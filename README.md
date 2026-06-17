@@ -45,9 +45,13 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `urunler` | Ürün kataloğu | ad, renk, gram, sureDk, maliyet, fiyat, makerworldUrl, not |
 | `isler` | Baskı işleri | makineId, makineAd, urunId, urunAd, adet, baslangic, sureDk, durum (devam/bitti/iptal), gercekBitis, not |
 | `yerler` | Ürün verilen yerler | ad, yetkili, telefon, adres, not |
-| `teslimatlar` | Konsinye/satış kayıtları | yerId, yerAd, urunId, urunAd, adet, birimFiyat, tur (konsinye/satis), tarih, not |
+| `teslimatlar` | Konsinye/satış kayıtları | yerId, yerAd, urunId, urunAd, adet, birimFiyat, tur (konsinye/satis), satilan, iade, tarih, not |
+| `cari_hareket` | Tahsilat / elle borç | yerId, yerAd, tip (tahsilat/borc), tutar, tarih, aciklama |
+| `meta` | Uygulama bayrakları | `app` dokümanı: makinelerSeed (makineler tek seferlik otomatik eklendi mi) |
 
-> Cari (borç/tahsilat/bakiye) ve filament stoğu sonraki fazlarda eklenecek (bkz. `ROADMAP.md`).
+> **Bakiye** = (satış teslimatlarının tamamı + konsinyede satılan adetler = mal bedeli)
+> + elle borç − tahsilat. Hepsi `teslimatlar` ve `cari_hareket`'ten canlı hesaplanır.
+> Filament stoğu sonraki fazda (bkz. `ROADMAP.md`).
 
 ## Ana Bileşenler
 
@@ -57,15 +61,18 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | Makineler | `MakinelerTab` | Makine CRUD |
 | Ürünler | `UrunlerTab` | Ürün kataloğu CRUD + kâr hesabı + MakerWorld linki |
 | İşler | `IslerTab` | İş geçmişi, filtre, başlat/düzenle/bitir/iptal |
-| Yerler | `YerlerTab` | Ürün verilen yerler + teslimat/konsinye/satış kaydı |
+| Yerler & Cari | `YerlerTab` | Verilen yerler, teslimat (konsinye/satış), tahsilat, bakiye |
 
 > **MakerWorld linki:** Sayfa bot korumalı (Cloudflare) olduğu için içerik otomatik
 > çekilemez. Link saklanır; "Ad ←" butonu ürün adını link slug'ından üretir
 > (`/models/629500-articulated-slug` → "Articulated Slug").
 
+> **Tema:** Üst bardaki düğme ile açık/koyu mod (CSS değişkenleri + localStorage).
+> **Makineler:** 6 makine ilk açılışta otomatik eklenir (tek seferlik, `meta/app` bayrağı).
+
 ## Fazlar
 - **Faz 1 (tamamlandı):** Makine envanteri + ürün kataloğu + canlı baskı panosu.
-- **Faz 2:** Konsinye & cari (iş yerleri, borç/tahsilat).
+- **Faz 2 (tamamlandı):** Konsinye & cari — yerler, teslimat (konsinye/satış), tahsilat, bakiye.
 - **Faz 3:** Filament stoğu + maliyet/ihtiyaç tahmini.
 - **Faz 4:** Raporlama, bakım hatırlatma, elektrik maliyeti.
 
