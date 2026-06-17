@@ -42,19 +42,26 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | Koleksiyon | Amaç | Ana alanlar |
 |---|---|---|
 | `makineler` | 3D yazıcı envanteri | ad, model, renkli, durum (bos/arizali/bakim), not |
-| `urunler` | Ürün kataloğu | ad, renk, gram, sureDk, maliyet, fiyat, not |
+| `urunler` | Ürün kataloğu | ad, renk, gram, sureDk, maliyet, fiyat, makerworldUrl, not |
 | `isler` | Baskı işleri | makineId, makineAd, urunId, urunAd, adet, baslangic, sureDk, durum (devam/bitti/iptal), gercekBitis, not |
+| `yerler` | Ürün verilen yerler | ad, yetkili, telefon, adres, not |
+| `teslimatlar` | Konsinye/satış kayıtları | yerId, yerAd, urunId, urunAd, adet, birimFiyat, tur (konsinye/satis), tarih, not |
 
-> Konsinye/cari/stok koleksiyonları sonraki fazlarda eklenecek (bkz. `ROADMAP.md`).
+> Cari (borç/tahsilat/bakiye) ve filament stoğu sonraki fazlarda eklenecek (bkz. `ROADMAP.md`).
 
 ## Ana Bileşenler
 
 | Sekme | Fonksiyon | Açıklama |
 |---|---|---|
 | Pano | `PanoTab` | Canlı makine durumu, çalışan iş, geri sayım, bitiş tahmini |
-| Makineler | `MakinelerTab` | Makine CRUD + "Örnekleri Ekle" (6 Bambu) |
-| Ürünler | `UrunlerTab` | Ürün kataloğu CRUD + kâr hesabı |
+| Makineler | `MakinelerTab` | Makine CRUD |
+| Ürünler | `UrunlerTab` | Ürün kataloğu CRUD + kâr hesabı + MakerWorld linki |
 | İşler | `IslerTab` | İş geçmişi, filtre, başlat/düzenle/bitir/iptal |
+| Yerler | `YerlerTab` | Ürün verilen yerler + teslimat/konsinye/satış kaydı |
+
+> **MakerWorld linki:** Sayfa bot korumalı (Cloudflare) olduğu için içerik otomatik
+> çekilemez. Link saklanır; "Ad ←" butonu ürün adını link slug'ından üretir
+> (`/models/629500-articulated-slug` → "Articulated Slug").
 
 ## Fazlar
 - **Faz 1 (tamamlandı):** Makine envanteri + ürün kataloğu + canlı baskı panosu.
