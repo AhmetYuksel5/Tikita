@@ -395,28 +395,47 @@ function PanoTab({ makineler, urunler, isler, now }) {
 /* ============================================================
    MAKİNELER — CRUD
    ============================================================ */
-function MakinelerTab({ makineler }) {
+function MakinelerTab({ makineler, isler, now }) {
   const [edit, setEdit] = useState(null);
   const bos = { ad:"", model:MODELLER[0], renkli:true, durum:"bos", not:"" };
 
+  const isByMakine = useMemo(() => {
+    const m = {};
+    isler.filter(i => i.durum === "devam").forEach(i => { if (!m[i.makineId]) m[i.makineId] = i; });
+    return m;
+  }, [isler]);
+
+  function hucre(m) {
+    const is = isByMakine[m.id];
+    let renk, durumAd, alt;
+    if (is) {
+      const bitisMs = new Date(is.baslangic).getTime() + num(is.sureDk) * 60000;
+      const kalan = bitisMs - now;
+      if (kalan <= 0) { renk = C.warn; durumAd = "Süre doldu"; alt = "Bitti ~" + fmtSaat(bitisMs); }
+      else { renk = C.acc2; durumAd = "Çalışıyor"; alt = "Bitiş " + fmtSaat(bitisMs) + " · " + fmtGeriSayim(kalan); }
+    } else {
+      const d = DURUMLAR[m.durum] || DURUMLAR.bos;
+      renk = d.c; durumAd = d.ad;
+      alt = m.durum === "bos" ? (m.model || "—") : (m.not || m.model || "");
+    }
+    return h("button", { key:m.id, onClick:()=>setEdit(m),
+      style:{ textAlign:"left", cursor:"pointer", border:"1px solid "+C.line, borderLeft:"4px solid "+renk,
+        borderRadius:12, padding:"12px 14px", background:soft(renk), color:C.txt,
+        display:"flex", flexDirection:"column", gap:5, minHeight:92 } },
+      h("div", { style:{ fontWeight:800, fontSize:16, lineHeight:1.1 } }, m.ad),
+      h("div", { style:{ fontWeight:700, fontSize:13, color:renk } }, "● " + durumAd),
+      h("div", { style:{ fontSize:12, color:C.mut, lineHeight:1.2 } }, alt)
+    );
+  }
+
   return h("div", { style:{ marginTop:16 } },
-    h("button", { style:{ ...S.btn("primary"), marginBottom:14 }, onClick:()=>setEdit(bos) }, "+ Makine"),
+    h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 } },
+      h("div", { style:{ fontSize:12, color:C.mut } }, "Hücreye dokun → düzenle / sil"),
+      h("button", { style:S.btn("primary"), onClick:()=>setEdit(bos) }, "+ Makine")),
     !makineler.length
       ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Makineler yükleniyor…")
-      : h("div", { style:{ ...S.grid, gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))" } },
-          makineler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(m =>
-            h("div", { key:m.id, style:S.card },
-              h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
-                h("div", { style:{ fontWeight:800, fontSize:16 } }, m.ad),
-                h(Badge, { d: DURUMLAR[m.durum] || DURUMLAR.bos })),
-              h("div", { style:{ fontSize:13, color:C.mut, margin:"4px 0 8px" } },
-                m.model + (m.renkli ? " · Renkli (AMS)" : " · Tek renk")),
-              m.not && h("div", { style:{ fontSize:12, color:C.mut, marginBottom:8 } }, m.not),
-              h("div", { style:{ display:"flex", gap:8, marginTop:6 } },
-                h("button", { style:S.ibtn, onClick:()=>setEdit(m) }, "Düzenle"),
-                h("button", { style:{ ...S.ibtn, color:C.bad, borderColor:C.bad }, onClick:()=>{ if(confirm(m.ad+" silinsin mi?")) remove("makineler", m.id); } }, "Sil"))
-            ))
-        ),
+      : h("div", { style:{ display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))" } },
+          makineler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(hucre)),
     edit && h(MakineModal, { kayit:edit, onKapat:()=>setEdit(null) })
   );
 }
@@ -433,6 +452,7 @@ function MakineModal({ kayit, onKapat }) {
     baslik: yeni ? "Yeni Makine" : "Makine Düzenle", onKapat,
     alt: h(React.Fragment, null,
       h("button", { style:{ ...S.btn("primary"), flex:1 }, onClick:kaydet }, "Kaydet"),
+      !yeni && h("button", { style:S.btn("bad"), onClick:()=>{ if(confirm(f.ad+" silinsin mi?")){ remove("makineler", f.id); onKapat(); } } }, "Sil"),
       h("button", { style:S.btn(), onClick:onKapat }, "Vazgeç"))
   },
     h(Field, { label:"Ad" },
@@ -923,7 +943,7 @@ function App() {
       !CONFIG_OK && h("div", { style:{ ...S.card, background:soft(C.warn), borderColor:C.warn, marginTop:16 } },
         h("b", null, "⚠ Firebase config eksik."), " cfg nesnesindeki alanları doldur."),
       tab==="pano"      && h(PanoTab,      { makineler, urunler, isler, now }),
-      tab==="makineler" && h(MakinelerTab, { makineler }),
+      tab==="makineler" && h(MakinelerTab, { makineler, isler, now }),
       tab==="urunler"   && h(UrunlerTab,   { urunler }),
       tab==="isler"     && h(IslerTab,     { makineler, urunler, isler }),
       tab==="yerler"    && h(YerlerTab,    { yerler, teslimatlar, cari, urunler })
