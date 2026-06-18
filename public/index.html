@@ -36,6 +36,9 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <!-- JSZip — .3mf (zip) slicer dosyalarını açmak için -->
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<!-- Leaflet — pazarlamacı harita görünümü -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -72,7 +75,7 @@ document.documentElement.dataset.theme = localStorage.getItem("tikita-tema") || 
 /* ============================================================
    React kısayolları
    ============================================================ */
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 const h = React.createElement;
 
 /* ============================================================
@@ -154,6 +157,7 @@ function makerworldAd(url) {
 /* ============================================================
    Ürün maliyeti (filament + elektrik + ek) — ayar global
    ============================================================ */
+const filAd = fl => fl ? ((fl.kod ? "#" + fl.kod + " " : "") + fl.ad) : "";
 function urunMaliyet(u, filById, ayar) {
   ayar = ayar || {};
   const fl = u.filamentId && filById && filById[u.filamentId];
@@ -333,7 +337,7 @@ function Modal({ baslik, onKapat, children, alt }) {
 /* ============================================================
    İş başlat / düzenle modalı
    ============================================================ */
-function IsModal({ kayit, makineler, urunler, onKapat }) {
+function IsModal({ kayit, makineler, urunler, filamentler, onKapat }) {
   const yeni = !kayit.id;
   const [f, setF] = useState(() => ({
     makineId:  kayit.makineId  || "",
@@ -341,6 +345,7 @@ function IsModal({ kayit, makineler, urunler, onKapat }) {
     adet:      kayit.adet      || 1,
     baslangic: toInput(kayit.baslangic || Date.now()),
     sureDk:    kayit.sureDk    || "",
+    filamentId: kayit.filamentId || "",
     not:       kayit.not       || "",
   }));
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
@@ -349,7 +354,8 @@ function IsModal({ kayit, makineler, urunler, onKapat }) {
 
   function urunSec(id) {
     const u = urunler.find(x => x.id === id);
-    setF(s => ({ ...s, urunId:id, sureDk: u ? Math.round(num(u.sureDk) * num(s.adet)) : s.sureDk }));
+    setF(s => ({ ...s, urunId:id, sureDk: u ? Math.round(num(u.sureDk) * num(s.adet)) : s.sureDk,
+      filamentId: s.filamentId || (u && u.filamentId) || "" }));
   }
   function adetSec(v) {
     setF(s => {
@@ -368,7 +374,7 @@ function IsModal({ kayit, makineler, urunler, onKapat }) {
       makineId: f.makineId, makineAd: mk ? mk.ad : "",
       urunId: f.urunId, urunAd: ur ? ur.ad : "(serbest)",
       adet: num(f.adet), baslangic: new Date(f.baslangic).toISOString(),
-      sureDk: num(f.sureDk), not: f.not,
+      sureDk: num(f.sureDk), filamentId: f.filamentId || "", not: f.not,
       durum: kayit.durum || "devam",
       gercekBitis: kayit.gercekBitis || null,
       olusturma: kayit.olusturma || new Date().toISOString(),
@@ -398,6 +404,10 @@ function IsModal({ kayit, makineler, urunler, onKapat }) {
     ),
     seciliUrun && h("div", { style:{ marginTop:-4, marginBottom:12, fontSize:12, color:C.mut } },
       "Önerilen süre: " + fmtSure(onerilenSure) + " (" + onerilenSure + " dk)"),
+    h(Field, { label:"Filament (opsiyonel — iş bitince stoktan düşülür)" },
+      h("select", { style:S.input, value:f.filamentId||"", onChange:e=>set("filamentId", e.target.value) },
+        h("option", { value:"" }, "— seçme —"),
+        (filamentler||[]).map(fl => h("option", { key:fl.id, value:fl.id }, filAd(fl))))),
     h(Field, { label:"Başlangıç" },
       h("input", { type:"datetime-local", style:S.input, value:f.baslangic, onChange:e=>set("baslangic", e.target.value) })),
     h(Field, { label:"Not" },
@@ -408,7 +418,7 @@ function IsModal({ kayit, makineler, urunler, onKapat }) {
 /* ============================================================
    PANO — canlı makine kartları
    ============================================================ */
-function PanoTab({ makineler, urunler, isler, now }) {
+function PanoTab({ makineler, urunler, isler, filamentler, now }) {
   const [baslat, setBaslat] = useState(null);
   const isByMakine = useMemo(() => {
     const m = {};
@@ -470,7 +480,7 @@ function PanoTab({ makineler, urunler, isler, now }) {
         );
       })
     ),
-    baslat && h(IsModal, { kayit:baslat, makineler, urunler, onKapat:()=>setBaslat(null) })
+    baslat && h(IsModal, { kayit:baslat, makineler, urunler, filamentler, onKapat:()=>setBaslat(null) })
   );
 }
 
@@ -589,7 +599,7 @@ function UrunlerTab({ urunler, filamentler, ayar }) {
               h("div", { style:{ fontWeight:800, fontSize:16 } }, u.ad),
               h("div", { style:{ fontSize:13, color:C.mut, margin:"3px 0 10px" } },
                 [u.renk, u.gram ? u.gram + "g" : null, u.sureDk ? fmtSure(u.sureDk) : null,
-                 u.filamentId && filById[u.filamentId] ? "🧵 " + filById[u.filamentId].ad : null].filter(Boolean).join(" · ") || "—"),
+                 u.filamentId && filById[u.filamentId] ? "🧵 " + filAd(filById[u.filamentId]) : null].filter(Boolean).join(" · ") || "—"),
               h("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:14, marginBottom:4 } },
                 h("span", { style:{ color:C.mut } }, "Maliyet"),
                 h("span", { title:"filament "+para(mal.filamentM)+" + elektrik "+para(mal.elektrik)+" + ek "+para(mal.ek) }, para(mal.toplam))),
@@ -657,7 +667,7 @@ function UrunModal({ kayit, filamentler, ayar, onKapat }) {
     h(Field, { label:"Filament (stok + maliyet için)" },
       h("select", { style:S.input, value:f.filamentId||"", onChange:e=>set("filamentId", e.target.value) },
         h("option", { value:"" }, "— seçme —"),
-        (filamentler||[]).map(fl => h("option", { key:fl.id, value:fl.id }, fl.ad)))),
+        (filamentler||[]).map(fl => h("option", { key:fl.id, value:fl.id }, filAd(fl))))),
     h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
       h(Field, { label:"Ek maliyet (işçilik/diğer ₺)" }, h("input", { type:"number", style:S.input, value:f.maliyet, onChange:e=>set("maliyet", e.target.value) })),
       h(Field, { label:"Satış Fiyatı (₺)" }, h("input", { type:"number", style:S.input, value:f.fiyat, onChange:e=>set("fiyat", e.target.value) }))
@@ -698,8 +708,9 @@ function IslerTab({ makineler, urunler, isler, filamentler }) {
     // Otomatik filament düşümü (tek seferlik — filamentDusuldu bayrağı)
     if (!i.filamentDusuldu) {
       const u = urunler.find(x => x.id === i.urunId);
-      const fl = u && u.filamentId && (filamentler||[]).find(f => f.id === u.filamentId);
-      if (fl && num(u.gram)) {
+      const fid = i.filamentId || (u && u.filamentId);
+      const fl = fid && (filamentler||[]).find(f => f.id === fid);
+      if (fl && u && num(u.gram)) {
         const dusulen = num(i.adet) * num(u.gram);
         await save("filamentler", { id:fl.id, kalanGram: Math.max(0, num(fl.kalanGram) - dusulen) });
         await save("isler", { id:i.id, filamentDusuldu:true });
@@ -735,7 +746,7 @@ function IslerTab({ makineler, urunler, isler, filamentler }) {
               h("button", { style:{ ...S.ibtn, color:C.bad, borderColor:C.bad }, onClick:()=>{ if(confirm("Kayıt silinsin mi?")) remove("isler", i.id); } }, "Sil"))
           ))
         ),
-    edit && h(IsModal, { kayit:edit, makineler, urunler, onKapat:()=>setEdit(null) })
+    edit && h(IsModal, { kayit:edit, makineler, urunler, filamentler, onKapat:()=>setEdit(null) })
   );
 }
 
@@ -770,7 +781,7 @@ function bakiyeBadge(bakiye) {
   return { ad:"Fazla ödeme " + para(-bakiye), c:C.warn };
 }
 
-function YerlerTab({ yerler, teslimatlar, cari, urunler }) {
+function YerlerTab({ yerler, teslimatlar, cari, urunler, pazarlamacilar }) {
   const [yerEdit, setYerEdit] = useState(null);
   const [teslimat, setTeslimat] = useState(null);
   const [tahsilat, setTahsilat] = useState(null);
@@ -872,7 +883,7 @@ function YerlerTab({ yerler, teslimatlar, cari, urunler }) {
           })
         ),
     yerEdit && h(YerModal, { kayit:yerEdit, onKapat:()=>setYerEdit(null) }),
-    teslimat && h(TeslimatModal, { kayit:teslimat, yerler, urunler, onKapat:()=>setTeslimat(null) }),
+    teslimat && h(TeslimatModal, { kayit:teslimat, yerler, urunler, pazarlamacilar, onKapat:()=>setTeslimat(null) }),
     tahsilat && h(TahsilatModal, { kayit:tahsilat, yerler, onKapat:()=>setTahsilat(null) })
   );
 }
@@ -883,7 +894,8 @@ function YerModal({ kayit, onKapat }) {
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
   async function kaydet() {
     if (!f.ad.trim()) return alert("Ad gir.");
-    await save("yerler", f); onKapat();
+    await save("yerler", { ...f, lat: f.lat==="" ? null : num(f.lat), lng: f.lng==="" ? null : num(f.lng) });
+    onKapat();
   }
   return h(Modal, {
     baslik: yeni ? "Yeni Yer" : "Yer Düzenle", onKapat,
@@ -897,12 +909,21 @@ function YerModal({ kayit, onKapat }) {
       h(Field, { label:"Yetkili" }, h("input", { style:S.input, value:f.yetkili||"", onChange:e=>set("yetkili", e.target.value) })),
       h(Field, { label:"Telefon" }, h("input", { style:S.input, value:f.telefon||"", onChange:e=>set("telefon", e.target.value) }))
     ),
-    h(Field, { label:"Adres" }, h("input", { style:S.input, value:f.adres||"", onChange:e=>set("adres", e.target.value) })),
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"Bölge / İlçe" }, h("input", { style:S.input, value:f.bolge||"", onChange:e=>set("bolge", e.target.value), placeholder:"Konyaaltı" })),
+      h(Field, { label:"Adres" }, h("input", { style:S.input, value:f.adres||"", onChange:e=>set("adres", e.target.value) }))
+    ),
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"Enlem (lat)" }, h("input", { type:"number", style:S.input, value:f.lat==null?"":f.lat, onChange:e=>set("lat", e.target.value), placeholder:"36.88" })),
+      h(Field, { label:"Boylam (lng)" }, h("input", { type:"number", style:S.input, value:f.lng==null?"":f.lng, onChange:e=>set("lng", e.target.value), placeholder:"30.70" }))
+    ),
+    h("div", { style:{ marginTop:-4, marginBottom:12, fontSize:11, color:C.mut } },
+      "Konum: Google Maps'te yere sağ tık → koordinatları kopyala (harita için)."),
     h(Field, { label:"Not" }, h("textarea", { style:{ ...S.input, minHeight:50, resize:"vertical" }, value:f.not||"", onChange:e=>set("not", e.target.value) }))
   );
 }
 
-function TeslimatModal({ kayit, yerler, urunler, onKapat }) {
+function TeslimatModal({ kayit, yerler, urunler, pazarlamacilar, onKapat }) {
   const yeni = !kayit.id;
   const [f, setF] = useState(() => ({
     yerId:      kayit.yerId      || "",
@@ -912,6 +933,8 @@ function TeslimatModal({ kayit, yerler, urunler, onKapat }) {
     tur:        kayit.tur        || "konsinye",
     satilan:    kayit.satilan    || 0,
     iade:       kayit.iade       || 0,
+    pazarlamaciId:    kayit.pazarlamaciId    || "",
+    pazarlamaciFiyat: kayit.pazarlamaciFiyat != null ? kayit.pazarlamaciFiyat : "",
     tarih:      toInput(kayit.tarih || Date.now()),
     not:        kayit.not        || "",
   }));
@@ -928,11 +951,14 @@ function TeslimatModal({ kayit, yerler, urunler, onKapat }) {
     if (!f.urunId) return alert("Ürün seç.");
     const yer = yerler.find(y => y.id === f.yerId);
     const ur  = urunler.find(u => u.id === f.urunId);
+    const pz  = (pazarlamacilar||[]).find(p => p.id === f.pazarlamaciId);
     await save("teslimatlar", {
       id: kayit.id,
       yerId:f.yerId, yerAd: yer?yer.ad:"", urunId:f.urunId, urunAd: ur?ur.ad:"",
       adet:num(f.adet), birimFiyat:num(f.birimFiyat), tur:f.tur,
       satilan: konsinye ? num(f.satilan) : 0, iade: konsinye ? num(f.iade) : 0,
+      pazarlamaciId: f.pazarlamaciId || "", pazarlamaciAd: pz ? pz.ad : "",
+      pazarlamaciFiyat: f.pazarlamaciFiyat === "" ? null : num(f.pazarlamaciFiyat),
       tarih:new Date(f.tarih).toISOString(), not:f.not,
     });
     onKapat();
@@ -965,6 +991,14 @@ function TeslimatModal({ kayit, yerler, urunler, onKapat }) {
     konsinye && h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
       h(Field, { label:"Satılan adet" }, h("input", { type:"number", min:0, style:S.input, value:f.satilan, onChange:e=>set("satilan", e.target.value) })),
       h(Field, { label:"İade adet" }, h("input", { type:"number", min:0, style:S.input, value:f.iade, onChange:e=>set("iade", e.target.value) }))
+    ),
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"Pazarlamacı (opsiyonel)" },
+        h("select", { style:S.input, value:f.pazarlamaciId, onChange:e=>set("pazarlamaciId", e.target.value) },
+          h("option", { value:"" }, "— yok —"),
+          (pazarlamacilar||[]).map(p => h("option", { key:p.id, value:p.id }, p.ad)))),
+      h(Field, { label:"Pazarlamacı satış fiyatı (₺)" },
+        h("input", { type:"number", min:0, style:S.input, value:f.pazarlamaciFiyat, onChange:e=>set("pazarlamaciFiyat", e.target.value), placeholder:"boşsa birim fiyat" }))
     ),
     h("div", { style:{ ...S.card, background:C.panel2, padding:"10px 12px", marginBottom:12, display:"flex", justifyContent:"space-between", fontWeight:700 } },
       h("span", { style:{ color:C.mut } }, konsinye ? "Toplam mal (bilgi)" : "Tutar"), h("span", null, para(toplam))),
@@ -1022,43 +1056,60 @@ function TahsilatModal({ kayit, yerler, onKapat }) {
    Baskıda → Depoda (basıldı, verilmedi) → Konsinyede → Satıldı
    ============================================================ */
 function AkisTab({ isler, teslimatlar, urunler }) {
+  const [detay, setDetay] = useState(null); // AKIS anahtarı
   const veri = useMemo(() => {
     const urunById = Object.fromEntries(urunler.map(u => [u.id, u]));
+    const baskidaList = isler.filter(i => i.durum === "devam")
+      .map(i => ({ ad: i.urunAd + " ×" + num(i.adet), alt: (i.makineAd||"—") }));
     const baskida = isler.filter(i => i.durum === "devam").reduce((s,i)=>s+num(i.adet), 0);
 
     const uretildi = {}, teslim = {};
     isler.filter(i => i.durum === "bitti").forEach(i => { uretildi[i.urunId] = (uretildi[i.urunId]||0) + num(i.adet); });
     teslimatlar.forEach(t => { teslim[t.urunId] = (teslim[t.urunId]||0) + num(t.adet); });
 
-    let depoda = 0, depoMaliyet = 0;
+    let depoda = 0, depoMaliyet = 0; const depodaList = [];
     new Set([...Object.keys(uretildi), ...Object.keys(teslim)]).forEach(id => {
       const kalan = Math.max(0, (uretildi[id]||0) - (teslim[id]||0));
-      depoda += kalan;
-      depoMaliyet += kalan * num(urunById[id]?.maliyet);
+      if (kalan > 0) { depoda += kalan; depoMaliyet += kalan * num(urunById[id]?.maliyet);
+        depodaList.push({ ad: (urunById[id]?.ad || "(ürün)") + " ×" + kalan, alt: "depoda hazır" }); }
     });
 
     let konsinye = 0, konsinyeDeger = 0, satildi = 0, satisDeger = 0;
+    const konsinyeList = [], satildiList = [];
     teslimatlar.forEach(t => {
       if (t.tur === "konsinye") {
         const kalan = Math.max(0, num(t.adet) - num(t.satilan) - num(t.iade));
-        konsinye += kalan; konsinyeDeger += kalan * num(t.birimFiyat);
-        satildi += num(t.satilan); satisDeger += num(t.satilan) * num(t.birimFiyat);
-      } else { satildi += num(t.adet); satisDeger += num(t.adet) * num(t.birimFiyat); }
+        if (kalan > 0) { konsinye += kalan; konsinyeDeger += kalan * num(t.birimFiyat);
+          konsinyeList.push({ ad: t.urunAd + " ×" + kalan, alt: (t.yerAd||"—") }); }
+        if (num(t.satilan) > 0) { satildi += num(t.satilan); satisDeger += num(t.satilan) * num(t.birimFiyat);
+          satildiList.push({ ad: t.urunAd + " ×" + num(t.satilan), alt: (t.yerAd||"—") + " · " + para(num(t.satilan)*num(t.birimFiyat)) }); }
+      } else {
+        satildi += num(t.adet); satisDeger += num(t.adet) * num(t.birimFiyat);
+        satildiList.push({ ad: t.urunAd + " ×" + num(t.adet), alt: (t.yerAd||"—") + " · " + para(num(t.adet)*num(t.birimFiyat)) });
+      }
     });
-    return { baskida, depoda, depoMaliyet, konsinye, konsinyeDeger, satildi, satisDeger };
+    return { baskida, depoda, depoMaliyet, konsinye, konsinyeDeger, satildi, satisDeger,
+      list: { baskida:baskidaList, depoda:depodaList, konsinye:konsinyeList, satildi:satildiList } };
   }, [isler, teslimatlar, urunler]);
 
   const sayilar = { baskida:veri.baskida, depoda:veri.depoda, konsinye:veri.konsinye, satildi:veri.satildi };
+  const detayAkis = detay && AKIS.find(a => a.k === detay);
 
   return h("div", { style:{ marginTop:16 } },
     h("div", { style:{ display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))" } },
-      AKIS.map((a, idx) => h("div", { key:a.k,
-        style:{ ...S.card, borderLeft:"4px solid "+a.c, background:soft(a.c) } },
+      AKIS.map(a => h("button", { key:a.k, onClick:()=>setDetay(a.k),
+        style:{ textAlign:"left", cursor:"pointer", ...S.card, borderLeft:"4px solid "+a.c, background:soft(a.c) } },
         h("div", { style:{ fontSize:13, color:C.mut, fontWeight:700 } }, a.ic + " " + a.ad),
         h("div", { style:{ fontSize:30, fontWeight:800, color:a.c, lineHeight:1.2 } }, sayilar[a.k]),
-        h("div", { style:{ fontSize:12, color:C.mut } }, a.not),
-        idx < AKIS.length-1 && h("div", { style:{ position:"absolute" } })
+        h("div", { style:{ fontSize:12, color:C.mut } }, a.not + " · detay ›")
       ))
+    ),
+    detayAkis && h(Modal, { baslik: detayAkis.ic + " " + detayAkis.ad + " — detay", onKapat:()=>setDetay(null) },
+      (veri.list[detay].length
+        ? veri.list[detay].map((x,i) => h("div", { key:i, style:{ display:"flex", justifyContent:"space-between", padding:"7px 0", borderBottom:"1px solid "+C.line } },
+            h("span", { style:{ fontWeight:600 } }, x.ad),
+            h("span", { style:{ fontSize:13, color:C.mut } }, x.alt)))
+        : h("div", { style:{ color:C.mut, padding:"8px 0" } }, "Bu aşamada kayıt yok."))
     ),
     h("div", { style:{ ...S.card, marginTop:14 } },
       h("div", { style:{ ...S.label, marginBottom:10 } }, "Para nerede?"),
@@ -1113,7 +1164,8 @@ function StokTab({ filamentler, urunler, isler }) {
               .sort((a,b)=>b.adet-a.adet).slice(0,4);
             return h("div", { key:f.id, style:{ ...S.card, borderLeft:"4px solid "+(dusuk?C.bad:C.ok) } },
               h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"baseline" } },
-                h("div", { style:{ fontWeight:800, fontSize:16 } }, f.ad),
+                h("div", { style:{ fontWeight:800, fontSize:16 } },
+                  f.kod ? h("span",{style:{color:C.mut}}, "#"+f.kod+" ") : null, f.ad),
                 h(Badge, { d: dusuk ? { ad:"Kritik", c:C.bad } : { ad:"Yeterli", c:C.ok } })),
               h("div", { style:{ fontSize:12, color:C.mut, margin:"2px 0 8px" } },
                 [f.tip, f.renk].filter(Boolean).join(" · ") || "—"),
@@ -1133,17 +1185,18 @@ function StokTab({ filamentler, urunler, isler }) {
             );
           })
         ),
-    edit && h(FilamentModal, { kayit:edit, onKapat:()=>setEdit(null) })
+    edit && h(FilamentModal, { kayit:edit, filamentler, onKapat:()=>setEdit(null) })
   );
 }
 
-function FilamentModal({ kayit, onKapat }) {
+function FilamentModal({ kayit, filamentler, onKapat }) {
   const yeni = !kayit.id;
   const [f, setF] = useState({ ...kayit });
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
   async function kaydet() {
     if (!f.ad.trim()) return alert("Ad gir.");
-    await save("filamentler", { ...f, kalanGram:num(f.kalanGram), kritikGram:num(f.kritikGram), kgFiyat:num(f.kgFiyat) });
+    const kod = f.kod || ((filamentler||[]).reduce((m,x)=>Math.max(m, num(x.kod)), 0) + 1);
+    await save("filamentler", { ...f, kod, kalanGram:num(f.kalanGram), kritikGram:num(f.kritikGram), kgFiyat:num(f.kgFiyat) });
     onKapat();
   }
   return h(Modal, {
@@ -1264,7 +1317,7 @@ function RaporTab({ isler, teslimatlar, cari, urunler, yerler, makineler }) {
 /* ============================================================
    SİPARİŞLER — özel/müşteri siparişleri (teklif yok)
    ============================================================ */
-function SiparisTab({ makineler, urunler, siparisler }) {
+function SiparisTab({ makineler, urunler, siparisler, filamentler }) {
   const [filtre, setFiltre] = useState("aktif");
   const [edit, setEdit] = useState(null);
   const [is, setIs] = useState(null);
@@ -1324,7 +1377,7 @@ function SiparisTab({ makineler, urunler, siparisler }) {
           })
         ),
     edit && h(SiparisModal, { kayit:edit, urunler, onKapat:()=>setEdit(null) }),
-    is && h(IsModal, { kayit:is, makineler, urunler, onKapat:()=>setIs(null) })
+    is && h(IsModal, { kayit:is, makineler, urunler, filamentler, onKapat:()=>setIs(null) })
   );
 }
 
@@ -1401,6 +1454,102 @@ function AyarModal({ ayar, onKapat }) {
 }
 
 /* ============================================================
+   PAZARLAMACI — satış istatistikleri + harita / bölge
+   ============================================================ */
+function pazStats(pid, teslimatlar, yerById) {
+  let adet = 0, ciro = 0; const yerSet = new Set(); const bolge = {};
+  teslimatlar.filter(t => t.pazarlamaciId === pid).forEach(t => {
+    const sat = t.tur === "konsinye" ? num(t.satilan) : num(t.adet);
+    const fiyat = t.pazarlamaciFiyat != null ? num(t.pazarlamaciFiyat) : num(t.birimFiyat);
+    adet += sat; ciro += sat * fiyat;
+    if (t.yerId) yerSet.add(t.yerId);
+    const b = (yerById[t.yerId] && yerById[t.yerId].bolge) || "(bölge yok)";
+    bolge[b] = (bolge[b] || 0) + sat;
+  });
+  return { adet, ciro, yerSayisi: yerSet.size, bolge };
+}
+
+function Harita({ yerler }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!window.L || !ref.current) return;
+    const pts = yerler.filter(y => y.lat != null && y.lng != null && (num(y.lat) || num(y.lng)));
+    const map = window.L.map(ref.current).setView([39.0, 35.2], 5);
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:"© OpenStreetMap" }).addTo(map);
+    pts.forEach(y => window.L.marker([num(y.lat), num(y.lng)]).addTo(map)
+      .bindPopup("<b>" + y.ad + "</b>" + (y.bolge ? "<br>" + y.bolge : "")));
+    if (pts.length) map.fitBounds(pts.map(y => [num(y.lat), num(y.lng)]), { padding:[30,30], maxZoom:13 });
+    setTimeout(() => map.invalidateSize(), 200);
+    return () => map.remove();
+  }, [yerler]);
+  return h("div", { ref, style:{ height:340, borderRadius:12, overflow:"hidden", border:"1px solid "+C.line, zIndex:0 } });
+}
+
+function PazarlamaciTab({ pazarlamacilar, teslimatlar, yerler }) {
+  const [edit, setEdit] = useState(null);
+  const yerById = Object.fromEntries(yerler.map(y => [y.id, y]));
+  const konumlu = yerler.filter(y => y.lat != null && y.lng != null && (num(y.lat) || num(y.lng)));
+
+  return h("div", { style:{ marginTop:16 } },
+    h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 } },
+      h("div", { style:{ ...S.label } }, "🗺 Yer haritası"),
+      h("button", { style:S.btn("primary"), onClick:()=>setEdit({ ad:"", telefon:"", bolge:"", not:"" }) }, "+ Pazarlamacı")),
+    konumlu.length
+      ? h(Harita, { yerler: konumlu })
+      : h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } },
+          "Haritada göstermek için Yerler'de enlem/boylam gir (Google Maps → sağ tık → koordinat)."),
+    h("div", { style:{ ...S.grid, marginTop:14 } },
+      !pazarlamacilar.length
+        ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Pazarlamacı yok.")
+        : pazarlamacilar.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(p => {
+            const s = pazStats(p.id, teslimatlar, yerById);
+            const bolgeler = Object.entries(s.bolge).sort((a,b)=>b[1]-a[1]);
+            return h("div", { key:p.id, style:S.card },
+              h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" } },
+                h("div", null,
+                  h("div", { style:{ fontWeight:800, fontSize:17 } }, p.ad),
+                  h("div", { style:{ fontSize:13, color:C.mut } }, [p.telefon, p.bolge].filter(Boolean).join(" · ") || "—")),
+                h("button", { style:S.ibtn, onClick:()=>setEdit(p) }, "Düzenle")),
+              h("div", { style:{ display:"flex", gap:18, flexWrap:"wrap", margin:"10px 0", fontSize:13, color:C.mut } },
+                h("span", null, "Satış: ", h("b",{style:{color:C.txt}}, s.adet + " adet")),
+                h("span", null, "Ciro: ", h("b",{style:{color:C.ok}}, para(s.ciro))),
+                h("span", null, "Gittiği yer: ", h("b",{style:{color:C.txt}}, s.yerSayisi))),
+              bolgeler.length > 0 && h("div", { style:{ borderTop:"1px solid "+C.line, paddingTop:8 } },
+                h("div", { style:{ ...S.label, marginBottom:6 } }, "Bölge dağılımı"),
+                bolgeler.map(([b,adet]) => h("div", { key:b, style:{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"2px 0" } },
+                  h("span", null, "📍 " + b), h("b", null, adet + " adet"))))
+            );
+          })
+    ),
+    edit && h(PazarlamaciModal, { kayit:edit, onKapat:()=>setEdit(null) })
+  );
+}
+
+function PazarlamaciModal({ kayit, onKapat }) {
+  const yeni = !kayit.id;
+  const [f, setF] = useState({ ...kayit });
+  const set = (k,v) => setF(s => ({ ...s, [k]:v }));
+  async function kaydet() {
+    if (!f.ad.trim()) return alert("Ad gir.");
+    await save("pazarlamacilar", f); onKapat();
+  }
+  return h(Modal, {
+    baslik: yeni ? "Yeni Pazarlamacı" : "Pazarlamacı Düzenle", onKapat,
+    alt: h(React.Fragment, null,
+      h("button", { style:{ ...S.btn("primary"), flex:1 }, onClick:kaydet }, "Kaydet"),
+      !yeni && h("button", { style:S.btn("bad"), onClick:()=>{ if(confirm(f.ad+" silinsin mi?")){ remove("pazarlamacilar", f.id); onKapat(); } } }, "Sil"),
+      h("button", { style:S.btn(), onClick:onKapat }, "Vazgeç"))
+  },
+    h(Field, { label:"Ad" }, h("input", { style:S.input, value:f.ad, onChange:e=>set("ad", e.target.value) })),
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"Telefon" }, h("input", { style:S.input, value:f.telefon||"", onChange:e=>set("telefon", e.target.value) })),
+      h(Field, { label:"Ana bölge" }, h("input", { style:S.input, value:f.bolge||"", onChange:e=>set("bolge", e.target.value) }))
+    ),
+    h(Field, { label:"Not" }, h("textarea", { style:{ ...S.input, minHeight:50, resize:"vertical" }, value:f.not||"", onChange:e=>set("not", e.target.value) }))
+  );
+}
+
+/* ============================================================
    APP
    ============================================================ */
 function App() {
@@ -1423,6 +1572,7 @@ function App() {
   const cari        = useColl("cari_hareket");
   const filamentler = useColl("filamentler");
   const siparisler  = useColl("siparisler");
+  const pazarlamacilar = useColl("pazarlamacilar");
   const meta        = useColl("meta");
   const ayar        = meta.find(m => m.id === "app") || {};
 
@@ -1452,6 +1602,7 @@ function App() {
     ["siparis", "Siparişler", "📋"],
     ["isler", "İşler", "🗂"],
     ["yerler", "Yerler & Cari", "🏬"],
+    ["pazarlamaci", "Pazarlamacı", "🧑‍💼"],
   ];
 
   return h("div", null,
@@ -1474,15 +1625,16 @@ function App() {
     h("div", { style:S.wrap },
       !CONFIG_OK && h("div", { style:{ ...S.card, background:soft(C.warn), borderColor:C.warn, marginTop:16 } },
         h("b", null, "⚠ Firebase config eksik."), " cfg nesnesindeki alanları doldur."),
-      tab==="pano"      && h(PanoTab,      { makineler, urunler, isler, now }),
+      tab==="pano"      && h(PanoTab,      { makineler, urunler, isler, filamentler, now }),
       tab==="rapor"     && h(RaporTab,     { isler, teslimatlar, cari, urunler, yerler, makineler }),
       tab==="akis"      && h(AkisTab,      { isler, teslimatlar, urunler }),
       tab==="makineler" && h(MakinelerTab, { makineler, isler, now }),
       tab==="urunler"   && h(UrunlerTab,   { urunler, filamentler, ayar }),
       tab==="stok"      && h(StokTab,      { filamentler, urunler, isler }),
-      tab==="siparis"   && h(SiparisTab,   { makineler, urunler, siparisler }),
+      tab==="siparis"   && h(SiparisTab,   { makineler, urunler, siparisler, filamentler }),
       tab==="isler"     && h(IslerTab,     { makineler, urunler, isler, filamentler }),
-      tab==="yerler"    && h(YerlerTab,    { yerler, teslimatlar, cari, urunler })
+      tab==="yerler"    && h(YerlerTab,    { yerler, teslimatlar, cari, urunler, pazarlamacilar }),
+      tab==="pazarlamaci" && h(PazarlamaciTab, { pazarlamacilar, teslimatlar, yerler })
     ),
     ayarAcik && h(AyarModal, { ayar, onKapat:()=>setAyarAcik(false) })
   );
