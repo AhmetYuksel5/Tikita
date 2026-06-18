@@ -34,6 +34,8 @@
 <!-- React 18 (UMD) — Babel YOK, h() ile element üretimi -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<!-- JSZip — .3mf (zip) slicer dosyalarını açmak için -->
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -150,6 +152,69 @@ function makerworldAd(url) {
 }
 
 /* ============================================================
+   Ürün maliyeti (filament + elektrik + ek) — ayar global
+   ============================================================ */
+function urunMaliyet(u, filById, ayar) {
+  ayar = ayar || {};
+  const fl = u.filamentId && filById && filById[u.filamentId];
+  const filamentM = (fl && num(fl.kgFiyat)) ? (num(u.gram) / 1000) * num(fl.kgFiyat) : 0;
+  const watt = num(ayar.varsayilanWatt) || 100;
+  const elektrik = num(ayar.kwhFiyat) ? (num(u.sureDk) / 60) * (watt / 1000) * num(ayar.kwhFiyat) : 0;
+  const ek = num(u.maliyet);
+  return { filamentM, elektrik, ek, toplam: filamentM + elektrik + ek };
+}
+
+/* ============================================================
+   Slicer dosyası (.gcode / .3mf) → süre + gram çıkar
+   ============================================================ */
+function gcodeParse(metin) {
+  const dk = (() => {
+    let m = metin.match(/model printing time:\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i)
+         || metin.match(/estimated printing time[^=:]*[=:]\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i);
+    if (m) return num(m[1])*60 + num(m[2]) + num(m[3])/60;
+    const t = metin.match(/;TIME:\s*(\d+)/i); // saniye
+    if (t) return num(t[1]) / 60;
+    return 0;
+  })();
+  const g = (() => {
+    const m = metin.match(/total filament used \[g\]\s*[:=]\s*([\d.]+)/i)
+          || metin.match(/filament used \[g\]\s*[:=]\s*([\d.]+)/i)
+          || metin.match(/filament_used_g\s*[:=]\s*([\d.]+)/i);
+    return m ? num(m[1]) : 0;
+  })();
+  return { sureDk: Math.round(dk), gram: Math.round(g * 100) / 100 };
+}
+
+async function parseSlicer(file) {
+  const ad = file.name.toLowerCase();
+  if (ad.endsWith(".3mf") || ad.endsWith(".zip")) {
+    if (!window.JSZip) throw new Error("JSZip yüklenemedi");
+    const zip = await window.JSZip.loadAsync(file);
+    // plate gcode'u bul
+    let gcodeEntry = null;
+    zip.forEach((path, entry) => { if (/\.gcode$/i.test(path) && !entry.dir) gcodeEntry = entry; });
+    if (gcodeEntry) {
+      const txt = await gcodeEntry.async("string");
+      const r = gcodeParse(txt.slice(0, 20000) + "\n" + txt.slice(-20000));
+      if (r.sureDk || r.gram) return r;
+    }
+    // slice_info.config (XML) — filament ağırlığı
+    let cfg = null;
+    zip.forEach((path, entry) => { if (/slice_info\.config$/i.test(path)) cfg = entry; });
+    if (cfg) {
+      const xml = await cfg.async("string");
+      const g = [...xml.matchAll(/weight"?\s*value="?([\d.]+)/gi)].reduce((s,m)=>s+num(m[1]), 0);
+      const tm = xml.match(/prediction"?\s*value="?(\d+)/i); // saniye
+      return { sureDk: tm ? Math.round(num(tm[1])/60) : 0, gram: Math.round(g*100)/100 };
+    }
+    throw new Error("3mf içinde slicer verisi bulunamadı");
+  }
+  // düz metin gcode
+  const txt = await file.text();
+  return gcodeParse(txt.slice(0, 20000) + "\n" + txt.slice(-20000));
+}
+
+/* ============================================================
    Sabitler
    ============================================================ */
 const C = {
@@ -209,6 +274,13 @@ const TESLIMAT_TUR = {
 const CARI_TIP = {
   tahsilat: { ad:"Tahsilat", c:C.ok },
   borc:     { ad:"Borç (elle)", c:C.bad },
+};
+const SIPARIS_DURUM = {
+  beklemede: { ad:"Beklemede", c:C.warn },
+  uretimde:  { ad:"Üretimde",  c:C.acc2 },
+  hazir:     { ad:"Hazır",     c:C.mor },
+  teslim:    { ad:"Teslim",    c:C.ok },
+  iptal:     { ad:"İptal",     c:C.mut },
 };
 
 // Makineler ilk açılışta otomatik eklenir (tek seferlik, buton yok).
@@ -500,7 +572,7 @@ function MakineModal({ kayit, isler, onKapat }) {
 /* ============================================================
    ÜRÜNLER — katalog CRUD + kâr + MakerWorld linki
    ============================================================ */
-function UrunlerTab({ urunler, filamentler }) {
+function UrunlerTab({ urunler, filamentler, ayar }) {
   const [edit, setEdit] = useState(null);
   const bos = { ad:"", renk:"", gram:"", sureDk:"", maliyet:"", fiyat:"", filamentId:"", makerworldUrl:"", not:"" };
   const filById = Object.fromEntries((filamentler||[]).map(f => [f.id, f]));
@@ -510,15 +582,17 @@ function UrunlerTab({ urunler, filamentler }) {
       ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Ürün yok.")
       : h("div", { style:{ ...S.grid, gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))" } },
           urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(u => {
-            const kar = num(u.fiyat) - num(u.maliyet);
-            const karY = num(u.maliyet) ? Math.round(kar / num(u.maliyet) * 100) : null;
+            const mal = urunMaliyet(u, filById, ayar);
+            const kar = num(u.fiyat) - mal.toplam;
+            const karY = mal.toplam ? Math.round(kar / mal.toplam * 100) : null;
             return h("div", { key:u.id, style:S.card },
               h("div", { style:{ fontWeight:800, fontSize:16 } }, u.ad),
               h("div", { style:{ fontSize:13, color:C.mut, margin:"3px 0 10px" } },
                 [u.renk, u.gram ? u.gram + "g" : null, u.sureDk ? fmtSure(u.sureDk) : null,
                  u.filamentId && filById[u.filamentId] ? "🧵 " + filById[u.filamentId].ad : null].filter(Boolean).join(" · ") || "—"),
               h("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:14, marginBottom:4 } },
-                h("span", { style:{ color:C.mut } }, "Maliyet"), h("span", null, para(u.maliyet))),
+                h("span", { style:{ color:C.mut } }, "Maliyet"),
+                h("span", { title:"filament "+para(mal.filamentM)+" + elektrik "+para(mal.elektrik)+" + ek "+para(mal.ek) }, para(mal.toplam))),
               h("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:14, marginBottom:4 } },
                 h("span", { style:{ color:C.mut } }, "Fiyat"), h("span", null, para(u.fiyat))),
               h("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:14, fontWeight:800,
@@ -532,15 +606,30 @@ function UrunlerTab({ urunler, filamentler }) {
             );
           })
         ),
-    edit && h(UrunModal, { kayit:edit, filamentler, onKapat:()=>setEdit(null) })
+    edit && h(UrunModal, { kayit:edit, filamentler, ayar, onKapat:()=>setEdit(null) })
   );
 }
 
-function UrunModal({ kayit, filamentler, onKapat }) {
+function UrunModal({ kayit, filamentler, ayar, onKapat }) {
   const yeni = !kayit.id;
   const [f, setF] = useState({ ...kayit });
+  const [yukleniyor, setYukleniyor] = useState(false);
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
-  const kar = num(f.fiyat) - num(f.maliyet);
+  const filById = Object.fromEntries((filamentler||[]).map(x => [x.id, x]));
+  const mal = urunMaliyet(f, filById, ayar);
+  const kar = num(f.fiyat) - mal.toplam;
+
+  async function slicerYukle(file) {
+    if (!file) return;
+    setYukleniyor(true);
+    try {
+      const r = await parseSlicer(file);
+      if (!r.sureDk && !r.gram) { alert("Dosyadan süre/gram okunamadı. Bambu Studio'da 'Export G-code' ile .gcode çıkar."); return; }
+      setF(s => ({ ...s, sureDk: r.sureDk || s.sureDk, gram: r.gram || s.gram }));
+      alert("Okundu → süre " + (r.sureDk||"?") + " dk, " + (r.gram||"?") + " g dolduruldu.");
+    } catch (e) { alert("Okunamadı: " + e.message); }
+    finally { setYukleniyor(false); }
+  }
   async function kaydet() {
     if (!f.ad.trim()) return alert("Ad gir.");
     await save("urunler", { ...f, gram:num(f.gram), sureDk:num(f.sureDk), maliyet:num(f.maliyet), fiyat:num(f.fiyat) });
@@ -554,23 +643,31 @@ function UrunModal({ kayit, filamentler, onKapat }) {
   },
     h(Field, { label:"Ad" },
       h("input", { style:S.input, value:f.ad, onChange:e=>set("ad", e.target.value), placeholder:"Anahtarlık" })),
+    h("label", { style:{ display:"block", marginBottom:12 } },
+      h("span", { style:S.label }, "📄 Slicer dosyası (.gcode / .3mf) → süre+gram"),
+      h("input", { type:"file", accept:".gcode,.3mf,.zip", disabled:yukleniyor, style:{ ...S.input, padding:8 },
+        onChange:e=>slicerYukle(e.target.files[0]) }),
+      yukleniyor && h("span", { style:{ fontSize:12, color:C.mut } }, "Okunuyor…")),
     h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
       h(Field, { label:"Renk" }, h("input", { style:S.input, value:f.renk||"", onChange:e=>set("renk", e.target.value) })),
       h(Field, { label:"Gram (g)" }, h("input", { type:"number", style:S.input, value:f.gram, onChange:e=>set("gram", e.target.value) }))
     ),
     h(Field, { label:"Baskı süresi (dk / adet)" },
       h("input", { type:"number", style:S.input, value:f.sureDk, onChange:e=>set("sureDk", e.target.value) })),
-    h(Field, { label:"Filament (stok takibi için)" },
+    h(Field, { label:"Filament (stok + maliyet için)" },
       h("select", { style:S.input, value:f.filamentId||"", onChange:e=>set("filamentId", e.target.value) },
         h("option", { value:"" }, "— seçme —"),
         (filamentler||[]).map(fl => h("option", { key:fl.id, value:fl.id }, fl.ad)))),
     h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
-      h(Field, { label:"Maliyet (₺)" }, h("input", { type:"number", style:S.input, value:f.maliyet, onChange:e=>set("maliyet", e.target.value) })),
+      h(Field, { label:"Ek maliyet (işçilik/diğer ₺)" }, h("input", { type:"number", style:S.input, value:f.maliyet, onChange:e=>set("maliyet", e.target.value) })),
       h(Field, { label:"Satış Fiyatı (₺)" }, h("input", { type:"number", style:S.input, value:f.fiyat, onChange:e=>set("fiyat", e.target.value) }))
     ),
-    h("div", { style:{ ...S.card, background:C.panel2, padding:"10px 12px", marginBottom:12,
-      display:"flex", justifyContent:"space-between", fontWeight:700, color: kar>=0?C.ok:C.bad } },
-      h("span", null, "Kâr"), h("span", null, para(kar))),
+    h("div", { style:{ ...S.card, background:C.panel2, padding:"10px 12px", marginBottom:12 } },
+      h("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.mut } },
+        h("span", null, "Filament " + para(mal.filamentM) + " + Elektrik " + para(mal.elektrik) + " + Ek " + para(mal.ek)),
+        h("b", { style:{ color:C.txt } }, "= " + para(mal.toplam))),
+      h("div", { style:{ display:"flex", justifyContent:"space-between", fontWeight:800, marginTop:6, color: kar>=0?C.ok:C.bad } },
+        h("span", null, "Kâr"), h("span", null, para(kar)))),
     h(Field, { label:"MakerWorld linki" },
       h("div", { style:{ display:"flex", gap:8 } },
         h("input", { style:{ ...S.input, flex:1 }, value:f.makerworldUrl||"", onChange:e=>set("makerworldUrl", e.target.value),
@@ -1046,7 +1143,7 @@ function FilamentModal({ kayit, onKapat }) {
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
   async function kaydet() {
     if (!f.ad.trim()) return alert("Ad gir.");
-    await save("filamentler", { ...f, kalanGram:num(f.kalanGram), kritikGram:num(f.kritikGram) });
+    await save("filamentler", { ...f, kalanGram:num(f.kalanGram), kritikGram:num(f.kritikGram), kgFiyat:num(f.kgFiyat) });
     onKapat();
   }
   return h(Modal, {
@@ -1064,9 +1161,10 @@ function FilamentModal({ kayit, onKapat }) {
           FILAMENT_TIP.map(t => h("option", { key:t, value:t }, t)))),
       h(Field, { label:"Renk" }, h("input", { style:S.input, value:f.renk||"", onChange:e=>set("renk", e.target.value) }))
     ),
-    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
-      h(Field, { label:"Kalan (gram)" }, h("input", { type:"number", style:S.input, value:f.kalanGram, onChange:e=>set("kalanGram", e.target.value) })),
-      h(Field, { label:"Kritik seviye (g)" }, h("input", { type:"number", style:S.input, value:f.kritikGram, onChange:e=>set("kritikGram", e.target.value) }))
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 } },
+      h(Field, { label:"Kalan (g)" }, h("input", { type:"number", style:S.input, value:f.kalanGram, onChange:e=>set("kalanGram", e.target.value) })),
+      h(Field, { label:"Kritik (g)" }, h("input", { type:"number", style:S.input, value:f.kritikGram, onChange:e=>set("kritikGram", e.target.value) })),
+      h(Field, { label:"Kg fiyatı (₺)" }, h("input", { type:"number", style:S.input, value:f.kgFiyat==null?"":f.kgFiyat, onChange:e=>set("kgFiyat", e.target.value), placeholder:"650" }))
     ),
     h(Field, { label:"Not / Tedarikçi" },
       h("textarea", { style:{ ...S.input, minHeight:50, resize:"vertical" }, value:f.not||"", onChange:e=>set("not", e.target.value) }))
@@ -1164,12 +1262,152 @@ function RaporTab({ isler, teslimatlar, cari, urunler, yerler, makineler }) {
 }
 
 /* ============================================================
+   SİPARİŞLER — özel/müşteri siparişleri (teklif yok)
+   ============================================================ */
+function SiparisTab({ makineler, urunler, siparisler }) {
+  const [filtre, setFiltre] = useState("aktif");
+  const [edit, setEdit] = useState(null);
+  const [is, setIs] = useState(null);
+
+  const liste = useMemo(() => {
+    let l = siparisler.slice().sort((a,b)=>new Date(a.teslimTarihi||a.tarih) - new Date(b.teslimTarihi||b.tarih));
+    if (filtre === "aktif") l = l.filter(s => s.durum !== "teslim" && s.durum !== "iptal");
+    else if (filtre !== "hepsi") l = l.filter(s => s.durum === filtre);
+    return l;
+  }, [siparisler, filtre]);
+
+  const sira = ["beklemede","uretimde","hazir","teslim"];
+  async function ilerlet(s) {
+    const i = sira.indexOf(s.durum);
+    if (i < 0 || i >= sira.length-1) return;
+    await save("siparisler", { id:s.id, durum: sira[i+1] });
+  }
+  function isBaslat(s) {
+    const u = urunler.find(x => x.id === s.urunId);
+    setIs({ urunId:s.urunId, adet:s.adet, sureDk: u ? Math.round(num(u.sureDk)*num(s.adet)) : "" });
+  }
+
+  const filtreler = [["aktif","Aktif"],["beklemede","Beklemede"],["uretimde","Üretimde"],["hazir","Hazır"],["teslim","Teslim"],["hepsi","Hepsi"]];
+
+  return h("div", { style:{ marginTop:16 } },
+    h("div", { style:{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap", alignItems:"center" } },
+      h("button", { style:S.btn("primary"), onClick:()=>setEdit({ musteri:"", telefon:"", urunId:"", adet:1, birimFiyat:"", teslimTarihi:toInput(Date.now()), durum:"beklemede", not:"" }) }, "+ Sipariş"),
+      h("div", { style:{ flex:1 } }),
+      filtreler.map(([k,ad]) => h("button", { key:k, onClick:()=>setFiltre(k),
+        style:{ ...S.ibtn, background: filtre===k?C.acc:C.panel2, color: filtre===k?"#fff":C.txt, borderColor: filtre===k?C.acc:C.line } }, ad))
+    ),
+    !liste.length
+      ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Sipariş yok.")
+      : h("div", { style:S.grid },
+          liste.map(s => {
+            const d = SIPARIS_DURUM[s.durum] || SIPARIS_DURUM.beklemede;
+            const gecmis = s.teslimTarihi && new Date(s.teslimTarihi) < new Date() && s.durum!=="teslim" && s.durum!=="iptal";
+            return h("div", { key:s.id, style:S.card },
+              h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 } },
+                h("div", null,
+                  h("div", { style:{ fontWeight:800, fontSize:16 } }, s.musteri || "(müşteri)"),
+                  h("div", { style:{ fontSize:13, color:C.mut, marginTop:2 } },
+                    s.urunAd + " ×" + s.adet + "  ·  " + para(num(s.adet)*num(s.birimFiyat)))),
+                h(Badge, { d })
+              ),
+              h("div", { style:{ fontSize:12, color: gecmis?C.bad:C.mut, marginTop:6, fontWeight: gecmis?700:400 } },
+                "📅 Teslim: " + (s.teslimTarihi ? fmtSaat(s.teslimTarihi) : "—") + (gecmis ? "  · GECİKTİ" : "") +
+                (s.telefon ? "   ☎ " + s.telefon : "")),
+              s.not && h("div", { style:{ fontSize:12, color:C.mut, marginTop:6 } }, "📝 " + s.not),
+              h("div", { style:{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap" } },
+                (s.durum!=="teslim" && s.durum!=="iptal") && h("button", { style:{ ...S.ibtn, color:C.ok, borderColor:C.ok }, onClick:()=>ilerlet(s) },
+                  "→ " + (SIPARIS_DURUM[sira[sira.indexOf(s.durum)+1]]?.ad || "")),
+                (s.durum==="beklemede"||s.durum==="uretimde") && h("button", { style:S.ibtn, onClick:()=>isBaslat(s) }, "▶ İş başlat"),
+                h("button", { style:S.ibtn, onClick:()=>setEdit(s) }, "Düzenle"),
+                h("button", { style:{ ...S.ibtn, color:C.bad, borderColor:C.bad }, onClick:()=>{ if(confirm("Sipariş silinsin mi?")) remove("siparisler", s.id); } }, "Sil"))
+            );
+          })
+        ),
+    edit && h(SiparisModal, { kayit:edit, urunler, onKapat:()=>setEdit(null) }),
+    is && h(IsModal, { kayit:is, makineler, urunler, onKapat:()=>setIs(null) })
+  );
+}
+
+function SiparisModal({ kayit, urunler, onKapat }) {
+  const yeni = !kayit.id;
+  const [f, setF] = useState({ ...kayit });
+  const set = (k,v) => setF(s => ({ ...s, [k]:v }));
+  function urunSec(id) {
+    const u = urunler.find(x => x.id === id);
+    setF(s => ({ ...s, urunId:id, birimFiyat: (s.birimFiyat === "" && u) ? num(u.fiyat) : s.birimFiyat }));
+  }
+  async function kaydet() {
+    if (!f.urunId) return alert("Ürün seç.");
+    const u = urunler.find(x => x.id === f.urunId);
+    await save("siparisler", {
+      ...f, urunAd: u ? u.ad : "", adet:num(f.adet), birimFiyat:num(f.birimFiyat),
+      teslimTarihi: f.teslimTarihi ? new Date(f.teslimTarihi).toISOString() : null,
+      tarih: f.tarih || new Date().toISOString(),
+    });
+    onKapat();
+  }
+  return h(Modal, {
+    baslik: yeni ? "Yeni Sipariş" : "Sipariş Düzenle", onKapat,
+    alt: h(React.Fragment, null,
+      h("button", { style:{ ...S.btn("primary"), flex:1 }, onClick:kaydet }, "Kaydet"),
+      !yeni && h("button", { style:S.btn("bad"), onClick:()=>{ if(confirm("Silinsin mi?")){ remove("siparisler", f.id); onKapat(); } } }, "Sil"),
+      h("button", { style:S.btn(), onClick:onKapat }, "Vazgeç"))
+  },
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"Müşteri" }, h("input", { style:S.input, value:f.musteri||"", onChange:e=>set("musteri", e.target.value) })),
+      h(Field, { label:"Telefon" }, h("input", { style:S.input, value:f.telefon||"", onChange:e=>set("telefon", e.target.value) }))
+    ),
+    h(Field, { label:"Ürün" },
+      h("select", { style:S.input, value:f.urunId, onChange:e=>urunSec(e.target.value) },
+        h("option", { value:"" }, "— seç —"),
+        urunler.map(u => h("option", { key:u.id, value:u.id }, u.ad + (u.renk ? " · " + u.renk : ""))))),
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"Adet" }, h("input", { type:"number", min:1, style:S.input, value:f.adet, onChange:e=>set("adet", e.target.value) })),
+      h(Field, { label:"Birim fiyat (₺)" }, h("input", { type:"number", style:S.input, value:f.birimFiyat, onChange:e=>set("birimFiyat", e.target.value) }))
+    ),
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"Teslim tarihi" }, h("input", { type:"datetime-local", style:S.input, value:f.teslimTarihi?toInput(f.teslimTarihi):"", onChange:e=>set("teslimTarihi", e.target.value) })),
+      h(Field, { label:"Durum" },
+        h("select", { style:S.input, value:f.durum, onChange:e=>set("durum", e.target.value) },
+          Object.keys(SIPARIS_DURUM).map(k => h("option", { key:k, value:k }, SIPARIS_DURUM[k].ad))))
+    ),
+    h(Field, { label:"Not" }, h("textarea", { style:{ ...S.input, minHeight:50, resize:"vertical" }, value:f.not||"", onChange:e=>set("not", e.target.value) }))
+  );
+}
+
+/* ============================================================
+   AYARLAR — elektrik (kWh fiyatı + varsayılan makine gücü)
+   ============================================================ */
+function AyarModal({ ayar, onKapat }) {
+  const [f, setF] = useState({ kwhFiyat: ayar.kwhFiyat ?? "", varsayilanWatt: ayar.varsayilanWatt ?? 100 });
+  const set = (k,v) => setF(s => ({ ...s, [k]:v }));
+  async function kaydet() {
+    await save("meta", { id:"app", kwhFiyat:num(f.kwhFiyat), varsayilanWatt:num(f.varsayilanWatt) });
+    onKapat();
+  }
+  return h(Modal, {
+    baslik: "Ayarlar — Elektrik", onKapat,
+    alt: h(React.Fragment, null,
+      h("button", { style:{ ...S.btn("primary"), flex:1 }, onClick:kaydet }, "Kaydet"),
+      h("button", { style:S.btn(), onClick:onKapat }, "Vazgeç"))
+  },
+    h(Field, { label:"Elektrik (₺ / kWh)" },
+      h("input", { type:"number", style:S.input, value:f.kwhFiyat, onChange:e=>set("kwhFiyat", e.target.value), placeholder:"örn. 2.50" })),
+    h(Field, { label:"Varsayılan makine gücü (Watt)" },
+      h("input", { type:"number", style:S.input, value:f.varsayilanWatt, onChange:e=>set("varsayilanWatt", e.target.value), placeholder:"Bambu A1 ~100" })),
+    h("div", { style:{ fontSize:12, color:C.mut } },
+      "Ürün elektrik maliyeti = (süre/60) × (Watt/1000) × kWh fiyatı. Ürün maliyetine otomatik yansır.")
+  );
+}
+
+/* ============================================================
    APP
    ============================================================ */
 function App() {
   const [tab, setTab] = useState("pano");
   const [now, setNow] = useState(Date.now());
   const [tema, setTema] = useState(() => localStorage.getItem("tikita-tema") || "dark");
+  const [ayarAcik, setAyarAcik] = useState(false);
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
@@ -1184,6 +1422,9 @@ function App() {
   const teslimatlar = useColl("teslimatlar");
   const cari        = useColl("cari_hareket");
   const filamentler = useColl("filamentler");
+  const siparisler  = useColl("siparisler");
+  const meta        = useColl("meta");
+  const ayar        = meta.find(m => m.id === "app") || {};
 
   // Makineleri ilk açılışta otomatik ekle (tek seferlik — meta bayrağı ile)
   useEffect(() => {
@@ -1208,6 +1449,7 @@ function App() {
     ["makineler", "Makineler", "🖨"],
     ["urunler", "Ürünler", "📦"],
     ["stok", "Stok", "🧵"],
+    ["siparis", "Siparişler", "📋"],
     ["isler", "İşler", "🗂"],
     ["yerler", "Yerler & Cari", "🏬"],
   ];
@@ -1220,6 +1462,7 @@ function App() {
             h("span", { style:{ fontSize:12, fontWeight:600, color:C.mut } }, "makine & cari")),
           h("div", { style:{ display:"flex", alignItems:"center", gap:8 } },
             aktifSayi > 0 && h(Badge, { d:{ ad: aktifSayi + " aktif baskı", c:C.acc2 } }),
+            h("button", { style:S.ibtn, title:"Ayarlar", onClick:()=>setAyarAcik(true) }, "⚙"),
             h("button", { style:S.ibtn, title:"Tema değiştir", onClick:()=>setTema(t=>t==="dark"?"light":"dark") },
               tema==="dark" ? "☀️ Açık" : "🌙 Koyu"))
         ),
@@ -1235,11 +1478,13 @@ function App() {
       tab==="rapor"     && h(RaporTab,     { isler, teslimatlar, cari, urunler, yerler, makineler }),
       tab==="akis"      && h(AkisTab,      { isler, teslimatlar, urunler }),
       tab==="makineler" && h(MakinelerTab, { makineler, isler, now }),
-      tab==="urunler"   && h(UrunlerTab,   { urunler, filamentler }),
+      tab==="urunler"   && h(UrunlerTab,   { urunler, filamentler, ayar }),
       tab==="stok"      && h(StokTab,      { filamentler, urunler, isler }),
+      tab==="siparis"   && h(SiparisTab,   { makineler, urunler, siparisler }),
       tab==="isler"     && h(IslerTab,     { makineler, urunler, isler, filamentler }),
       tab==="yerler"    && h(YerlerTab,    { yerler, teslimatlar, cari, urunler })
-    )
+    ),
+    ayarAcik && h(AyarModal, { ayar, onKapat:()=>setAyarAcik(false) })
   );
 }
 
