@@ -407,7 +407,7 @@ function PanoTab({ makineler, urunler, isler, now }) {
    ============================================================ */
 function MakinelerTab({ makineler, isler, now }) {
   const [edit, setEdit] = useState(null);
-  const bos = { ad:"", model:MODELLER[0], renkli:true, durum:"bos", not:"" };
+  const bos = { ad:"", model:MODELLER[0], renkli:true, durum:"bos", bakimEsigiSaat:300, sonBakim:null, not:"" };
 
   const isByMakine = useMemo(() => {
     const m = {};
@@ -417,6 +417,7 @@ function MakinelerTab({ makineler, isler, now }) {
 
   function hucre(m) {
     const is = isByMakine[m.id];
+    const bakim = bakimGerekli(m, isler);
     let renk, durumAd, alt;
     if (is) {
       const bitisMs = new Date(is.baslangic).getTime() + num(is.sureDk) * 60000;
@@ -434,7 +435,8 @@ function MakinelerTab({ makineler, isler, now }) {
         display:"flex", flexDirection:"column", gap:5, minHeight:92 } },
       h("div", { style:{ fontWeight:800, fontSize:16, lineHeight:1.1 } }, m.ad),
       h("div", { style:{ fontWeight:700, fontSize:13, color:renk } }, "● " + durumAd),
-      h("div", { style:{ fontSize:12, color:C.mut, lineHeight:1.2 } }, alt)
+      h("div", { style:{ fontSize:12, color:C.mut, lineHeight:1.2 } }, alt),
+      bakim && h("div", { style:{ fontSize:11, color:C.warn, fontWeight:700 } }, "🔧 Bakım zamanı")
     );
   }
 
@@ -446,17 +448,22 @@ function MakinelerTab({ makineler, isler, now }) {
       ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Makineler yükleniyor…")
       : h("div", { style:{ display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))" } },
           makineler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(hucre)),
-    edit && h(MakineModal, { kayit:edit, onKapat:()=>setEdit(null) })
+    edit && h(MakineModal, { kayit:edit, isler, onKapat:()=>setEdit(null) })
   );
 }
 
-function MakineModal({ kayit, onKapat }) {
+function MakineModal({ kayit, isler, onKapat }) {
   const yeni = !kayit.id;
   const [f, setF] = useState({ ...kayit });
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
+  const calismaSaat = kayit.id ? bakimSaat(kayit, isler || []) : 0;
   async function kaydet() {
     if (!f.ad.trim()) return alert("Ad gir.");
-    await save("makineler", f); onKapat();
+    await save("makineler", { ...f, bakimEsigiSaat:num(f.bakimEsigiSaat) }); onKapat();
+  }
+  async function bakimYapildi() {
+    await save("makineler", { id:f.id, sonBakim:new Date().toISOString() });
+    onKapat();
   }
   return h(Modal, {
     baslik: yeni ? "Yeni Makine" : "Makine Düzenle", onKapat,
@@ -478,6 +485,13 @@ function MakineModal({ kayit, onKapat }) {
     h("label", { style:{ display:"flex", alignItems:"center", gap:8, margin:"4px 0 12px", fontWeight:600 } },
       h("input", { type:"checkbox", checked:!!f.renkli, onChange:e=>set("renkli", e.target.checked) }),
       "Renkli baskı (AMS var)"),
+    h(Field, { label:"Bakım eşiği (çalışma saati)" },
+      h("input", { type:"number", min:0, style:S.input, value:f.bakimEsigiSaat==null?"":f.bakimEsigiSaat, onChange:e=>set("bakimEsigiSaat", e.target.value), placeholder:"300" })),
+    !yeni && h("div", { style:{ ...S.card, background:C.panel2, padding:"10px 12px", marginBottom:12 } },
+      h("div", { style:{ fontSize:13 } }, "Son bakımdan beri: ",
+        h("b", { style:{ color: bakimGerekli(kayit, isler||[]) ? C.warn : C.txt } }, calismaSaat.toFixed(1) + " saat"),
+        f.sonBakim ? h("span",{style:{color:C.mut}}, "  · son bakım " + fmtSaat(f.sonBakim)) : h("span",{style:{color:C.mut}}, "  · hiç bakım yok")),
+      h("button", { style:{ ...S.ibtn, marginTop:8 }, type:"button", onClick:bakimYapildi }, "🔧 Bakım yapıldı (sıfırla)")),
     h(Field, { label:"Not" },
       h("textarea", { style:{ ...S.input, minHeight:60, resize:"vertical" }, value:f.not||"", onChange:e=>set("not", e.target.value) }))
   );
@@ -573,7 +587,7 @@ function UrunModal({ kayit, filamentler, onKapat }) {
 /* ============================================================
    İŞLER — geçmiş, filtre, başlat/düzenle/bitir/iptal
    ============================================================ */
-function IslerTab({ makineler, urunler, isler }) {
+function IslerTab({ makineler, urunler, isler, filamentler }) {
   const [filtre, setFiltre] = useState("hepsi");
   const [edit, setEdit] = useState(null);
   const liste = useMemo(() => {
@@ -582,7 +596,19 @@ function IslerTab({ makineler, urunler, isler }) {
     return l;
   }, [isler, filtre]);
 
-  async function bitir(i) { await save("isler", { id:i.id, durum:"bitti", gercekBitis:new Date().toISOString() }); }
+  async function bitir(i) {
+    await save("isler", { id:i.id, durum:"bitti", gercekBitis:new Date().toISOString() });
+    // Otomatik filament düşümü (tek seferlik — filamentDusuldu bayrağı)
+    if (!i.filamentDusuldu) {
+      const u = urunler.find(x => x.id === i.urunId);
+      const fl = u && u.filamentId && (filamentler||[]).find(f => f.id === u.filamentId);
+      if (fl && num(u.gram)) {
+        const dusulen = num(i.adet) * num(u.gram);
+        await save("filamentler", { id:fl.id, kalanGram: Math.max(0, num(fl.kalanGram) - dusulen) });
+        await save("isler", { id:i.id, filamentDusuldu:true });
+      }
+    }
+  }
   async function iptal(i) { if(confirm("İş iptal edilsin mi?")) await save("isler", { id:i.id, durum:"iptal", gercekBitis:new Date().toISOString() }); }
 
   return h("div", { style:{ marginTop:16 } },
@@ -1048,6 +1074,96 @@ function FilamentModal({ kayit, onKapat }) {
 }
 
 /* ============================================================
+   BAKIM yardımcıları — son bakımdan beri çalışma saati
+   ============================================================ */
+function bakimSaat(m, isler) {
+  const since = m.sonBakim ? new Date(m.sonBakim).getTime() : 0;
+  let dk = 0;
+  isler.forEach(i => {
+    if (i.makineId === m.id && i.durum === "bitti" && new Date(i.baslangic).getTime() >= since) dk += num(i.sureDk);
+  });
+  return dk / 60;
+}
+function bakimGerekli(m, isler) {
+  const esik = num(m.bakimEsigiSaat);
+  return esik > 0 && bakimSaat(m, isler) >= esik;
+}
+
+/* ============================================================
+   RAPOR — dashboard (Faz 4): ciro, en çok satan, en borçlu, makine verimi
+   ============================================================ */
+function RaporTab({ isler, teslimatlar, cari, urunler, yerler, makineler }) {
+  const [donem, setDonem] = useState("ay");
+  const r = useMemo(() => {
+    const n = new Date();
+    const sinir = donem === "ay" ? new Date(n.getFullYear(), n.getMonth(), 1).getTime()
+                : donem === "yil" ? new Date(n.getFullYear(), 0, 1).getTime() : 0;
+    const inD = d => new Date(d).getTime() >= sinir;
+
+    const urunSatis = {}; let ciro = 0, satilanAdet = 0;
+    teslimatlar.forEach(t => {
+      if (!inD(t.tarih)) return;
+      const adet = t.tur === "satis" ? num(t.adet) : num(t.satilan);
+      const deger = adet * num(t.birimFiyat);
+      if (adet > 0) {
+        ciro += deger; satilanAdet += adet;
+        const e = urunSatis[t.urunId] || (urunSatis[t.urunId] = { ad:t.urunAd, adet:0, ciro:0 });
+        e.adet += adet; e.ciro += deger;
+      }
+    });
+    const topUrun = Object.values(urunSatis).sort((a,b)=>b.adet-a.adet).slice(0,5);
+    const iptal = isler.filter(i => i.durum === "iptal" && inD(i.baslangic)).length;
+    const biten = isler.filter(i => i.durum === "bitti" && inD(i.baslangic)).length;
+
+    const borclular = yerler.map(y => ({ ad:y.ad, bakiye: cariOzet(y.id, teslimatlar, cari).bakiye }))
+      .filter(x => x.bakiye > 0.005).sort((a,b)=>b.bakiye-a.bakiye).slice(0,5);
+    const toplamAlacak = yerler.reduce((s,y)=> s + Math.max(0, cariOzet(y.id, teslimatlar, cari).bakiye), 0);
+
+    const makineVerim = makineler.map(m => {
+      const isl = isler.filter(i => i.makineId === m.id && i.durum === "bitti" && inD(i.baslangic));
+      return { ad:m.ad, adet:isl.length, saat: isl.reduce((s,i)=>s+num(i.sureDk),0)/60, bakim: bakimGerekli(m, isler) };
+    }).sort((a,b)=>b.saat-a.saat);
+
+    return { ciro, satilanAdet, iptal, biten, topUrun, borclular, toplamAlacak, makineVerim };
+  }, [donem, isler, teslimatlar, cari, urunler, yerler, makineler]);
+
+  const kart = (baslik, deger, renk) => h("div", { style:{ ...S.card, flex:"1 1 150px" } },
+    h("div", { style:S.label }, baslik),
+    h("div", { style:{ fontSize:24, fontWeight:800, color:renk||C.txt } }, deger));
+
+  const bolum = (baslik, satirlar, bos) => h("div", { style:{ ...S.card } },
+    h("div", { style:{ ...S.label, marginBottom:10 } }, baslik),
+    satirlar.length ? satirlar : h("div", { style:{ fontSize:13, color:C.mut } }, bos));
+
+  return h("div", { style:{ marginTop:16 } },
+    h("div", { style:{ display:"flex", gap:8, marginBottom:14 } },
+      [["ay","Bu ay"],["yil","Bu yıl"],["tum","Tümü"]].map(([k,ad]) =>
+        h("button", { key:k, onClick:()=>setDonem(k),
+          style:{ ...S.ibtn, background: donem===k?C.acc:C.panel2, color: donem===k?"#fff":C.txt, borderColor: donem===k?C.acc:C.line } }, ad))),
+    h("div", { style:{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:12 } },
+      kart("Ciro", para(r.ciro), C.ok),
+      kart("Satılan adet", r.satilanAdet),
+      kart("Açık alacak", para(r.toplamAlacak), r.toplamAlacak>0?C.bad:C.ok),
+      kart("Biten / İptal", r.biten + " / " + r.iptal, r.iptal>0?C.warn:C.txt)
+    ),
+    h("div", { style:{ ...S.grid, gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))" } },
+      bolum("En çok satan ürünler",
+        r.topUrun.map((u,idx) => h("div", { key:idx, style:{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid "+C.line } },
+          h("span", null, (idx+1) + ". " + u.ad + h("span",{style:{color:C.mut}}, " ×"+u.adet)),
+          h("b", null, para(u.ciro)))), "Bu dönemde satış yok."),
+      bolum("En borçlu yerler",
+        r.borclular.map((y,idx) => h("div", { key:idx, style:{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid "+C.line } },
+          h("span", null, (idx+1) + ". " + y.ad),
+          h("b", { style:{ color:C.bad } }, para(y.bakiye)))), "Borçlu yer yok."),
+      bolum("Makine verimliliği (biten iş · saat)",
+        r.makineVerim.map((m,idx) => h("div", { key:idx, style:{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid "+C.line } },
+          h("span", null, m.ad, m.bakim ? h("span",{style:{color:C.warn}}, " 🔧") : null),
+          h("span", { style:{ color:C.mut } }, m.adet + " iş · " + m.saat.toFixed(1) + " sa"))), "Veri yok.")
+    )
+  );
+}
+
+/* ============================================================
    APP
    ============================================================ */
 function App() {
@@ -1087,6 +1203,7 @@ function App() {
   const aktifSayi = isler.filter(i => i.durum === "devam").length;
   const SEKMELER = [
     ["pano", "Pano", aktifSayi ? "🟢" : "📊"],
+    ["rapor", "Rapor", "📈"],
     ["akis", "Akış", "🔀"],
     ["makineler", "Makineler", "🖨"],
     ["urunler", "Ürünler", "📦"],
@@ -1115,11 +1232,12 @@ function App() {
       !CONFIG_OK && h("div", { style:{ ...S.card, background:soft(C.warn), borderColor:C.warn, marginTop:16 } },
         h("b", null, "⚠ Firebase config eksik."), " cfg nesnesindeki alanları doldur."),
       tab==="pano"      && h(PanoTab,      { makineler, urunler, isler, now }),
+      tab==="rapor"     && h(RaporTab,     { isler, teslimatlar, cari, urunler, yerler, makineler }),
       tab==="akis"      && h(AkisTab,      { isler, teslimatlar, urunler }),
       tab==="makineler" && h(MakinelerTab, { makineler, isler, now }),
       tab==="urunler"   && h(UrunlerTab,   { urunler, filamentler }),
       tab==="stok"      && h(StokTab,      { filamentler, urunler, isler }),
-      tab==="isler"     && h(IslerTab,     { makineler, urunler, isler }),
+      tab==="isler"     && h(IslerTab,     { makineler, urunler, isler, filamentler }),
       tab==="yerler"    && h(YerlerTab,    { yerler, teslimatlar, cari, urunler })
     )
   );
