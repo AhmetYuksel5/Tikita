@@ -41,9 +41,9 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 
 | Koleksiyon | Amaç | Ana alanlar |
 |---|---|---|
-| `makineler` | 3D yazıcı envanteri | ad, model, renkli, durum (bos/arizali/bakim), not |
+| `makineler` | 3D yazıcı envanteri | ad, model, renkli, durum, bakimEsigiSaat, sonBakim, not |
 | `urunler` | Ürün kataloğu | ad, renk, gram, sureDk, maliyet, fiyat, filamentId, makerworldUrl, not |
-| `isler` | Baskı işleri | makineId, makineAd, urunId, urunAd, adet, baslangic, sureDk, durum (devam/bitti/iptal), gercekBitis, not |
+| `isler` | Baskı işleri | makineId, makineAd, urunId, urunAd, adet, baslangic, sureDk, durum (devam/bitti/iptal), gercekBitis, filamentDusuldu, not |
 | `yerler` | Ürün verilen yerler | ad, yetkili, telefon, adres, not |
 | `teslimatlar` | Konsinye/satış kayıtları | yerId, yerAd, urunId, urunAd, adet, birimFiyat, tur (konsinye/satis), satilan, iade, tarih, not |
 | `cari_hareket` | Tahsilat / elle borç | yerId, yerAd, tip (tahsilat/borc), tutar, tarih, aciklama |
@@ -59,6 +59,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | Sekme | Fonksiyon | Açıklama |
 |---|---|---|
 | Pano | `PanoTab` | Canlı makine durumu, çalışan iş, geri sayım, bitiş tahmini |
+| Rapor | `RaporTab` | Dönem (ay/yıl/tüm): ciro, satılan adet, açık alacak, biten/iptal, en çok satan, en borçlu, makine verimi |
 | Akış | `AkisTab` | Üretimden satışa değer akışı: Baskıda → Depoda → Konsinyede → Satıldı (otomatik türetilir) + bağlı para |
 | Makineler | `MakinelerTab` | Tek ekran kompakt hücre tablosu (ad + durum + bitiş); hücreye dokun → düzenle/sil |
 | Ürünler | `UrunlerTab` | Ürün kataloğu CRUD + kâr + filament ataması + MakerWorld linki |
@@ -77,6 +78,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 - **Faz 1 (tamamlandı):** Makine envanteri + ürün kataloğu + canlı baskı panosu.
 - **Faz 2 (tamamlandı):** Konsinye & cari — yerler, teslimat (konsinye/satış), tahsilat, bakiye.
 - **Faz 3 (tamamlandı):** Filament stoğu + "yeter mi" analizi; Akış (değer akışı) panosu.
-- **Faz 4:** Raporlama, bakım hatırlatma, elektrik maliyeti, otomatik filament düşümü.
+- **Faz 4 (tamamlandı):** Rapor/dashboard, bakım hatırlatıcı (çalışma saatine göre), iş bitince otomatik filament düşümü.
+  - Kalan: elektrik maliyeti, sipariş/teklif yönetimi, slicer dosyası (.3mf/G-code) ile otomatik ürün doldurma.
 
 Detay için `ROADMAP.md`.
