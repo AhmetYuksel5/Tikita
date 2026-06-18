@@ -44,10 +44,11 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `makineler` | 3D yazıcı envanteri | ad, model, renkli, durum, bakimEsigiSaat, sonBakim, not |
 | `urunler` | Ürün kataloğu | ad, renk, gram, sureDk, maliyet, fiyat, filamentId, makerworldUrl, not |
 | `isler` | Baskı işleri | makineId, makineAd, urunId, urunAd, adet, baslangic, sureDk, durum (devam/bitti/iptal), gercekBitis, filamentDusuldu, not |
-| `yerler` | Ürün verilen yerler | ad, yetkili, telefon, adres, not |
-| `teslimatlar` | Konsinye/satış kayıtları | yerId, yerAd, urunId, urunAd, adet, birimFiyat, tur (konsinye/satis), satilan, iade, tarih, not |
+| `yerler` | Ürün verilen yerler | ad, yetkili, telefon, bolge, adres, lat, lng, not |
+| `teslimatlar` | Konsinye/satış kayıtları | yerId, yerAd, urunId, urunAd, adet, birimFiyat, tur, satilan, iade, pazarlamaciId, pazarlamaciFiyat, tarih, not |
+| `pazarlamacilar` | Pazarlamacılar | ad, telefon, bolge, not |
 | `cari_hareket` | Tahsilat / elle borç | yerId, yerAd, tip (tahsilat/borc), tutar, tarih, aciklama |
-| `filamentler` | Filament stoğu | ad, tip, renk, kalanGram, kritikGram, kgFiyat, not |
+| `filamentler` | Filament stoğu | kod (1'den otomatik), ad, tip, renk, kalanGram, kritikGram, kgFiyat, not |
 | `siparisler` | Müşteri siparişleri | musteri, telefon, urunId, urunAd, adet, birimFiyat, teslimTarihi, durum (beklemede/uretimde/hazir/teslim/iptal), tarih, not |
 | `meta` | Ayarlar + bayraklar | `app` dokümanı: makinelerSeed, kwhFiyat, varsayilanWatt (elektrik) |
 
@@ -67,7 +68,8 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | Stok | `StokTab` | Filament stoğu, kritik uyarısı, aktif iş ihtiyacı vs stok, "kaç adet daha basılır" |
 | Siparişler | `SiparisTab` | Müşteri siparişleri, durum akışı (beklemede→teslim), gecikme uyarısı, siparişten iş başlatma |
 | İşler | `IslerTab` | İş geçmişi, filtre, başlat/düzenle/bitir/iptal |
-| Yerler & Cari | `YerlerTab` | Verilen yerler, teslimat (konsinye/satış), tahsilat, bakiye |
+| Yerler & Cari | `YerlerTab` | Verilen yerler, teslimat (konsinye/satış + pazarlamacı/fiyat), tahsilat, bakiye |
+| Pazarlamacı | `PazarlamaciTab` | Pazarlamacı satış istatistikleri (adet/ciro/yer), bölge dağılımı, yer haritası (Leaflet) |
 
 > **Elektrik & maliyet:** ⚙ Ayarlar'dan kWh fiyatı + varsayılan makine gücü (Watt). Ürün maliyeti =
 > filament (gram × kg fiyatı) + elektrik (süre × güç × kWh) + ek maliyet; kâr buna göre hesaplanır.
@@ -87,5 +89,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 - **Faz 3 (tamamlandı):** Filament stoğu + "yeter mi" analizi; Akış (değer akışı) panosu.
 - **Faz 4 (tamamlandı):** Rapor/dashboard, bakım hatırlatıcı, otomatik filament düşümü,
   elektrik maliyeti (ürün maliyetine yansır), sipariş yönetimi, slicer (.gcode/.3mf) ile otomatik ürün doldurma.
+- **Faz 5 (tamamlandı):** İşe opsiyonel filament; filament kod no; Akış detay (tıkla→liste);
+  teslimatta pazarlamacı + satış fiyatı; Pazarlamacı sekmesi (istatistik + bölge + Leaflet harita).
 
 Detay için `ROADMAP.md`.
