@@ -47,8 +47,9 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `yerler` | Ürün verilen yerler | ad, yetkili, telefon, adres, not |
 | `teslimatlar` | Konsinye/satış kayıtları | yerId, yerAd, urunId, urunAd, adet, birimFiyat, tur (konsinye/satis), satilan, iade, tarih, not |
 | `cari_hareket` | Tahsilat / elle borç | yerId, yerAd, tip (tahsilat/borc), tutar, tarih, aciklama |
-| `filamentler` | Filament stoğu | ad, tip, renk, kalanGram, kritikGram, not |
-| `meta` | Uygulama bayrakları | `app` dokümanı: makinelerSeed (makineler tek seferlik otomatik eklendi mi) |
+| `filamentler` | Filament stoğu | ad, tip, renk, kalanGram, kritikGram, kgFiyat, not |
+| `siparisler` | Müşteri siparişleri | musteri, telefon, urunId, urunAd, adet, birimFiyat, teslimTarihi, durum (beklemede/uretimde/hazir/teslim/iptal), tarih, not |
+| `meta` | Ayarlar + bayraklar | `app` dokümanı: makinelerSeed, kwhFiyat, varsayilanWatt (elektrik) |
 
 > **Bakiye** = (satış teslimatlarının tamamı + konsinyede satılan adetler = mal bedeli)
 > + elle borç − tahsilat. Hepsi `teslimatlar` ve `cari_hareket`'ten canlı hesaplanır.
@@ -64,8 +65,14 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | Makineler | `MakinelerTab` | Tek ekran kompakt hücre tablosu (ad + durum + bitiş); hücreye dokun → düzenle/sil |
 | Ürünler | `UrunlerTab` | Ürün kataloğu CRUD + kâr + filament ataması + MakerWorld linki |
 | Stok | `StokTab` | Filament stoğu, kritik uyarısı, aktif iş ihtiyacı vs stok, "kaç adet daha basılır" |
+| Siparişler | `SiparisTab` | Müşteri siparişleri, durum akışı (beklemede→teslim), gecikme uyarısı, siparişten iş başlatma |
 | İşler | `IslerTab` | İş geçmişi, filtre, başlat/düzenle/bitir/iptal |
 | Yerler & Cari | `YerlerTab` | Verilen yerler, teslimat (konsinye/satış), tahsilat, bakiye |
+
+> **Elektrik & maliyet:** ⚙ Ayarlar'dan kWh fiyatı + varsayılan makine gücü (Watt). Ürün maliyeti =
+> filament (gram × kg fiyatı) + elektrik (süre × güç × kWh) + ek maliyet; kâr buna göre hesaplanır.
+> **Slicer okuma:** Ürün penceresinde `.gcode` / `.3mf` yükle → süre + gram otomatik dolar
+> (G-code başlığı / 3mf içindeki slice verisi okunur; JSZip ile zip açılır).
 
 > **MakerWorld linki:** Sayfa bot korumalı (Cloudflare) olduğu için içerik otomatik
 > çekilemez. Link saklanır; "Ad ←" butonu ürün adını link slug'ından üretir
@@ -78,7 +85,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 - **Faz 1 (tamamlandı):** Makine envanteri + ürün kataloğu + canlı baskı panosu.
 - **Faz 2 (tamamlandı):** Konsinye & cari — yerler, teslimat (konsinye/satış), tahsilat, bakiye.
 - **Faz 3 (tamamlandı):** Filament stoğu + "yeter mi" analizi; Akış (değer akışı) panosu.
-- **Faz 4 (tamamlandı):** Rapor/dashboard, bakım hatırlatıcı (çalışma saatine göre), iş bitince otomatik filament düşümü.
-  - Kalan: elektrik maliyeti, sipariş/teklif yönetimi, slicer dosyası (.3mf/G-code) ile otomatik ürün doldurma.
+- **Faz 4 (tamamlandı):** Rapor/dashboard, bakım hatırlatıcı, otomatik filament düşümü,
+  elektrik maliyeti (ürün maliyetine yansır), sipariş yönetimi, slicer (.gcode/.3mf) ile otomatik ürün doldurma.
 
 Detay için `ROADMAP.md`.
