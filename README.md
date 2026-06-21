@@ -97,4 +97,14 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 > **Güvenlik notu:** PIN yalnızca arayüzü kilitler (casual koruma). `firestore.rules` hâlâ açık —
 > gerçek koruma için Firebase Auth + auth gerektiren kurallar eklenmeli.
 
+- **Faz 7 (tamamlandı):** Menü sadeleşti → sıra: **Makineler · Stok(Filament) · Ürünler · Satış · Rapor**.
+  Pano/İşler/Siparişler kaldırıldı.
+  - **Makineler:** kutucukta canlı baskı durumu + bitiş saati + kalan süre + filament; kutucuğa
+    dokun → **Baskı başlat / bitti / iptal / geçmiş baskılar**. Baskı bitince ürün başı maliyet
+    ve toplam üretilen adet otomatik Ürünler'e işlenir.
+  - **Ürünler:** karta dokun → stok, maliyet kırılımı, stoktan üretilebilir adet, **hangi
+    mekanlarda kaç adet**, karlılık.
+  - **Yerler & Cari:** her teslimatta **biz kaça verdik / pazarlamacı kaça sattı / hangi
+    pazarlamacı** + yere özel pazarlamacı istatistiği.
+
 Detay için `ROADMAP.md`.
