@@ -139,6 +139,21 @@ function toInput(d) { // Date/ISO -> "YYYY-MM-DDTHH:MM"
     "T" + p(dt.getHours()) + ":" + p(dt.getMinutes());
 }
 
+// Basit (kriptografik olmayan) hash — UI şifre kapısı için
+function hashPin(s) {
+  let h = 5381; const str = String(s);
+  for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+function dosyaIndir(adi, metin) {
+  const b = new Blob([metin], { type:"application/json" });
+  const u = URL.createObjectURL(b);
+  const a = document.createElement("a");
+  a.href = u; a.download = adi; a.click();
+  URL.revokeObjectURL(u);
+}
+const ara = (metin, q) => String(metin || "").toLocaleLowerCase("tr").includes(q.toLocaleLowerCase("tr"));
+
 /* ============================================================
    MakerWorld linkinden ad çıkar
    .../models/629500-articulated-slug -> "Articulated Slug"
@@ -603,14 +618,18 @@ function MakineModal({ kayit, isler, onKapat }) {
    ============================================================ */
 function UrunlerTab({ urunler, filamentler, ayar }) {
   const [edit, setEdit] = useState(null);
+  const [q, setQ] = useState("");
   const bos = { ad:"", renk:"", gram:"", sureDk:"", maliyet:"", fiyat:"", filamentId:"", makerworldUrl:"", not:"" };
   const filById = Object.fromEntries((filamentler||[]).map(f => [f.id, f]));
+  const liste = urunler.filter(u => !q || ara(u.ad, q) || ara(u.renk, q));
   return h("div", { style:{ marginTop:16 } },
-    h("button", { style:{ ...S.btn("primary"), marginBottom:14 }, onClick:()=>setEdit(bos) }, "+ Ürün"),
-    !urunler.length
-      ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Ürün yok.")
+    h("div", { style:{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" } },
+      h("button", { style:S.btn("primary"), onClick:()=>setEdit(bos) }, "+ Ürün"),
+      h("input", { style:{ ...S.input, flex:"1 1 160px", maxWidth:280 }, value:q, onChange:e=>setQ(e.target.value), placeholder:"🔎 Ürün ara…" })),
+    !liste.length
+      ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, urunler.length ? "Eşleşme yok." : "Ürün yok.")
       : h("div", { style:{ ...S.grid, gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))" } },
-          urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(u => {
+          liste.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(u => {
             const mal = urunMaliyet(u, filById, ayar);
             const kar = num(u.fiyat) - mal.toplam;
             const karY = mal.toplam ? Math.round(kar / mal.toplam * 100) : null;
@@ -805,6 +824,8 @@ function YerlerTab({ yerler, teslimatlar, cari, urunler, pazarlamacilar }) {
   const [teslimat, setTeslimat] = useState(null);
   const [tahsilat, setTahsilat] = useState(null);
   const [acik, setAcik] = useState({});
+  const [q, setQ] = useState("");
+  const yerListe = yerler.filter(y => !q || ara(y.ad, q) || ara(y.yetkili, q) || ara(y.bolge, q));
 
   const ozetler = useMemo(() => {
     const m = {};
@@ -842,11 +863,13 @@ function YerlerTab({ yerler, teslimatlar, cari, urunler, pazarlamacilar }) {
       h("div", null, h("div", { style:S.label }, "Konsinyede Kalan"),
         h("div", { style:{ fontSize:22, fontWeight:800, color:C.mor } }, toplamKonsinye + " adet"))
     ),
-    h("button", { style:{ ...S.btn("primary"), marginBottom:14 }, onClick:()=>setYerEdit({ ad:"", yetkili:"", telefon:"", adres:"", not:"" }) }, "+ Yer"),
-    !yerler.length
-      ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Henüz yer yok. Ürün verdiğin dükkân/bayi ekle.")
+    h("div", { style:{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" } },
+      h("button", { style:S.btn("primary"), onClick:()=>setYerEdit({ ad:"", yetkili:"", telefon:"", bolge:"", adres:"", not:"" }) }, "+ Yer"),
+      h("input", { style:{ ...S.input, flex:"1 1 160px", maxWidth:280 }, value:q, onChange:e=>setQ(e.target.value), placeholder:"🔎 Yer ara…" })),
+    !yerListe.length
+      ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, yerler.length ? "Eşleşme yok." : "Henüz yer yok. Ürün verdiğin dükkân/bayi ekle.")
       : h("div", { style:S.grid },
-          yerler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(y => {
+          yerListe.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(y => {
             const o = ozetler[y.id] || {};
             const tList = teslByYer[y.id] || [];
             const cList = cariByYer[y.id] || [];
@@ -1340,13 +1363,15 @@ function SiparisTab({ makineler, urunler, siparisler, filamentler }) {
   const [filtre, setFiltre] = useState("aktif");
   const [edit, setEdit] = useState(null);
   const [is, setIs] = useState(null);
+  const [q, setQ] = useState("");
 
   const liste = useMemo(() => {
     let l = siparisler.slice().sort((a,b)=>new Date(a.teslimTarihi||a.tarih) - new Date(b.teslimTarihi||b.tarih));
     if (filtre === "aktif") l = l.filter(s => s.durum !== "teslim" && s.durum !== "iptal");
     else if (filtre !== "hepsi") l = l.filter(s => s.durum === filtre);
+    if (q) l = l.filter(s => ara(s.musteri, q) || ara(s.urunAd, q) || ara(s.telefon, q));
     return l;
-  }, [siparisler, filtre]);
+  }, [siparisler, filtre, q]);
 
   const sira = ["beklemede","uretimde","hazir","teslim"];
   async function ilerlet(s) {
@@ -1364,7 +1389,7 @@ function SiparisTab({ makineler, urunler, siparisler, filamentler }) {
   return h("div", { style:{ marginTop:16 } },
     h("div", { style:{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap", alignItems:"center" } },
       h("button", { style:S.btn("primary"), onClick:()=>setEdit({ musteri:"", telefon:"", urunId:"", adet:1, birimFiyat:"", teslimTarihi:toInput(Date.now()), durum:"beklemede", not:"" }) }, "+ Sipariş"),
-      h("div", { style:{ flex:1 } }),
+      h("input", { style:{ ...S.input, flex:"1 1 140px", maxWidth:240 }, value:q, onChange:e=>setQ(e.target.value), placeholder:"🔎 Müşteri/ürün…" }),
       filtreler.map(([k,ad]) => h("button", { key:k, onClick:()=>setFiltre(k),
         style:{ ...S.ibtn, background: filtre===k?C.acc:C.panel2, color: filtre===k?"#fff":C.txt, borderColor: filtre===k?C.acc:C.line } }, ad))
     ),
@@ -1450,25 +1475,63 @@ function SiparisModal({ kayit, urunler, onKapat }) {
 /* ============================================================
    AYARLAR — elektrik (kWh fiyatı + varsayılan makine gücü)
    ============================================================ */
-function AyarModal({ ayar, onKapat }) {
-  const [f, setF] = useState({ kwhFiyat: ayar.kwhFiyat ?? "", varsayilanWatt: ayar.varsayilanWatt ?? 100 });
+function KilitEkrani({ ayar, onAc }) {
+  const [pin, setPin] = useState("");
+  function dene(e) { if (e) e.preventDefault(); if (hashPin(pin) === ayar.pinHash) onAc(); else { alert("Yanlış PIN."); setPin(""); } }
+  return h("div", { style:{ position:"fixed", inset:0, background:C.bg, display:"flex", alignItems:"center", justifyContent:"center", zIndex:100, padding:20 } },
+    h("form", { onSubmit:dene, style:{ ...S.card, width:"100%", maxWidth:320, textAlign:"center" } },
+      h("div", { style:{ fontSize:30, marginBottom:4 } }, "🔒"),
+      h("div", { style:{ fontWeight:800, fontSize:18, marginBottom:14 } }, "Tikita kilitli"),
+      h("input", { type:"password", inputMode:"numeric", autoFocus:true, value:pin, onChange:e=>setPin(e.target.value),
+        style:{ ...S.input, textAlign:"center", fontSize:20, letterSpacing:4, marginBottom:12 }, placeholder:"PIN" }),
+      h("button", { type:"submit", style:{ ...S.btn("primary"), width:"100%" } }, "Gir")
+    )
+  );
+}
+
+function AyarModal({ ayar, onKapat, onYedekIndir, onYedekYukle }) {
+  const [f, setF] = useState({ kwhFiyat: ayar.kwhFiyat ?? "", varsayilanWatt: ayar.varsayilanWatt ?? 100, pin:"" });
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
   async function kaydet() {
-    await save("meta", { id:"app", kwhFiyat:num(f.kwhFiyat), varsayilanWatt:num(f.varsayilanWatt) });
+    const veri = { id:"app", kwhFiyat:num(f.kwhFiyat), varsayilanWatt:num(f.varsayilanWatt) };
+    if (f.pin !== "") veri.pinHash = hashPin(f.pin); // boşsa dokunma
+    await save("meta", veri);
+    onKapat();
+  }
+  async function sifreKaldir() {
+    if (!confirm("Şifre kapısı kaldırılsın mı?")) return;
+    await save("meta", { id:"app", pinHash:"" });
     onKapat();
   }
   return h(Modal, {
-    baslik: "Ayarlar — Elektrik", onKapat,
+    baslik: "Ayarlar", onKapat,
     alt: h(React.Fragment, null,
       h("button", { style:{ ...S.btn("primary"), flex:1 }, onClick:kaydet }, "Kaydet"),
       h("button", { style:S.btn(), onClick:onKapat }, "Vazgeç"))
   },
-    h(Field, { label:"Elektrik (₺ / kWh)" },
-      h("input", { type:"number", style:S.input, value:f.kwhFiyat, onChange:e=>set("kwhFiyat", e.target.value), placeholder:"örn. 2.50" })),
-    h(Field, { label:"Varsayılan makine gücü (Watt)" },
-      h("input", { type:"number", style:S.input, value:f.varsayilanWatt, onChange:e=>set("varsayilanWatt", e.target.value), placeholder:"Bambu A1 ~100" })),
-    h("div", { style:{ fontSize:12, color:C.mut } },
-      "Ürün elektrik maliyeti = (süre/60) × (Watt/1000) × kWh fiyatı. Ürün maliyetine otomatik yansır.")
+    h("div", { style:{ ...S.label, marginBottom:8 } }, "Elektrik"),
+    h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      h(Field, { label:"₺ / kWh" },
+        h("input", { type:"number", style:S.input, value:f.kwhFiyat, onChange:e=>set("kwhFiyat", e.target.value), placeholder:"2.50" })),
+      h(Field, { label:"Varsayılan güç (Watt)" },
+        h("input", { type:"number", style:S.input, value:f.varsayilanWatt, onChange:e=>set("varsayilanWatt", e.target.value), placeholder:"~100" }))),
+    h("div", { style:{ fontSize:12, color:C.mut, marginBottom:14 } },
+      "Ürün elektrik maliyeti = (süre/60) × (Watt/1000) × kWh. Ürün maliyetine yansır."),
+
+    h("div", { style:{ ...S.label, margin:"4px 0 8px" } }, "Güvenlik"),
+    h(Field, { label: (ayar.pinHash ? "Yeni PIN (değiştir)" : "PIN belirle") },
+      h("input", { type:"password", inputMode:"numeric", style:S.input, value:f.pin, onChange:e=>set("pin", e.target.value), placeholder:"örn. 4-6 hane" })),
+    ayar.pinHash ? h("button", { style:{ ...S.ibtn, color:C.bad, borderColor:C.bad, marginBottom:14 }, type:"button", onClick:sifreKaldir }, "Şifreyi kaldır") : null,
+    h("div", { style:{ fontSize:11, color:C.mut, marginBottom:14 } },
+      "Not: Bu PIN sadece arayüzü kilitler (casual koruma). Tam güvenlik için Firebase Auth gerekir."),
+
+    h("div", { style:{ ...S.label, margin:"4px 0 8px" } }, "Yedekleme"),
+    h("div", { style:{ display:"flex", gap:8, flexWrap:"wrap" } },
+      h("button", { style:S.btn(), type:"button", onClick:onYedekIndir }, "⬇ Yedek indir (JSON)"),
+      h("label", { style:{ ...S.btn(), cursor:"pointer" } }, "⬆ Yedeği yükle",
+        h("input", { type:"file", accept:".json", style:{ display:"none" }, onChange:e=>{ if(e.target.files[0]){ onYedekYukle(e.target.files[0]); onKapat(); } } }))),
+    h("div", { style:{ fontSize:11, color:C.mut, marginTop:8 } },
+      "Yükleme mevcut kayıtların üzerine yazar (aynı id'ler güncellenir).")
   );
 }
 
@@ -1576,6 +1639,7 @@ function App() {
   const [now, setNow] = useState(Date.now());
   const [tema, setTema] = useState(() => localStorage.getItem("tikita-tema") || "dark");
   const [ayarAcik, setAyarAcik] = useState(false);
+  const [acik, setAcik] = useState(() => sessionStorage.getItem("tikita-acik") === "1");
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
@@ -1594,6 +1658,23 @@ function App() {
   const pazarlamacilar = useColl("pazarlamacilar");
   const meta        = useColl("meta");
   const ayar        = meta.find(m => m.id === "app") || {};
+
+  const KOLEKSIYONLAR = { makineler, urunler, isler, yerler, teslimatlar, cari_hareket:cari, filamentler, siparisler, pazarlamacilar, meta };
+  function yedekIndir() {
+    dosyaIndir("tikita-yedek-" + new Date().toISOString().slice(0,10) + ".json", JSON.stringify(KOLEKSIYONLAR, null, 2));
+  }
+  async function yedekYukle(file) {
+    if (!confirm("Yedek mevcut kayıtların üzerine yazılacak. Devam?")) return;
+    try {
+      const data = JSON.parse(await file.text());
+      let n = 0;
+      for (const [coll, rows] of Object.entries(data)) {
+        if (!Array.isArray(rows)) continue;
+        for (const row of rows) { if (row && row.id) { await save(coll, row); n++; } }
+      }
+      alert(n + " kayıt geri yüklendi.");
+    } catch (e) { alert("Yedek okunamadı: " + e.message); }
+  }
 
   // Makineleri ilk açılışta otomatik ekle (tek seferlik — meta bayrağı ile)
   useEffect(() => {
@@ -1618,6 +1699,11 @@ function App() {
     { k:"satis",   ad:"Satış",   ic:"🏬", alt:[["yerler","Yerler & Cari"],["pazarlamaci","Pazarlamacı"]] },
   ];
   const aktifGrup = GRUPLAR.find(g => g.alt.some(([k]) => k === tab)) || GRUPLAR[0];
+
+  // Şifre kapısı — PIN tanımlıysa ve oturum açık değilse kilit ekranı
+  if (ayar.pinHash && !acik) {
+    return h(KilitEkrani, { ayar, onAc: () => { sessionStorage.setItem("tikita-acik", "1"); setAcik(true); } });
+  }
 
   return h("div", null,
     h("div", { style:S.top },
@@ -1659,7 +1745,7 @@ function App() {
       tab==="yerler"    && h(YerlerTab,    { yerler, teslimatlar, cari, urunler, pazarlamacilar }),
       tab==="pazarlamaci" && h(PazarlamaciTab, { pazarlamacilar, teslimatlar, yerler })
     ),
-    ayarAcik && h(AyarModal, { ayar, onKapat:()=>setAyarAcik(false) })
+    ayarAcik && h(AyarModal, { ayar, onKapat:()=>setAyarAcik(false), onYedekIndir:yedekIndir, onYedekYukle:yedekYukle })
   );
 }
 
