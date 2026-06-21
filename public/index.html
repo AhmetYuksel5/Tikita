@@ -9,13 +9,13 @@
   :root, :root[data-theme="dark"]{
     --bg:#0b1020; --panel:#151b2e; --panel2:#1c2438; --line:#27304a;
     --txt:#e8edf7; --mut:#94a3b8; --acc:#6366f1; --acc2:#22d3ee;
-    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --chip:#243049;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
     --top-bg:rgba(11,16,32,.9); --shadow:rgba(0,0,0,.35);
   }
   :root[data-theme="light"]{
     --bg:#eef2f7; --panel:#ffffff; --panel2:#f4f7fb; --line:#dbe3ec;
     --txt:#0f172a; --mut:#64748b; --acc:#5b5fe0; --acc2:#0891b2;
-    --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --chip:#eef2ff;
+    --ok:#16a34a; --warn:#d97706; --bad:#dc2626;
     --top-bg:rgba(238,242,247,.9); --shadow:rgba(15,23,42,.10);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -224,7 +224,7 @@ async function parseSlicer(file) {
 const C = {
   bg:"var(--bg)", panel:"var(--panel)", panel2:"var(--panel2)", line:"var(--line)",
   txt:"var(--txt)", mut:"var(--mut)", acc:"var(--acc)", acc2:"var(--acc2)",
-  ok:"var(--ok)", warn:"var(--warn)", bad:"var(--bad)", chip:"var(--chip)",
+  ok:"var(--ok)", warn:"var(--warn)", bad:"var(--bad)",
   mor:"#8b5cf6",
 };
 const soft = c => "color-mix(in srgb, " + c + " 16%, transparent)";
@@ -418,7 +418,7 @@ function IsModal({ kayit, makineler, urunler, filamentler, onKapat }) {
 /* ============================================================
    PANO — canlı makine kartları
    ============================================================ */
-function PanoTab({ makineler, urunler, isler, filamentler, now }) {
+function PanoTab({ makineler, urunler, isler, filamentler, siparisler, yerler, teslimatlar, cari, now, onGit }) {
   const [baslat, setBaslat] = useState(null);
   const isByMakine = useMemo(() => {
     const m = {};
@@ -426,13 +426,32 @@ function PanoTab({ makineler, urunler, isler, filamentler, now }) {
     return m;
   }, [isler]);
 
+  const uyarilar = [];
+  const kf = (filamentler||[]).filter(f => num(f.kalanGram) <= num(f.kritikGram)).length;
+  if (kf) uyarilar.push({ ic:"🧵", ad: kf + " filament kritik", c:C.bad, git:"stok" });
+  const bm = (makineler||[]).filter(m => bakimGerekli(m, isler)).length;
+  if (bm) uyarilar.push({ ic:"🔧", ad: bm + " makine bakım", c:C.warn, git:"makineler" });
+  const gs = (siparisler||[]).filter(s => s.teslimTarihi && new Date(s.teslimTarihi) < new Date() && s.durum!=="teslim" && s.durum!=="iptal").length;
+  if (gs) uyarilar.push({ ic:"📅", ad: gs + " sipariş gecikti", c:C.bad, git:"siparis" });
+  const aa = (yerler||[]).reduce((s,y)=> s + Math.max(0, cariOzet(y.id, teslimatlar||[], cari||[]).bakiye), 0);
+  if (aa > 0) uyarilar.push({ ic:"💰", ad:"Açık alacak " + para(aa), c:C.warn, git:"yerler" });
+
+  const uyariSerit = uyarilar.length
+    ? h("div", { style:{ display:"flex", gap:8, flexWrap:"wrap", marginTop:16 } },
+        uyarilar.map((u,i) => h("button", { key:i, onClick:()=>onGit && onGit(u.git),
+          style:{ ...S.badge, cursor:"pointer", padding:"7px 12px", fontSize:13,
+            background:soft(u.c), color:u.c, border:"1px solid "+u.c } }, u.ic + " " + u.ad + " ›")))
+    : h("div", { style:{ marginTop:16, fontSize:13, color:C.ok, fontWeight:600 } }, "✓ Acil bir durum yok.");
+
   if (!makineler.length) {
-    return h("div", { style:{ ...S.card, textAlign:"center", color:C.mut, marginTop:16 } },
-      "Makineler yükleniyor… (ilk açılışta otomatik eklenir)");
+    return h("div", null, uyariSerit,
+      h("div", { style:{ ...S.card, textAlign:"center", color:C.mut, marginTop:14 } },
+        "Makineler yükleniyor… (ilk açılışta otomatik eklenir)"));
   }
 
   return h("div", null,
-    h("div", { style:{ ...S.grid, gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", marginTop:16 } },
+    uyariSerit,
+    h("div", { style:{ ...S.grid, gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", marginTop:14 } },
       makineler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(m => {
         const is = isByMakine[m.id];
         let govde;
@@ -1629,7 +1648,7 @@ function App() {
     h("div", { style:S.wrap },
       !CONFIG_OK && h("div", { style:{ ...S.card, background:soft(C.warn), borderColor:C.warn, marginTop:16 } },
         h("b", null, "⚠ Firebase config eksik."), " cfg nesnesindeki alanları doldur."),
-      tab==="pano"      && h(PanoTab,      { makineler, urunler, isler, filamentler, now }),
+      tab==="pano"      && h(PanoTab,      { makineler, urunler, isler, filamentler, siparisler, yerler, teslimatlar, cari, now, onGit:setTab }),
       tab==="rapor"     && h(RaporTab,     { isler, teslimatlar, cari, urunler, yerler, makineler }),
       tab==="akis"      && h(AkisTab,      { isler, teslimatlar, urunler }),
       tab==="makineler" && h(MakinelerTab, { makineler, isler, now }),
