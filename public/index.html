@@ -1078,7 +1078,8 @@ function TeslimatModal({ kayit, yerler, urunler, pazarlamacilar, onKapat }) {
             TESLIMAT_TUR[k].ad)))),
     h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
       h(Field, { label:"Adet" }, h("input", { type:"number", min:1, style:S.input, value:f.adet, onChange:e=>set("adet", e.target.value) })),
-      h(Field, { label:"Birim fiyat (₺)" }, h("input", { type:"number", min:0, style:S.input, value:f.birimFiyat, onChange:e=>set("birimFiyat", e.target.value) }))
+      h(Field, { label: f.pazarlamaciId ? "Pazarlamacının bizden aldığı (₺)" : "Birim fiyat (₺)" },
+        h("input", { type:"number", min:0, style:S.input, value:f.birimFiyat, onChange:e=>set("birimFiyat", e.target.value) }))
     ),
     konsinye && h("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
       h(Field, { label:"Satılan adet" }, h("input", { type:"number", min:0, style:S.input, value:f.satilan, onChange:e=>set("satilan", e.target.value) })),
@@ -1089,9 +1090,11 @@ function TeslimatModal({ kayit, yerler, urunler, pazarlamacilar, onKapat }) {
         h("select", { style:S.input, value:f.pazarlamaciId, onChange:e=>set("pazarlamaciId", e.target.value) },
           h("option", { value:"" }, "— yok —"),
           (pazarlamacilar||[]).map(p => h("option", { key:p.id, value:p.id }, p.ad)))),
-      h(Field, { label:"Pazarlamacı satış fiyatı (₺)" },
-        h("input", { type:"number", min:0, style:S.input, value:f.pazarlamaciFiyat, onChange:e=>set("pazarlamaciFiyat", e.target.value), placeholder:"boşsa birim fiyat" }))
+      h(Field, { label:"Müşteriye sattığı fiyat (₺)" },
+        h("input", { type:"number", min:0, style:S.input, value:f.pazarlamaciFiyat, onChange:e=>set("pazarlamaciFiyat", e.target.value), placeholder:"boşsa = aldığı fiyat" }))
     ),
+    f.pazarlamaciId && f.pazarlamaciFiyat !== "" && h("div", { style:{ marginTop:-4, marginBottom:12, fontSize:12, color:C.mor, fontWeight:700 } },
+      "Pazarlamacı kazancı: " + para((num(f.pazarlamaciFiyat) - num(f.birimFiyat))) + "/adet"),
     h("div", { style:{ ...S.card, background:C.panel2, padding:"10px 12px", marginBottom:12, display:"flex", justifyContent:"space-between", fontWeight:700 } },
       h("span", { style:{ color:C.mut } }, konsinye ? "Toplam mal (bilgi)" : "Tutar"), h("span", null, para(toplam))),
     konsinye && h("div", { style:{ marginTop:-4, marginBottom:12, fontSize:12, color:C.mut } },
@@ -1473,16 +1476,22 @@ function AyarModal({ ayar, onKapat, onYedekIndir, onYedekYukle }) {
    PAZARLAMACI — satış istatistikleri + harita / bölge
    ============================================================ */
 function pazStats(pid, teslimatlar, yerById) {
-  let adet = 0, ciro = 0; const yerSet = new Set(); const bolge = {};
+  let adet = 0, bizCiro = 0, pazCiro = 0;
+  const yerSet = new Set(); const bolge = {}; const urun = {};
   teslimatlar.filter(t => t.pazarlamaciId === pid).forEach(t => {
     const sat = t.tur === "konsinye" ? num(t.satilan) : num(t.adet);
-    const fiyat = t.pazarlamaciFiyat != null ? num(t.pazarlamaciFiyat) : num(t.birimFiyat);
-    adet += sat; ciro += sat * fiyat;
+    if (!sat) return;
+    const alis = num(t.birimFiyat);                                               // pazarlamacının bizden aldığı
+    const satis = t.pazarlamaciFiyat != null ? num(t.pazarlamaciFiyat) : alis;    // müşteriye verdiği
+    adet += sat; bizCiro += sat * alis; pazCiro += sat * satis;
     if (t.yerId) yerSet.add(t.yerId);
     const b = (yerById[t.yerId] && yerById[t.yerId].bolge) || "(bölge yok)";
     bolge[b] = (bolge[b] || 0) + sat;
+    const u = urun[t.urunId] || (urun[t.urunId] = { ad:t.urunAd||"—", adet:0, biz:0, paz:0 });
+    u.adet += sat; u.biz += sat * alis; u.paz += sat * satis;
   });
-  return { adet, ciro, yerSayisi: yerSet.size, bolge };
+  return { adet, bizCiro, pazCiro, kazanc: pazCiro - bizCiro, yerSayisi: yerSet.size, bolge,
+           urunler: Object.values(urun).sort((a,b)=>(b.paz-b.biz)-(a.paz-a.biz)) };
 }
 
 function Harita({ yerler }) {
@@ -1506,6 +1515,11 @@ function PazarlamaciTab({ pazarlamacilar, teslimatlar, yerler }) {
   const yerById = Object.fromEntries(yerler.map(y => [y.id, y]));
   const konumlu = yerler.filter(y => y.lat != null && y.lng != null && (num(y.lat) || num(y.lng)));
 
+  const statlar = pazarlamacilar.map(p => ({ p, s: pazStats(p.id, teslimatlar, yerById) }));
+  const topBiz = statlar.reduce((a,x)=>a+x.s.bizCiro,0);
+  const topPaz = statlar.reduce((a,x)=>a+x.s.pazCiro,0);
+  const satir = (et, deg, renk) => h("span", null, et + ": ", h("b",{style:{color:renk||C.txt}}, deg));
+
   return h("div", { style:{ marginTop:16 } },
     h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 } },
       h("div", { style:{ ...S.label } }, "🗺 Yer haritası"),
@@ -1514,22 +1528,41 @@ function PazarlamaciTab({ pazarlamacilar, teslimatlar, yerler }) {
       ? h(Harita, { yerler: konumlu })
       : h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } },
           "Haritada göstermek için Yerler'de enlem/boylam gir (Google Maps → sağ tık → koordinat)."),
+    pazarlamacilar.length > 0 && h("div", { style:{ ...S.card, marginTop:14, display:"flex", gap:24, flexWrap:"wrap" } },
+      h("div", null, h("div", { style:S.label }, "Pazarlamacılar bizden aldı"),
+        h("div", { style:{ fontSize:20, fontWeight:800 } }, para(topBiz))),
+      h("div", null, h("div", { style:S.label }, "Müşteriye sattı"),
+        h("div", { style:{ fontSize:20, fontWeight:800 } }, para(topPaz))),
+      h("div", null, h("div", { style:S.label }, "Pazarlamacı kazancı (toplam)"),
+        h("div", { style:{ fontSize:20, fontWeight:800, color:C.mor } }, para(topPaz - topBiz)))),
     h("div", { style:{ ...S.grid, marginTop:14 } },
       !pazarlamacilar.length
         ? h("div", { style:{ ...S.card, color:C.mut, textAlign:"center" } }, "Pazarlamacı yok.")
-        : pazarlamacilar.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(p => {
-            const s = pazStats(p.id, teslimatlar, yerById);
+        : statlar.slice().sort((a,b)=>b.s.kazanc - a.s.kazanc).map(({ p, s }) => {
             const bolgeler = Object.entries(s.bolge).sort((a,b)=>b[1]-a[1]);
+            const marj = s.bizCiro ? Math.round(s.kazanc / s.bizCiro * 100) : null;
             return h("div", { key:p.id, style:S.card },
               h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" } },
                 h("div", null,
                   h("div", { style:{ fontWeight:800, fontSize:17 } }, p.ad),
                   h("div", { style:{ fontSize:13, color:C.mut } }, [p.telefon, p.bolge].filter(Boolean).join(" · ") || "—")),
                 h("button", { style:S.ibtn, onClick:()=>setEdit(p) }, "Düzenle")),
-              h("div", { style:{ display:"flex", gap:18, flexWrap:"wrap", margin:"10px 0", fontSize:13, color:C.mut } },
-                h("span", null, "Satış: ", h("b",{style:{color:C.txt}}, s.adet + " adet")),
-                h("span", null, "Ciro: ", h("b",{style:{color:C.ok}}, para(s.ciro))),
-                h("span", null, "Gittiği yer: ", h("b",{style:{color:C.txt}}, s.yerSayisi))),
+              h("div", { style:{ display:"flex", gap:18, flexWrap:"wrap", margin:"10px 0 8px", fontSize:13, color:C.mut } },
+                satir("Satış", s.adet + " adet"),
+                satir("Bizden aldı", para(s.bizCiro)),
+                satir("Müşteriye sattı", para(s.pazCiro)),
+                satir("Gittiği yer", s.yerSayisi)),
+              h("div", { style:{ background:soft(C.mor), border:"1px solid "+C.mor, borderRadius:10,
+                padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 } },
+                h("span", { style:{ fontWeight:700, color:C.mor } }, "💰 Pazarlamacı kazancı"),
+                h("span", { style:{ fontWeight:800, color:C.mor } }, para(s.kazanc) + (marj!=null ? "  (%"+marj+")" : ""))),
+              s.urunler.length > 0 && h("div", { style:{ borderTop:"1px solid "+C.line, paddingTop:8, marginBottom:8 } },
+                h("div", { style:{ ...S.label, marginBottom:6 } }, "Ürün bazında (aldığı → sattığı → kazanç)"),
+                s.urunler.map((u,i) => h("div", { key:i, style:{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"2px 0", gap:8 } },
+                  h("span", null, u.ad + " ×" + u.adet),
+                  h("span", { style:{ color:C.mut } },
+                    para(u.adet?u.biz/u.adet:0) + " → " + para(u.adet?u.paz/u.adet:0) + " · ",
+                    h("b",{style:{color:C.mor}}, "+"+para(u.paz-u.biz)))))),
               bolgeler.length > 0 && h("div", { style:{ borderTop:"1px solid "+C.line, paddingTop:8 } },
                 h("div", { style:{ ...S.label, marginBottom:6 } }, "Bölge dağılımı"),
                 bolgeler.map(([b,adet]) => h("div", { key:b, style:{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"2px 0" } },
