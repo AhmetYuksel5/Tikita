@@ -91,5 +91,10 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
   elektrik maliyeti (ürün maliyetine yansır), sipariş yönetimi, slicer (.gcode/.3mf) ile otomatik ürün doldurma.
 - **Faz 5 (tamamlandı):** İşe opsiyonel filament; filament kod no; Akış detay (tıkla→liste);
   teslimatta pazarlamacı + satış fiyatı; Pazarlamacı sekmesi (istatistik + bölge + Leaflet harita).
+- **Faz 6 (tamamlandı):** Gruplu kompakt menü; Pano uyarı şeridi; PIN şifre kapısı;
+  tek tık JSON yedek/geri yükleme (⚙ Ayarlar); ürün/yer/sipariş arama.
+
+> **Güvenlik notu:** PIN yalnızca arayüzü kilitler (casual koruma). `firestore.rules` hâlâ açık —
+> gerçek koruma için Firebase Auth + auth gerektiren kurallar eklenmeli.
 
 Detay için `ROADMAP.md`.
