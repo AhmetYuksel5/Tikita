@@ -62,6 +62,7 @@ const C = {
   bg:"#eef2f7", card:"#ffffff", line:"#dbe3ec", navyHdr:"#22305a",
   yesil:"#b6e7bd", yesilB:"#4caf50", yesilT:"#14532d",
   planBg:"#e4f6e8", planB:"#a9d6b0", planT:"#3f7a4a",
+  onayBg:"#fdecc4", onayB:"#e0a200", onayT:"#7a5600",
   bitBg:"#eef1f5", bitB:"#cdd6e1", bitT:"#94a3b8",
   kirmizi:"#f6a99f", kirmiziB:"#ef5350", kirmiziT:"#7f1d1d",
   mavi:"#3b82f6", sari:"#f5c518",
@@ -140,6 +141,12 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     h(Field,{label:"Makine"},
       h("select",{style:S.input,value:f.makineId,onChange:e=>set("makineId",e.target.value)},
         makineler.map(m=>h("option",{key:m.id,value:m.id},m.ad)))),
+    !yeni && (kayit.basladi
+      ? h("div",{style:{background:C.yesil,border:"1px solid "+C.yesilB,borderRadius:10,padding:"8px 12px",
+          marginBottom:12,color:C.yesilT,fontWeight:700}}, "✓ Başladı: "+fmtTarihSaat(kayit.gercekBaslangic||kayit.baslangic))
+      : h("button",{type:"button",style:{...S.btn(),width:"100%",marginBottom:12,borderColor:C.onayB,color:C.onayT,fontWeight:700},
+          onClick:async()=>{ await save("plan",{id:kayit.id,basladi:true,gercekBaslangic:new Date().toISOString()}); onKapat(); }},
+          "▶ Baskıyı başlat (başladı onayı)")),
     yeni && onceki && !tekrar && h("button",{ type:"button", onClick:tekrarla,
       style:{...S.btn(), width:"100%", marginBottom:12, borderColor:C.navyHdr, color:C.navyHdr, fontWeight:700} },
       "↻ Bir öncekini tekrarla ("+num(onceki.adet)+" x "+onceki.ad+")"),
@@ -266,9 +273,20 @@ function App(){
   const px = toplamW / toplamMs;
 
   const mlist = makineler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
+  const makineById = Object.fromEntries(mlist.map(m=>[m.id,m]));
   const timelines = useMemo(()=>{
     const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id, plan, baslaMs, bitMs, now); }); return m;
   },[plan, makineler, baslaMs, bitMs, now]);
+
+  // baskı başlat onayı — zamanı gelen planlı işler otomatik başlamaz, onay ister
+  async function baslat(p){
+    if(!confirm((num(p.adet)?num(p.adet)+" x ":"")+p.ad+" baskısı başladı mı?\n(Onaylayınca 'çalışıyor' görünecek.)")) return;
+    await save("plan",{ id:p.id, basladi:true, gercekBaslangic:new Date().toISOString() });
+  }
+  const onayBekleyen = plan
+    .filter(p=>!p.basladi && new Date(p.baslangic).getTime()<=now
+      && new Date(p.baslangic).getTime()+num(p.sureDk)*60000 > now)   // zamanı geldi, penceresi sürüyor
+    .sort((a,b)=>new Date(a.baslangic)-new Date(b.baslangic));
 
   // boş kalacak makineler — art arda planlı işlerde SON bitiş saatini baz al (makine başına tek satır)
   const bosListe = [];
@@ -318,6 +336,18 @@ function App(){
         h("button",{style:S.btn(),onClick:()=>setMakineAcik(true)},"⚙ Makineler"),
         h("button",{style:S.btn("p"),onClick:()=>setIsModal({})},"+ Baskı Planla"))),
 
+    // onay bekleyen baskılar
+    onayBekleyen.length>0 && h("div",{style:{...S.card,marginBottom:14,borderColor:C.onayB,
+      background:C.onayBg,padding:"10px 14px"}},
+      h("div",{style:{fontWeight:800,color:C.onayT,marginBottom:8}}, "⏰ Onay bekleyen baskı ("+onayBekleyen.length+") — zamanı geldi, başladı mı?"),
+      h("div",{style:{display:"flex",flexWrap:"wrap",gap:8}},
+        onayBekleyen.map(p=>h("div",{key:p.id,style:{display:"flex",alignItems:"center",gap:8,background:"#fff",
+          border:"1px solid "+C.onayB,borderRadius:10,padding:"6px 8px 6px 12px"}},
+          h("span",{style:{fontSize:13}},
+            h("b",null,(makineById[p.makineId]||{}).ad||"?"), " · ", num(p.adet)+" x "+p.ad,
+            h("span",{style:{color:C.mut}}, " · "+fmtSaat(p.baslangic))),
+          h("button",{style:{...S.btn("p"),padding:"6px 12px"},onClick:()=>baslat(p)},"▶ Başlat")))) ),
+
     // gantt kartı
     h("div",{style:{...S.card,overflow:"hidden",marginBottom:16}},
       h("div",{style:{...S.hdr,borderRadius:0,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}},
@@ -325,6 +355,7 @@ function App(){
         h("div",{style:{display:"flex",gap:16,flexWrap:"wrap"}},
           h(Lejant,{renk:C.yesil,ad:"Çalışıyor"}),
           h(Lejant,{renk:C.planBg,ad:"Planlandı"}),
+          h(Lejant,{renk:C.onayBg,ad:"Onay bekliyor"}),
           h(Lejant,{renk:C.kirmizi,ad:"Boşta (gelecek)"}),
           h(Lejant,{renk:"#e3aba4",ad:"⚠ Kayıp zaman"}),
           h(Lejant,{renk:C.mavi,ad:"AMS'li iş"}),
@@ -382,12 +413,15 @@ function App(){
                   tl.js.map((x,i)=>{
                     const left=(Math.max(baslaMs,x.s)-baslaMs)*px, width=(Math.min(bitMs,x.e)-Math.max(baslaMs,x.s))*px;
                     if(width<3) return null;
-                    // durum: planlı (başlamadı) açık ton · aktif normal · bitmiş gri
-                    const dr = x.s>now ? {bg:C.planBg,bd:C.planB,tc:C.planT,dash:true}
-                             : x.e<=now ? {bg:C.bitBg,bd:C.bitB,tc:C.bitT}
-                             : {bg:C.yesil,bd:C.yesilB,tc:C.yesilT};
-                    return h("div",{key:"j"+i,onClick:()=>setIsModal(x.p),
-                      title:x.p.ad+" · "+(x.s>now?"planlandı":x.e<=now?"bitti":"çalışıyor")+" · bitiş "+fmtTarihSaat(x.e),
+                    // durum: başladı→çalışıyor/bitti · başlamadı: planlı(açık)/onay bekliyor(amber)/kaçırıldı
+                    const basladi = !!x.p.basladi;
+                    let dr, durStr;
+                    if(basladi){ if(x.e<=now){ dr={bg:C.bitBg,bd:C.bitB,tc:C.bitT}; durStr="bitti"; } else { dr={bg:C.yesil,bd:C.yesilB,tc:C.yesilT}; durStr="çalışıyor"; } }
+                    else if(x.s>now){ dr={bg:C.planBg,bd:C.planB,tc:C.planT,dash:true}; durStr="planlandı"; }
+                    else if(x.e>now){ dr={bg:C.onayBg,bd:C.onayB,tc:C.onayT,onay:true}; durStr="onay bekliyor"; }
+                    else { dr={bg:C.bitBg,bd:C.bitB,tc:C.bitT,dash:true}; durStr="başlamadı"; }
+                    return h("div",{key:"j"+i,onClick:()=> dr.onay ? baslat(x.p) : setIsModal(x.p),
+                      title:x.p.ad+" · "+durStr+" · bitiş "+fmtTarihSaat(x.e),
                       style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
                         background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",
                         display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
@@ -395,7 +429,7 @@ function App(){
                       h("span",{style:{position:"absolute",top:4,right:5,width:8,height:8,borderRadius:8,background:x.p.ams?C.mavi:C.sari}}),
                       width>52 && h(React.Fragment,null,
                         h("div",null,num(x.p.adet)+" x "+x.p.ad),
-                        h("div",null,fmtTarihSaat(x.e))));
+                        h("div",null, dr.onay ? "▶ Başlasın mı?" : fmtTarihSaat(x.e))));
                   }),
                   // şimdi çizgisi
                   (now>=baslaMs&&now<=bitMs) && h("div",{style:{position:"absolute",left:(now-baslaMs)*px,top:0,bottom:0,width:2,background:C.navyHdr,opacity:.55}})
