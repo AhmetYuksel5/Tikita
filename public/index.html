@@ -61,6 +61,8 @@ function gunBasi(d){ const t=new Date(d); t.setHours(0,0,0,0); return t; }
 const C = {
   bg:"#eef2f7", card:"#ffffff", line:"#dbe3ec", navyHdr:"#22305a",
   yesil:"#b6e7bd", yesilB:"#4caf50", yesilT:"#14532d",
+  planBg:"#e4f6e8", planB:"#a9d6b0", planT:"#3f7a4a",
+  bitBg:"#eef1f5", bitB:"#cdd6e1", bitT:"#94a3b8",
   kirmizi:"#f6a99f", kirmiziB:"#ef5350", kirmiziT:"#7f1d1d",
   mavi:"#3b82f6", sari:"#f5c518",
 };
@@ -122,8 +124,11 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     if(!f.makineId) return alert("Makine seç.");
     if(!f.ad.trim()) return alert("İş/ürün adı gir.");
     if(!f.sureDk)   return alert("Süre gir (dk).");
-    await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
+    const sMs = new Date(f.baslangic).getTime();
+    const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
       baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), ams:!!f.ams, not:f.not });
+    // plan aksarsa sonraki işleri otomatik kaydır (çakışmayı önle)
+    await planKaydir(f.makineId, plan, { id, s:sMs, dk:num(f.sureDk) });
     onKapat();
   }
   const bitis = new Date(f.baslangic).getTime() + num(f.sureDk)*60000;
@@ -192,6 +197,20 @@ function MakineYonetim({ makineler, onKapat }){
 /* ============================================================
    GANTT — zaman çizelgesi hesapları
    ============================================================ */
+// Plan aksarsa: aynı makinedeki işleri başlangıç sırasına göre çakışmasız diz (yalnız ileri kaydır)
+async function planKaydir(makineId, plan, edited){
+  const arr = plan.filter(p=>p.makineId===makineId && p.id!==edited.id)
+    .map(p=>({ id:p.id, s:new Date(p.baslangic).getTime(), dk:num(p.sureDk) }));
+  arr.push({ id:edited.id, s:edited.s, dk:edited.dk });
+  arr.sort((a,b)=>a.s-b.s);
+  let prevEnd=null;
+  for(const j of arr){
+    let s=j.s;
+    if(prevEnd!=null && s<prevEnd) s=prevEnd;          // çakışıyorsa öncekinin bitişine çek
+    if(s!==j.s) await save("plan",{ id:j.id, baslangic:new Date(s).toISOString() });
+    prevEnd = s + j.dk*60000;
+  }
+}
 function tickStep(gunW){ // saat aralığı — zoom'a göre detay
   const slots = Math.max(1, Math.floor(gunW/36));
   for(const o of [1,2,3,4,6,8,12,24]){ if(24/o <= slots) return o; }
@@ -298,7 +317,8 @@ function App(){
       h("div",{style:{...S.hdr,borderRadius:0,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}},
         h("span",null,"📅 "+tarihAralik),
         h("div",{style:{display:"flex",gap:16,flexWrap:"wrap"}},
-          h(Lejant,{renk:C.yesil,ad:"Baskı Yapıyor"}),
+          h(Lejant,{renk:C.yesil,ad:"Çalışıyor"}),
+          h(Lejant,{renk:C.planBg,ad:"Planlandı"}),
           h(Lejant,{renk:C.kirmizi,ad:"Boşta"}),
           h(Lejant,{renk:C.mavi,ad:"AMS'li iş"}),
           h(Lejant,{renk:C.sari,ad:"AMS gerektirmeyen"}))),
@@ -342,12 +362,16 @@ function App(){
                   tl.js.map((x,i)=>{
                     const left=(Math.max(baslaMs,x.s)-baslaMs)*px, width=(Math.min(bitMs,x.e)-Math.max(baslaMs,x.s))*px;
                     if(width<3) return null;
+                    // durum: planlı (başlamadı) açık ton · aktif normal · bitmiş gri
+                    const dr = x.s>now ? {bg:C.planBg,bd:C.planB,tc:C.planT,dash:true}
+                             : x.e<=now ? {bg:C.bitBg,bd:C.bitB,tc:C.bitT}
+                             : {bg:C.yesil,bd:C.yesilB,tc:C.yesilT};
                     return h("div",{key:"j"+i,onClick:()=>setIsModal(x.p),
-                      title:x.p.ad+" · bitiş "+fmtTarihSaat(x.e),
+                      title:x.p.ad+" · "+(x.s>now?"planlandı":x.e<=now?"bitti":"çalışıyor")+" · bitiş "+fmtTarihSaat(x.e),
                       style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
-                        background:C.yesil,border:"1px solid "+C.yesilB,borderRadius:7,cursor:"pointer",
+                        background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",
                         display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-                        overflow:"hidden",color:C.yesilT,fontSize:11,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
+                        overflow:"hidden",color:dr.tc,fontSize:11,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
                       h("span",{style:{position:"absolute",top:4,right:5,width:8,height:8,borderRadius:8,background:x.p.ams?C.mavi:C.sari}}),
                       width>52 && h(React.Fragment,null,
                         h("div",null,num(x.p.adet)+" x "+x.p.ad),
