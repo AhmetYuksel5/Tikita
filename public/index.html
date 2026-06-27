@@ -216,7 +216,7 @@ function tickStep(gunW){ // saat aralığı — zoom'a göre detay
   for(const o of [1,2,3,4,6,8,12,24]){ if(24/o <= slots) return o; }
   return 24;
 }
-function makineTimeline(makineId, plan, baslaMs, bitMs){
+function makineTimeline(makineId, plan, baslaMs, bitMs, now){
   const js = plan.filter(p=>p.makineId===makineId)
     .map(p=>({ p, s:new Date(p.baslangic).getTime(), e:new Date(p.baslangic).getTime()+num(p.sureDk)*60000 }))
     .filter(x=>x.e>baslaMs && x.s<bitMs)
@@ -226,7 +226,11 @@ function makineTimeline(makineId, plan, baslaMs, bitMs){
   const bos=[]; let cur=baslaMs;
   js.forEach(x=>{ const s=Math.max(baslaMs,x.s); if(s>cur) bos.push({start:cur,end:s}); cur=Math.max(cur,Math.min(bitMs,x.e)); });
   if(cur<bitMs) bos.push({start:cur,end:bitMs});
-  return { js, bos, printMs, bosMs:(bitMs-baslaMs)-printMs };
+  // kayıp = geçmişte (now'dan önce) çalışmayan dilimler
+  let kayipMs=0;
+  bos.forEach(b=>{ const pe=Math.min(b.end, now||0); if(pe>b.start) kayipMs += pe-b.start; });
+  const bosMs=(bitMs-baslaMs)-printMs;
+  return { js, bos, printMs, bosMs, kayipMs, bosGelecekMs: bosMs-kayipMs };
 }
 
 /* ============================================================
@@ -263,8 +267,8 @@ function App(){
 
   const mlist = makineler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
   const timelines = useMemo(()=>{
-    const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id, plan, baslaMs, bitMs); }); return m;
-  },[plan, makineler, baslaMs, bitMs]);
+    const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id, plan, baslaMs, bitMs, now); }); return m;
+  },[plan, makineler, baslaMs, bitMs, now]);
 
   // boş kalacak makineler — art arda planlı işlerde SON bitiş saatini baz al (makine başına tek satır)
   const bosListe = [];
@@ -283,6 +287,8 @@ function App(){
   const kapasiteMs = mlist.length * toplamMs;
   const toplamPrint = mlist.reduce((s,mk)=>s+(timelines[mk.id]?.printMs||0),0);
   const toplamBos = kapasiteMs - toplamPrint;
+  const toplamKayip = mlist.reduce((s,mk)=>s+(timelines[mk.id]?.kayipMs||0),0);
+  const toplamBosGelecek = Math.max(0, toplamBos - toplamKayip);
   const yuzde = t => kapasiteMs ? (Math.round(t/kapasiteMs*1000)/10) : 0;
 
   function haftaKaydir(yon){ setBas(b=>b + yon*gunSayisi*24*3600*1000); }
@@ -319,7 +325,8 @@ function App(){
         h("div",{style:{display:"flex",gap:16,flexWrap:"wrap"}},
           h(Lejant,{renk:C.yesil,ad:"Çalışıyor"}),
           h(Lejant,{renk:C.planBg,ad:"Planlandı"}),
-          h(Lejant,{renk:C.kirmizi,ad:"Boşta"}),
+          h(Lejant,{renk:C.kirmizi,ad:"Boşta (gelecek)"}),
+          h(Lejant,{renk:"#e3aba4",ad:"⚠ Kayıp zaman"}),
           h(Lejant,{renk:C.mavi,ad:"AMS'li iş"}),
           h(Lejant,{renk:C.sari,ad:"AMS gerektirmeyen"}))),
       // kaydırmalı alan
@@ -344,19 +351,32 @@ function App(){
                 h("div",{style:{position:"relative",width:toplamW,flexShrink:0,
                   backgroundImage:"repeating-linear-gradient(90deg,#c8d3e0 0 1px,transparent 1px "+GUN_W+"px),"+
                     "repeating-linear-gradient(90deg,#eef2f7 0 1px,transparent 1px "+(GUN_W*step/24)+"px)"}},
-                  // boş bloklar
-                  tl.bos.map((b,i)=>{
-                    const left=(b.start-baslaMs)*px, width=(b.end-b.start)*px;
-                    if(width<3) return null;
-                    return h("div",{key:"b"+i,onClick:()=>setIsModal({makineId:mk.id,baslangic:b.start}),
-                      title:"Boş — tıkla, iş planla",
-                      style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
-                        background:C.kirmizi,border:"1px solid "+C.kirmiziB,borderRadius:7,cursor:"pointer",
-                        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-                        overflow:"hidden",color:C.kirmiziT,fontSize:11,fontWeight:700,lineHeight:1.25}},
-                      width>54 && h(React.Fragment,null,
-                        h("div",null,fmtSaat(b.start)),
-                        h("div",null,fmtSaat(b.end))));
+                  // boş bloklar → geçmiş=KAYIP (taralı), gelecek=BOŞTA (tıklanır)
+                  tl.bos.flatMap((b,i)=>{
+                    const parts=[];
+                    const pe=Math.min(b.end, now);
+                    if(pe>b.start) parts.push({k:"k"+i,s:b.start,e:pe,kayip:true});
+                    const fs=Math.max(b.start, now);
+                    if(b.end>fs) parts.push({k:"f"+i,s:fs,e:b.end,kayip:false});
+                    return parts.map(pt=>{
+                      const left=(pt.s-baslaMs)*px, width=(pt.e-pt.s)*px;
+                      if(width<3) return null;
+                      if(pt.kayip) return h("div",{key:pt.k,
+                        title:"⚠ Kayıp zaman: "+fmtTarihSaat(pt.s)+" – "+fmtSaat(pt.e)+" ("+fmtSureSaat((pt.e-pt.s)/60000)+")",
+                        style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
+                          background:"repeating-linear-gradient(45deg,#efc3bd 0 6px,#e3aba4 6px 12px)",
+                          border:"1px solid "+C.kirmiziB,borderRadius:7,
+                          display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                          overflow:"hidden",color:"#7f1d1d",fontSize:10,fontWeight:800,lineHeight:1.2}},
+                        width>50 && h(React.Fragment,null, h("div",null,"⚠ KAYIP"), h("div",{style:{fontWeight:600}},fmtSureSaat((pt.e-pt.s)/60000))));
+                      return h("div",{key:pt.k,onClick:()=>setIsModal({makineId:mk.id,baslangic:pt.s}),
+                        title:"Boş — tıkla, iş planla",
+                        style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
+                          background:C.kirmizi,border:"1px solid "+C.kirmiziB,borderRadius:7,cursor:"pointer",
+                          display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                          overflow:"hidden",color:C.kirmiziT,fontSize:11,fontWeight:700,lineHeight:1.25}},
+                        width>54 && h(React.Fragment,null, h("div",null,fmtSaat(pt.s)), h("div",null,fmtSaat(pt.e))));
+                    });
                   }),
                   // iş blokları
                   tl.js.map((x,i)=>{
@@ -400,15 +420,19 @@ function App(){
       // makine özeti
       h("div",{style:S.card},
         h("div",{style:S.hdr},"MAKİNE ÖZETİ (HAFTALIK)"),
-        h("div",{style:{padding:"4px 0"}},
+        h("div",{style:{display:"grid",gridTemplateColumns:"1.1fr .9fr .9fr .9fr 78px",gap:6,
+          padding:"7px 14px",borderBottom:"1px solid "+C.line,fontSize:11,fontWeight:700,color:C.mut}},
+          h("span",null,"MAKİNE"),h("span",null,"BASKI"),h("span",null,"BOŞ"),h("span",{style:{color:C.kirmiziB}},"KAYIP"),h("span",null,"DOLULUK")),
+        h("div",{style:{padding:"2px 0"}},
           mlist.map((mk,i)=>{
-            const tl=timelines[mk.id]||{printMs:0,bosMs:0};
+            const tl=timelines[mk.id]||{printMs:0,bosGelecekMs:0,kayipMs:0};
             const dol = toplamMs? Math.round(tl.printMs/toplamMs*1000)/10 : 0;
-            return h("div",{key:mk.id,style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 90px",gap:6,alignItems:"center",
-              padding:"8px 14px",borderTop:i?"1px solid "+C.line:"none",fontSize:13}},
+            return h("div",{key:mk.id,style:{display:"grid",gridTemplateColumns:"1.1fr .9fr .9fr .9fr 78px",gap:6,alignItems:"center",
+              padding:"8px 14px",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
               h("b",null,mk.ad),
               h("span",{style:{color:C.mut}},fmtSureSaat(tl.printMs/60000)),
-              h("span",{style:{color:C.mut}},fmtSureSaat(tl.bosMs/60000)),
+              h("span",{style:{color:C.mut}},fmtSureSaat(tl.bosGelecekMs/60000)),
+              h("span",{style:{color: tl.kayipMs>0?C.kirmiziB:C.mut, fontWeight: tl.kayipMs>0?700:400}},fmtSureSaat(tl.kayipMs/60000)),
               h("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 h("div",{style:{flex:1,height:8,background:"#eef2f7",borderRadius:9,overflow:"hidden"}},
                   h("div",{style:{height:"100%",width:dol+"%",background:dol>=70?C.yesilB:dol>=40?C.sari:C.kirmiziB}})),
@@ -422,15 +446,19 @@ function App(){
             h("div",{style:{fontSize:12,color:C.mut,fontWeight:700}},"TOPLAM KAPASİTE"),
             h("div",{style:{fontSize:11,color:C.mut}},mlist.length+" makine × 24 saat × "+gunSayisi+" gün"),
             h("div",{style:{fontSize:24,fontWeight:800,color:C.navyHdr,marginTop:4}},Math.round(kapasiteMs/3600000)+" SAAT")),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
-            h("div",{style:{...S.card,padding:14,textAlign:"center"}},
-              h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},"BASKI SÜRESİ"),
-              h("div",{style:{fontSize:18,fontWeight:800,marginTop:4}},fmtSureSaat(toplamPrint/60000)),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
+            h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center"}},
+              h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},"BASKI"),
+              h("div",{style:{fontSize:15,fontWeight:800,marginTop:4}},fmtSureSaat(toplamPrint/60000)),
               h("div",{style:{fontWeight:800,color:C.yesilB}},"(%"+yuzde(toplamPrint)+")")),
-            h("div",{style:{...S.card,padding:14,textAlign:"center"}},
-              h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},"BOŞ SÜRE"),
-              h("div",{style:{fontSize:18,fontWeight:800,marginTop:4}},fmtSureSaat(toplamBos/60000)),
-              h("div",{style:{fontWeight:800,color:C.kirmiziB}},"(%"+yuzde(toplamBos)+")"))))) ),
+            h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center"}},
+              h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},"BOŞTA"),
+              h("div",{style:{fontSize:15,fontWeight:800,marginTop:4}},fmtSureSaat(toplamBosGelecek/60000)),
+              h("div",{style:{fontWeight:800,color:C.kirmiziB}},"(%"+yuzde(toplamBosGelecek)+")")),
+            h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center",borderColor:C.kirmiziB}},
+              h("div",{style:{fontSize:11,color:C.kirmiziB,fontWeight:700}},"⚠ KAYIP"),
+              h("div",{style:{fontSize:15,fontWeight:800,marginTop:4}},fmtSureSaat(toplamKayip/60000)),
+              h("div",{style:{fontWeight:800,color:C.kirmiziB}},"(%"+yuzde(toplamKayip)+")"))))) ),
 
     h("div",{style:{textAlign:"right",fontSize:12,color:C.mut,marginTop:12}},"Güncelleme: "+fmtTarihSaat(now)),
 
