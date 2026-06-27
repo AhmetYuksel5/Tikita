@@ -130,11 +130,13 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
     if(!f.sureDk)   return alert("Süre gir (dk).");
     onSnap&&onSnap();
     const sMs = new Date(f.baslangic).getTime();
+    // Yeni iş geçmiş bir zaman dilimine giriliyorsa → planlanan değil, tamamlanmış (başladı) say
+    const basladi = yeni ? (sMs <= Date.now()) : !!f.basladi;
     // planSureDk = ilk plan süresi (gecikme baz çizgisi). İlk kayıtta sabitlenir; "yeni plan kabul et" ile sıfırlanabilir.
     const planSureDk = (planReset || kayit.planSureDk==null) ? num(f.sureDk) : num(kayit.planSureDk);
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
       baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), planSureDk, ams:!!f.ams, not:f.not,
-      basladi:!!f.basladi, gercekBaslangic: f.basladi ? (kayit.gercekBaslangic || new Date(f.baslangic).toISOString()) : null });
+      basladi, gercekBaslangic: basladi ? (kayit.gercekBaslangic || new Date(f.baslangic).toISOString()) : null });
     if(!yeni && kayit.makineId===f.makineId){
       // başlama/süre değişti → sonraki işleri aynı delta (bitiş kayması) kadar otele
       const eskiBas = new Date(kayit.baslangic).getTime();
@@ -187,6 +189,9 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
                        "⏱ Gecikme: "+fmtSureSaat(gec)+"  (ilk plan bitişi: "+fmtTarihSaat(new Date(f.baslangic).getTime()+base*60000)+")  ",
                        h("button",{type:"button",style:{...S.ibtn,padding:"2px 7px",fontSize:11},onClick:()=>setPlanReset(true)},"↺ yeni plan kabul et"))
                     : ("Bitiş: "+fmtTarihSaat(bitis)+" · "+fmtSureSaat(f.sureDk))); })(),
+          yeni && new Date(f.baslangic).getTime()<=Date.now() && h("div",{style:{fontSize:12,marginTop:-6,marginBottom:12,
+            color:C.yesilT,background:C.yesil,border:"1px solid "+C.yesilB,borderRadius:8,padding:"6px 10px",fontWeight:700}},
+            "✓ Geçmiş zaman — bu iş tamamlanmış (başladı) olarak eklenecek."),
           h("label",{style:{display:"flex",alignItems:"center",gap:8,fontWeight:600,marginBottom:8}},
             h("input",{type:"checkbox",checked:!!f.ams,onChange:e=>set("ams",e.target.checked)}), "AMS'li iş (renkli)"),
           h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not,onChange:e=>set("not",e.target.value)}))));
