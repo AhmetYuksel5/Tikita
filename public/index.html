@@ -109,6 +109,8 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     sureDk:   kayit.sureDk   || "",
     ams:      kayit.ams != null ? kayit.ams : true,
     not:      kayit.not      || "",
+    basladi:  !!kayit.basladi,
+    gercekBaslangic: toInput(kayit.gercekBaslangic || kayit.baslangic || Date.now()),
   }));
   const [tekrar,setTekrar] = useState(false);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
@@ -127,7 +129,8 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     if(!f.sureDk)   return alert("Süre gir (dk).");
     const sMs = new Date(f.baslangic).getTime();
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
-      baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), ams:!!f.ams, not:f.not });
+      baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), ams:!!f.ams, not:f.not,
+      basladi:!!f.basladi, gercekBaslangic: f.basladi ? new Date(f.gercekBaslangic).toISOString() : null });
     if(!yeni && kayit.makineId===f.makineId){
       // başlama/süre değişti → sonraki işleri aynı delta (bitiş kayması) kadar otele
       const eskiBas = new Date(kayit.baslangic).getTime();
@@ -148,12 +151,16 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     h(Field,{label:"Makine"},
       h("select",{style:S.input,value:f.makineId,onChange:e=>set("makineId",e.target.value)},
         makineler.map(m=>h("option",{key:m.id,value:m.id},m.ad)))),
-    !yeni && (kayit.basladi
-      ? h("div",{style:{background:C.yesil,border:"1px solid "+C.yesilB,borderRadius:10,padding:"8px 12px",
-          marginBottom:12,color:C.yesilT,fontWeight:700}}, "✓ Başladı: "+fmtTarihSaat(kayit.gercekBaslangic||kayit.baslangic))
-      : h("button",{type:"button",style:{...S.btn(),width:"100%",marginBottom:12,borderColor:C.onayB,color:C.onayT,fontWeight:700},
-          onClick:async()=>{ await save("plan",{id:kayit.id,basladi:true,gercekBaslangic:new Date().toISOString()}); onKapat(); }},
-          "▶ Baskıyı başlat (başladı onayı)")),
+    !yeni && h("div",{style:{...S.card,padding:"10px 12px",marginBottom:12,
+        background: f.basladi?C.yesil:"#f3f6fb", borderColor: f.basladi?C.yesilB:C.line}},
+      h("label",{style:{display:"flex",alignItems:"center",gap:8,fontWeight:700,cursor:"pointer",color: f.basladi?C.yesilT:C.txt}},
+        h("input",{type:"checkbox",checked:!!f.basladi,onChange:e=>set("basladi",e.target.checked)}),
+        f.basladi ? "✓ Baskı başladı" : "▶ Baskı başladı mı? (manuel işaretle)"),
+      f.basladi && h("div",{style:{marginTop:8}},
+        h("span",{style:{...S.label,marginBottom:4}},"Gerçek başlangıç saati"),
+        h("input",{type:"datetime-local",style:S.input,value:f.gercekBaslangic,onChange:e=>set("gercekBaslangic",e.target.value)}),
+        h("div",{style:{marginTop:6}},
+          h("button",{type:"button",style:S.ibtn,onClick:()=>set("gercekBaslangic",toInput(Date.now()))},"Şimdi")))),
     yeni && onceki && !tekrar && h("button",{ type:"button", onClick:tekrarla,
       style:{...S.btn(), width:"100%", marginBottom:12, borderColor:C.navyHdr, color:C.navyHdr, fontWeight:700} },
       "↻ Bir öncekini tekrarla ("+num(onceki.adet)+" x "+onceki.ad+")"),
