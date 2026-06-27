@@ -96,7 +96,7 @@ function Lejant({ renk, ad }){
 /* ============================================================
    İŞ (plan kaydı) modalı
    ============================================================ */
-function IsModal({ kayit, makineler, onKapat }){
+function IsModal({ kayit, makineler, plan, onKapat }){
   const yeni = !kayit.id;
   const [f,setF] = useState(()=>({
     makineId: kayit.makineId || (makineler[0]&&makineler[0].id) || "",
@@ -107,7 +107,17 @@ function IsModal({ kayit, makineler, onKapat }){
     ams:      kayit.ams != null ? kayit.ams : true,
     not:      kayit.not      || "",
   }));
+  const [tekrar,setTekrar] = useState(false);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
+  const onceki = useMemo(()=>(plan||[])
+    .filter(p=>p.makineId===f.makineId && p.id!==kayit.id)
+    .sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))[0] || null,
+    [plan,f.makineId,kayit.id]);
+  function tekrarla(){
+    if(!onceki) return;
+    setF(s=>({ ...s, ad:onceki.ad, adet:onceki.adet, sureDk:onceki.sureDk, ams:!!onceki.ams, not:onceki.not||"" }));
+    setTekrar(true);
+  }
   async function kaydet(){
     if(!f.makineId) return alert("Makine seç.");
     if(!f.ad.trim()) return alert("İş/ürün adı gir.");
@@ -117,7 +127,7 @@ function IsModal({ kayit, makineler, onKapat }){
     onKapat();
   }
   const bitis = new Date(f.baslangic).getTime() + num(f.sureDk)*60000;
-  return h(Modal,{ baslik: yeni?"Baskı Planla":"İşi Düzenle", onKapat,
+  return h(Modal,{ baslik: yeni?(tekrar?"Tekrarla":"Baskı Planla"):"İşi Düzenle", onKapat,
     alt: h(React.Fragment,null,
       h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet}, yeni?"Planla":"Kaydet"),
       !yeni && h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{ if(confirm("Silinsin mi?")){ remove("plan",f.id); onKapat(); } }},"Sil"),
@@ -125,16 +135,28 @@ function IsModal({ kayit, makineler, onKapat }){
     h(Field,{label:"Makine"},
       h("select",{style:S.input,value:f.makineId,onChange:e=>set("makineId",e.target.value)},
         makineler.map(m=>h("option",{key:m.id,value:m.id},m.ad)))),
-    h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12}},
-      h(Field,{label:"İş / ürün adı"}, h("input",{style:S.input,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Sudoku / SD"})),
-      h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:f.adet,onChange:e=>set("adet",e.target.value)}))),
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
-      h(Field,{label:"Başlangıç"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
-      h(Field,{label:"Süre (dk)"}, h("input",{type:"number",min:0,style:S.input,value:f.sureDk,onChange:e=>set("sureDk",e.target.value)}))),
-    h("div",{style:{fontSize:12,color:C.mut,marginTop:-4,marginBottom:12}}, f.sureDk?("Bitiş: "+fmtTarihSaat(bitis)+" · "+fmtSureSaat(f.sureDk)):""),
-    h("label",{style:{display:"flex",alignItems:"center",gap:8,fontWeight:600,marginBottom:8}},
-      h("input",{type:"checkbox",checked:!!f.ams,onChange:e=>set("ams",e.target.checked)}), "AMS'li iş (renkli)"),
-    h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not,onChange:e=>set("not",e.target.value)})));
+    yeni && onceki && !tekrar && h("button",{ type:"button", onClick:tekrarla,
+      style:{...S.btn(), width:"100%", marginBottom:12, borderColor:C.navyHdr, color:C.navyHdr, fontWeight:700} },
+      "↻ Bir öncekini tekrarla ("+num(onceki.adet)+" x "+onceki.ad+")"),
+    tekrar
+      ? h(React.Fragment,null,
+          h("div",{style:{...S.card,padding:"10px 12px",marginBottom:12,background:"#f3f6fb"}},
+            h("div",{style:{fontWeight:700}}, num(f.adet)+" x "+f.ad),
+            h("div",{style:{fontSize:12,color:C.mut,marginTop:2}}, fmtSureSaat(f.sureDk)+(f.ams?" · AMS'li":"")),
+            h("button",{style:{...S.ibtn,marginTop:8},type:"button",onClick:()=>setTekrar(false)},"✎ Detayları düzenle")),
+          h(Field,{label:"Başlangıç saati"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
+          h("div",{style:{fontSize:12,color:C.mut,marginTop:-4}}, f.sureDk?("Bitiş: "+fmtTarihSaat(bitis)):""))
+      : h(React.Fragment,null,
+          h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12}},
+            h(Field,{label:"İş / ürün adı"}, h("input",{style:S.input,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Sudoku / SD"})),
+            h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:f.adet,onChange:e=>set("adet",e.target.value)}))),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+            h(Field,{label:"Başlangıç"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
+            h(Field,{label:"Süre (dk)"}, h("input",{type:"number",min:0,style:S.input,value:f.sureDk,onChange:e=>set("sureDk",e.target.value)}))),
+          h("div",{style:{fontSize:12,color:C.mut,marginTop:-4,marginBottom:12}}, f.sureDk?("Bitiş: "+fmtTarihSaat(bitis)+" · "+fmtSureSaat(f.sureDk)):""),
+          h("label",{style:{display:"flex",alignItems:"center",gap:8,fontWeight:600,marginBottom:8}},
+            h("input",{type:"checkbox",checked:!!f.ams,onChange:e=>set("ams",e.target.checked)}), "AMS'li iş (renkli)"),
+          h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not,onChange:e=>set("not",e.target.value)}))));
 }
 
 /* ============================================================
@@ -388,7 +410,7 @@ function App(){
 
     h("div",{style:{textAlign:"right",fontSize:12,color:C.mut,marginTop:12}},"Güncelleme: "+fmtTarihSaat(now)),
 
-    isModal && h(IsModal,{kayit:isModal,makineler:mlist,onKapat:()=>setIsModal(null)}),
+    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,onKapat:()=>setIsModal(null)}),
     makineAcik && h(MakineYonetim,{makineler:mlist,onKapat:()=>setMakineAcik(false)})
   );
 }
