@@ -128,8 +128,15 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     const sMs = new Date(f.baslangic).getTime();
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
       baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), ams:!!f.ams, not:f.not });
-    // plan aksarsa sonraki işleri otomatik kaydır (çakışmayı önle)
-    await planKaydir(f.makineId, plan, { id, s:sMs, dk:num(f.sureDk) });
+    if(!yeni && kayit.makineId===f.makineId){
+      // başlama/süre değişti → sonraki işleri aynı delta (bitiş kayması) kadar otele
+      const eskiBas = new Date(kayit.baslangic).getTime();
+      const delta = (sMs + num(f.sureDk)*60000) - (eskiBas + num(kayit.sureDk)*60000);
+      await planOtele(f.makineId, plan, eskiBas, delta, id);
+    } else {
+      // yeni iş / makine değişti → çakışmasız diz
+      await planKaydir(f.makineId, plan, { id, s:sMs, dk:num(f.sureDk) });
+    }
     onKapat();
   }
   const bitis = new Date(f.baslangic).getTime() + num(f.sureDk)*60000;
@@ -204,6 +211,15 @@ function MakineYonetim({ makineler, onKapat }){
 /* ============================================================
    GANTT — zaman çizelgesi hesapları
    ============================================================ */
+// Başlama saati değişince: sonraki işleri (eski sıraya göre) aynı delta kadar öteler — boşluklar/ara korunur
+async function planOtele(makineId, plan, oldStartMs, deltaMs, editedId){
+  if(!deltaMs) return;
+  const ds = plan.filter(p=>p.makineId===makineId && p.id!==editedId
+    && new Date(p.baslangic).getTime() > oldStartMs);
+  for(const p of ds){
+    await save("plan",{ id:p.id, baslangic:new Date(new Date(p.baslangic).getTime()+deltaMs).toISOString() });
+  }
+}
 // Plan aksarsa: aynı makinedeki işleri başlangıç sırasına göre çakışmasız diz (yalnız ileri kaydır)
 async function planKaydir(makineId, plan, edited){
   const arr = plan.filter(p=>p.makineId===makineId && p.id!==edited.id)
