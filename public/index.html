@@ -41,6 +41,7 @@ const h = React.createElement;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 async function save(coll, obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,coll,id),d,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
+async function restoreDoc(coll,obj){ const {id,...data}=obj; await setDoc(doc(db,coll,id),data); } // merge yok → tam geri yükle
 function useColl(name){
   const [rows,setRows]=useState([]);
   useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>console.error(name,e)),[name]);
@@ -99,7 +100,7 @@ function Lejant({ renk, ad }){
 /* ============================================================
    İŞ (plan kaydı) modalı
    ============================================================ */
-function IsModal({ kayit, makineler, plan, onKapat }){
+function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
   const yeni = !kayit.id;
   const [f,setF] = useState(()=>({
     makineId: kayit.makineId || (makineler[0]&&makineler[0].id) || "",
@@ -127,6 +128,7 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     if(!f.makineId) return alert("Makine seç.");
     if(!f.ad.trim()) return alert("İş/ürün adı gir.");
     if(!f.sureDk)   return alert("Süre gir (dk).");
+    onSnap&&onSnap();
     const sMs = new Date(f.baslangic).getTime();
     // planSureDk = ilk plan süresi (gecikme baz çizgisi). İlk kayıtta sabitlenir; "yeni plan kabul et" ile sıfırlanabilir.
     const planSureDk = (planReset || kayit.planSureDk==null) ? num(f.sureDk) : num(kayit.planSureDk);
@@ -148,7 +150,7 @@ function IsModal({ kayit, makineler, plan, onKapat }){
   return h(Modal,{ baslik: yeni?(tekrar?"Tekrarla":"Baskı Planla"):"İşi Düzenle", onKapat,
     alt: h(React.Fragment,null,
       h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet}, yeni?"Planla":"Kaydet"),
-      !yeni && h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{ if(confirm("Silinsin mi?")){ remove("plan",f.id); onKapat(); } }},"Sil"),
+      !yeni && h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{ if(confirm("Silinsin mi?")){ onSnap&&onSnap(); remove("plan",f.id); onKapat(); } }},"Sil"),
       h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
     h(Field,{label:"Makine"},
       h("select",{style:S.input,value:f.makineId,onChange:e=>set("makineId",e.target.value)},
@@ -288,6 +290,8 @@ function App(){
   const scrollRef = useRef(null);
   const dragRef = useRef(null);
   const [dragPrev, setDragPrev] = useState(null);  // {id, startMs} sürükleme önizleme
+  const undoRef = useRef(null);
+  const [undoVar, setUndoVar] = useState(false);
   useEffect(()=>{ const t=setInterval(()=>setNow(Date.now()),60000); return ()=>clearInterval(t); },[]);
   useEffect(()=>{
     if(!scrollRef.current || !window.ResizeObserver) return;
@@ -314,9 +318,27 @@ function App(){
   // baskı başlat onayı — zamanı gelen planlı işler otomatik başlamaz, onay ister
   async function baslat(p){
     if(!confirm((num(p.adet)?num(p.adet)+" x ":"")+p.ad+" baskısı başladı mı?\n(Onaylayınca 'çalışıyor' görünecek.)")) return;
+    snapAl();
     await save("plan",{ id:p.id, basladi:true, gercekBaslangic:new Date().toISOString(),
       planSureDk: p.planSureDk!=null?p.planSureDk:num(p.sureDk) });
   }
+
+  // geri al — değişiklik öncesi plan anlık görüntüsü
+  function snapAl(){ undoRef.current = plan.map(p=>({...p})); setUndoVar(true); }
+  async function geriAl(){
+    const snap=undoRef.current; if(!snap) return;
+    const ids=new Set(snap.map(p=>p.id));
+    for(const p of plan){ if(!ids.has(p.id)) await remove("plan",p.id); }   // sonradan eklenenleri sil
+    for(const p of snap){ await restoreDoc("plan",p); }                     // eski hâli yükle
+    undoRef.current=null; setUndoVar(false);
+  }
+  // çakışmaları gider — her makinede işleri sıraya diz (çakışanı ileri it)
+  async function dizMakine(makineId){
+    const arr=plan.filter(p=>p.makineId===makineId).map(p=>({id:p.id,s:new Date(p.baslangic).getTime(),dk:num(p.sureDk)})).sort((a,b)=>a.s-b.s);
+    let prevEnd=null;
+    for(const j of arr){ let s=j.s; if(prevEnd!=null&&s<prevEnd)s=prevEnd; if(s!==j.s) await save("plan",{id:j.id,baslangic:new Date(s).toISOString()}); prevEnd=s+j.dk*60000; }
+  }
+  async function cakismalariGider(){ if(!confirm("Tüm makinelerde çakışan işler ileri itilerek sıralanacak. Devam?")) return; snapAl(); for(const mk of mlist) await dizMakine(mk.id); }
 
   // tut-sürükle ile işi taşı (yatay = zaman). Tıklama (sürükleme yok) → onay/düzenle.
   const SNAP = 5*60000;
@@ -341,8 +363,9 @@ function App(){
     }
     const ns=d.curStart!=null?d.curStart:d.origStart;
     if(ns===d.origStart){ setDragPrev(null); return; }
+    snapAl();
     await save("plan",{ id:d.id, baslangic:new Date(ns).toISOString() });
-    await planOtele(d.makineId, plan, d.origStart, ns-d.origStart, d.id);
+    await planKaydir(d.makineId, plan, { id:d.id, s:ns, dk:num(d.p.sureDk) }); // çakışmasız diz (üstüne gelirse sonrakileri it)
     setDragPrev(null);
   }
   function dragDown(e,x){
@@ -400,6 +423,8 @@ function App(){
           h("button",{style:S.ibtn,title:"Uzaklaştır",onClick:()=>setZoom(z=>Math.max(1,Math.round((z-0.5)*10)/10))},"🔍−"),
           h("span",{style:{fontSize:12,color:C.mut,minWidth:30,textAlign:"center"}},zoom+"x"),
           h("button",{style:S.ibtn,title:"Yakınlaştır",onClick:()=>setZoom(z=>Math.min(6,Math.round((z+0.5)*10)/10))},"🔍+")),
+        undoVar && h("button",{style:{...S.btn(),borderColor:"#c2410c",color:"#c2410c",fontWeight:800},onClick:geriAl,title:"Son değişikliği geri al"},"↶ Geri al"),
+        h("button",{style:S.ibtn,onClick:cakismalariGider,title:"Çakışan işleri ileri iterek sırala"},"🧹 Çakışmaları gider"),
         h("button",{style:S.btn(),onClick:()=>setMakineAcik(true)},"⚙ Makineler"),
         h("button",{style:S.btn("p"),onClick:()=>setIsModal({})},"+ Baskı Planla"))),
 
@@ -572,7 +597,7 @@ function App(){
 
     h("div",{style:{textAlign:"right",fontSize:12,color:C.mut,marginTop:12}},"Güncelleme: "+fmtTarihSaat(now)),
 
-    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,onKapat:()=>setIsModal(null)}),
+    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,onSnap:snapAl,onKapat:()=>setIsModal(null)}),
     makineAcik && h(MakineYonetim,{makineler:mlist,onKapat:()=>setMakineAcik(false)})
   );
 }
