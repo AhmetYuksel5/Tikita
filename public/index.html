@@ -286,6 +286,8 @@ function App(){
   const [zoom, setZoom] = useState(1);
   const [containerW, setContainerW] = useState(1000);
   const scrollRef = useRef(null);
+  const dragRef = useRef(null);
+  const [dragPrev, setDragPrev] = useState(null);  // {id, startMs} sürükleme önizleme
   useEffect(()=>{ const t=setInterval(()=>setNow(Date.now()),60000); return ()=>clearInterval(t); },[]);
   useEffect(()=>{
     if(!scrollRef.current || !window.ResizeObserver) return;
@@ -314,6 +316,41 @@ function App(){
     if(!confirm((num(p.adet)?num(p.adet)+" x ":"")+p.ad+" baskısı başladı mı?\n(Onaylayınca 'çalışıyor' görünecek.)")) return;
     await save("plan",{ id:p.id, basladi:true, gercekBaslangic:new Date().toISOString(),
       planSureDk: p.planSureDk!=null?p.planSureDk:num(p.sureDk) });
+  }
+
+  // tut-sürükle ile işi taşı (yatay = zaman). Tıklama (sürükleme yok) → onay/düzenle.
+  const SNAP = 5*60000;
+  function dragMove(e){
+    const d=dragRef.current; if(!d) return;
+    const dx=e.clientX-d.startX;
+    if(Math.abs(dx)>4) d.moved=true;
+    if(!d.moved) return;
+    const ns=Math.round((d.origStart + dx/px)/SNAP)*SNAP;
+    d.curStart=ns; setDragPrev({ id:d.id, startMs:ns });
+  }
+  async function dragUp(){
+    const d=dragRef.current; dragRef.current=null;
+    window.removeEventListener("pointermove",dragMove);
+    window.removeEventListener("pointerup",dragUp);
+    if(!d){ setDragPrev(null); return; }
+    if(!d.moved){ // sürükleme yok → tık
+      setDragPrev(null);
+      const eEnd=d.origStart+num(d.p.sureDk)*60000;
+      if(!d.p.basladi && d.origStart<=now && eEnd>now) baslat(d.p); else setIsModal(d.p);
+      return;
+    }
+    const ns=d.curStart!=null?d.curStart:d.origStart;
+    if(ns===d.origStart){ setDragPrev(null); return; }
+    await save("plan",{ id:d.id, baslangic:new Date(ns).toISOString() });
+    await planOtele(d.makineId, plan, d.origStart, ns-d.origStart, d.id);
+    setDragPrev(null);
+  }
+  function dragDown(e,x){
+    if(e.button!=null && e.button!==0) return;
+    e.preventDefault();
+    dragRef.current={ id:x.p.id, makineId:x.p.makineId, origStart:x.s, startX:e.clientX, moved:false, curStart:null, p:x.p };
+    window.addEventListener("pointermove",dragMove);
+    window.addEventListener("pointerup",dragUp);
   }
 
   // boş kalacak makineler — art arda planlı işlerde SON bitiş saatini baz al (makine başına tek satır)
@@ -367,7 +404,7 @@ function App(){
         h("button",{style:S.btn("p"),onClick:()=>setIsModal({})},"+ Baskı Planla"))),
 
     // gantt kartı
-    h("div",{style:{...S.card,overflow:"hidden",marginBottom:16}},
+    h("div",{style:{...S.card,overflow:"hidden",marginBottom:16,userSelect:"none",WebkitUserSelect:"none"}},
       h("div",{style:{...S.hdr,borderRadius:0,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}},
         h("span",null,"📅 "+tarihAralik),
         h("div",{style:{display:"flex",gap:16,flexWrap:"wrap"}},
@@ -438,27 +475,33 @@ function App(){
                         width>54 && h(React.Fragment,null, h("div",null,fmtSaat(pt.s)), h("div",null,fmtSaat(pt.e))));
                     });
                   }),
-                  // iş blokları
+                  // iş blokları (tut-sürükle ile taşınır)
                   tl.js.map((x,i)=>{
-                    const left=(Math.max(baslaMs,x.s)-baslaMs)*px, width=(Math.min(bitMs,x.e)-Math.max(baslaMs,x.s))*px;
+                    const sur = x.e - x.s;
+                    const drg = dragPrev && dragPrev.id===x.p.id;
+                    const es = drg ? dragPrev.startMs : x.s;
+                    const ee = es + sur;
+                    const left=(Math.max(baslaMs,es)-baslaMs)*px, width=(Math.min(bitMs,ee)-Math.max(baslaMs,es))*px;
                     if(width<3) return null;
                     // durum: başladı→çalışıyor/bitti · başlamadı: planlı(açık)/onay bekliyor(amber)/kaçırıldı
                     const basladi = !!x.p.basladi;
                     let dr, durStr;
-                    if(basladi){ if(x.e<=now){ dr={bg:C.bitBg,bd:C.bitB,tc:C.bitT}; durStr="bitti"; } else { dr={bg:C.yesil,bd:C.yesilB,tc:C.yesilT}; durStr="çalışıyor"; } }
-                    else if(x.s>now){ dr={bg:C.planBg,bd:C.planB,tc:C.planT,dash:true}; durStr="planlandı"; }
-                    else if(x.e>now){ dr={bg:C.onayBg,bd:C.onayB,tc:C.onayT,onay:true}; durStr="onay bekliyor"; }
+                    if(basladi){ if(ee<=now){ dr={bg:C.bitBg,bd:C.bitB,tc:C.bitT}; durStr="bitti"; } else { dr={bg:C.yesil,bd:C.yesilB,tc:C.yesilT}; durStr="çalışıyor"; } }
+                    else if(es>now){ dr={bg:C.planBg,bd:C.planB,tc:C.planT,dash:true}; durStr="planlandı"; }
+                    else if(ee>now){ dr={bg:C.onayBg,bd:C.onayB,tc:C.onayT,onay:true}; durStr="onay bekliyor"; }
                     else { dr={bg:C.bitBg,bd:C.bitB,tc:C.bitT,dash:true}; durStr="başlamadı"; }
-                    return h("div",{key:"j"+i,onClick:()=> dr.onay ? baslat(x.p) : setIsModal(x.p),
-                      title:x.p.ad+" · "+durStr+" · bitiş "+fmtTarihSaat(x.e),
+                    return h("div",{key:"j"+i, onPointerDown:(e)=>dragDown(e,x),
+                      title:x.p.ad+" · "+durStr+" · bitiş "+fmtTarihSaat(ee)+" · tut-sürükle ile taşı",
                       style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
-                        background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",
+                        background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,
+                        cursor:"grab",touchAction:"none",userSelect:"none",WebkitUserSelect:"none",
+                        boxShadow: drg?"0 4px 10px rgba(0,0,0,.25)":"none", zIndex: drg?5:1,
                         display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                         overflow:"hidden",color:dr.tc,fontSize:11,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
                       h("span",{style:{position:"absolute",top:4,right:5,width:8,height:8,borderRadius:8,background:x.p.ams?C.mavi:C.sari}}),
                       width>52 && h(React.Fragment,null,
                         h("div",null,num(x.p.adet)+" x "+x.p.ad),
-                        h("div",null, dr.onay ? "▶ Başlasın mı?" : fmtTarihSaat(x.e))));
+                        h("div",null, drg ? fmtTarihSaat(es) : (dr.onay ? "▶ Başlasın mı?" : fmtTarihSaat(ee)))));
                   }),
                   // şimdi çizgisi
                   (now>=baslaMs&&now<=bitMs) && h("div",{style:{position:"absolute",left:(now-baslaMs)*px,top:0,bottom:0,width:2,background:C.navyHdr,opacity:.55}})
