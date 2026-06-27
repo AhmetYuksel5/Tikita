@@ -110,7 +110,6 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     ams:      kayit.ams != null ? kayit.ams : true,
     not:      kayit.not      || "",
     basladi:  !!kayit.basladi,
-    gercekBaslangic: toInput(kayit.gercekBaslangic || kayit.baslangic || Date.now()),
   }));
   const [tekrar,setTekrar] = useState(false);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
@@ -128,9 +127,11 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     if(!f.ad.trim()) return alert("İş/ürün adı gir.");
     if(!f.sureDk)   return alert("Süre gir (dk).");
     const sMs = new Date(f.baslangic).getTime();
+    // planSureDk = ilk plan süresi (gecikme baz çizgisi). Başlamadıkça güncel kalır; başlayınca dondurulur.
+    const planSureDk = f.basladi ? (kayit.planSureDk!=null ? num(kayit.planSureDk) : num(f.sureDk)) : num(f.sureDk);
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
-      baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), ams:!!f.ams, not:f.not,
-      basladi:!!f.basladi, gercekBaslangic: f.basladi ? new Date(f.gercekBaslangic).toISOString() : null });
+      baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), planSureDk, ams:!!f.ams, not:f.not,
+      basladi:!!f.basladi, gercekBaslangic: f.basladi ? (kayit.gercekBaslangic || new Date(f.baslangic).toISOString()) : null });
     if(!yeni && kayit.makineId===f.makineId){
       // başlama/süre değişti → sonraki işleri aynı delta (bitiş kayması) kadar otele
       const eskiBas = new Date(kayit.baslangic).getTime();
@@ -151,16 +152,11 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     h(Field,{label:"Makine"},
       h("select",{style:S.input,value:f.makineId,onChange:e=>set("makineId",e.target.value)},
         makineler.map(m=>h("option",{key:m.id,value:m.id},m.ad)))),
-    !yeni && h("div",{style:{...S.card,padding:"10px 12px",marginBottom:12,
-        background: f.basladi?C.yesil:"#f3f6fb", borderColor: f.basladi?C.yesilB:C.line}},
-      h("label",{style:{display:"flex",alignItems:"center",gap:8,fontWeight:700,cursor:"pointer",color: f.basladi?C.yesilT:C.txt}},
-        h("input",{type:"checkbox",checked:!!f.basladi,onChange:e=>set("basladi",e.target.checked)}),
-        f.basladi ? "✓ Baskı başladı" : "▶ Baskı başladı mı? (manuel işaretle)"),
-      f.basladi && h("div",{style:{marginTop:8}},
-        h("span",{style:{...S.label,marginBottom:4}},"Gerçek başlangıç saati"),
-        h("input",{type:"datetime-local",style:S.input,value:f.gercekBaslangic,onChange:e=>set("gercekBaslangic",e.target.value)}),
-        h("div",{style:{marginTop:6}},
-          h("button",{type:"button",style:S.ibtn,onClick:()=>set("gercekBaslangic",toInput(Date.now()))},"Şimdi")))),
+    !yeni && h("label",{style:{...S.card,padding:"10px 12px",marginBottom:12,display:"flex",alignItems:"center",gap:8,
+        cursor:"pointer",fontWeight:700,background: f.basladi?C.yesil:"#f3f6fb",
+        borderColor: f.basladi?C.yesilB:C.line, color: f.basladi?C.yesilT:C.txt}},
+      h("input",{type:"checkbox",checked:!!f.basladi,onChange:e=>set("basladi",e.target.checked)}),
+      f.basladi ? "✓ Baskı başladı" : "▶ Baskı başladı mı? (manuel)"),
     yeni && onceki && !tekrar && h("button",{ type:"button", onClick:tekrarla,
       style:{...S.btn(), width:"100%", marginBottom:12, borderColor:C.navyHdr, color:C.navyHdr, fontWeight:700} },
       "↻ Bir öncekini tekrarla ("+num(onceki.adet)+" x "+onceki.ad+")"),
@@ -176,10 +172,16 @@ function IsModal({ kayit, makineler, plan, onKapat }){
           h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12}},
             h(Field,{label:"İş / ürün adı"}, h("input",{style:S.input,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Sudoku / SD"})),
             h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:f.adet,onChange:e=>set("adet",e.target.value)}))),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
-            h(Field,{label:"Başlangıç"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
-            h(Field,{label:"Süre (dk)"}, h("input",{type:"number",min:0,style:S.input,value:f.sureDk,onChange:e=>set("sureDk",e.target.value)}))),
-          h("div",{style:{fontSize:12,color:C.mut,marginTop:-4,marginBottom:12}}, f.sureDk?("Bitiş: "+fmtTarihSaat(bitis)+" · "+fmtSureSaat(f.sureDk)):""),
+          h(Field,{label:"Başlangıç"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1.3fr",gap:12}},
+            h(Field,{label:"Süre (dk)"}, h("input",{type:"number",min:0,style:S.input,value:f.sureDk,onChange:e=>set("sureDk",e.target.value)})),
+            h(Field,{label:"Planlanan bitiş"}, h("input",{type:"datetime-local",style:S.input,
+              value:toInput(new Date(f.baslangic).getTime()+num(f.sureDk)*60000),
+              onChange:e=>{ const ms=new Date(e.target.value).getTime()-new Date(f.baslangic).getTime(); set("sureDk",Math.max(0,Math.round(ms/60000))); }}))),
+          (()=>{ const base=kayit.planSureDk!=null?num(kayit.planSureDk):num(f.sureDk); const gec=Math.max(0,num(f.sureDk)-base);
+            return h("div",{style:{fontSize:12,marginTop:-4,marginBottom:12,color: gec>0?C.kirmiziB:C.mut, fontWeight: gec>0?700:400}},
+              gec>0 ? ("⏱ Gecikme: "+fmtSureSaat(gec)+"  (ilk plan bitişi: "+fmtTarihSaat(new Date(f.baslangic).getTime()+base*60000)+")")
+                    : ("Bitiş: "+fmtTarihSaat(bitis)+" · "+fmtSureSaat(f.sureDk))); })(),
           h("label",{style:{display:"flex",alignItems:"center",gap:8,fontWeight:600,marginBottom:8}},
             h("input",{type:"checkbox",checked:!!f.ams,onChange:e=>set("ams",e.target.checked)}), "AMS'li iş (renkli)"),
           h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not,onChange:e=>set("not",e.target.value)}))));
@@ -259,8 +261,12 @@ function makineTimeline(makineId, plan, baslaMs, bitMs, now){
   // kayıp = geçmişte (now'dan önce) çalışmayan dilimler
   let kayipMs=0;
   bos.forEach(b=>{ const pe=Math.min(b.end, now||0); if(pe>b.start) kayipMs += pe-b.start; });
+  // gecikme = bitiş ilk plandan ne kadar ileri alındı (sureDk - planSureDk)
+  let gecikmeMs=0, gecikmeSayi=0;
+  js.forEach(x=>{ const base=x.p.planSureDk!=null?num(x.p.planSureDk):num(x.p.sureDk);
+    const g=(num(x.p.sureDk)-base)*60000; if(g>0){ gecikmeMs+=g; gecikmeSayi++; } });
   const bosMs=(bitMs-baslaMs)-printMs;
-  return { js, bos, printMs, bosMs, kayipMs, bosGelecekMs: bosMs-kayipMs };
+  return { js, bos, printMs, bosMs, kayipMs, bosGelecekMs: bosMs-kayipMs, gecikmeMs, gecikmeSayi };
 }
 
 /* ============================================================
@@ -303,7 +309,8 @@ function App(){
   // baskı başlat onayı — zamanı gelen planlı işler otomatik başlamaz, onay ister
   async function baslat(p){
     if(!confirm((num(p.adet)?num(p.adet)+" x ":"")+p.ad+" baskısı başladı mı?\n(Onaylayınca 'çalışıyor' görünecek.)")) return;
-    await save("plan",{ id:p.id, basladi:true, gercekBaslangic:new Date().toISOString() });
+    await save("plan",{ id:p.id, basladi:true, gercekBaslangic:new Date().toISOString(),
+      planSureDk: p.planSureDk!=null?p.planSureDk:num(p.sureDk) });
   }
 
   // boş kalacak makineler — art arda planlı işlerde SON bitiş saatini baz al (makine başına tek satır)
@@ -325,6 +332,8 @@ function App(){
   const toplamBos = kapasiteMs - toplamPrint;
   const toplamKayip = mlist.reduce((s,mk)=>s+(timelines[mk.id]?.kayipMs||0),0);
   const toplamBosGelecek = Math.max(0, toplamBos - toplamKayip);
+  const toplamGecikme = mlist.reduce((s,mk)=>s+(timelines[mk.id]?.gecikmeMs||0),0);
+  const toplamGecikmeSayi = mlist.reduce((s,mk)=>s+(timelines[mk.id]?.gecikmeSayi||0),0);
   const yuzde = t => kapasiteMs ? (Math.round(t/kapasiteMs*1000)/10) : 0;
 
   function haftaKaydir(yon){ setBas(b=>b + yon*gunSayisi*24*3600*1000); }
@@ -473,17 +482,17 @@ function App(){
         h("div",{style:S.hdr},"MAKİNE ÖZETİ (HAFTALIK)"),
         h("div",{style:{display:"grid",gridTemplateColumns:"1.1fr .9fr .9fr .9fr 78px",gap:6,
           padding:"7px 14px",borderBottom:"1px solid "+C.line,fontSize:11,fontWeight:700,color:C.mut}},
-          h("span",null,"MAKİNE"),h("span",null,"BASKI"),h("span",null,"BOŞ"),h("span",{style:{color:C.kirmiziB}},"KAYIP"),h("span",null,"DOLULUK")),
+          h("span",null,"MAKİNE"),h("span",null,"BASKI"),h("span",{style:{color:C.kirmiziB}},"KAYIP"),h("span",{style:{color:"#c2410c"}},"GECİKME"),h("span",null,"DOLULUK")),
         h("div",{style:{padding:"2px 0"}},
           mlist.map((mk,i)=>{
-            const tl=timelines[mk.id]||{printMs:0,bosGelecekMs:0,kayipMs:0};
+            const tl=timelines[mk.id]||{printMs:0,kayipMs:0,gecikmeMs:0};
             const dol = toplamMs? Math.round(tl.printMs/toplamMs*1000)/10 : 0;
             return h("div",{key:mk.id,style:{display:"grid",gridTemplateColumns:"1.1fr .9fr .9fr .9fr 78px",gap:6,alignItems:"center",
               padding:"8px 14px",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
               h("b",null,mk.ad),
               h("span",{style:{color:C.mut}},fmtSureSaat(tl.printMs/60000)),
-              h("span",{style:{color:C.mut}},fmtSureSaat(tl.bosGelecekMs/60000)),
               h("span",{style:{color: tl.kayipMs>0?C.kirmiziB:C.mut, fontWeight: tl.kayipMs>0?700:400}},fmtSureSaat(tl.kayipMs/60000)),
+              h("span",{style:{color: tl.gecikmeMs>0?"#c2410c":C.mut, fontWeight: tl.gecikmeMs>0?700:400}},fmtSureSaat(tl.gecikmeMs/60000)),
               h("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 h("div",{style:{flex:1,height:8,background:"#eef2f7",borderRadius:9,overflow:"hidden"}},
                   h("div",{style:{height:"100%",width:dol+"%",background:dol>=70?C.yesilB:dol>=40?C.sari:C.kirmiziB}})),
@@ -497,7 +506,7 @@ function App(){
             h("div",{style:{fontSize:12,color:C.mut,fontWeight:700}},"TOPLAM KAPASİTE"),
             h("div",{style:{fontSize:11,color:C.mut}},mlist.length+" makine × 24 saat × "+gunSayisi+" gün"),
             h("div",{style:{fontSize:24,fontWeight:800,color:C.navyHdr,marginTop:4}},Math.round(kapasiteMs/3600000)+" SAAT")),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(78px,1fr))",gap:10}},
             h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center"}},
               h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},"BASKI"),
               h("div",{style:{fontSize:15,fontWeight:800,marginTop:4}},fmtSureSaat(toplamPrint/60000)),
@@ -509,7 +518,11 @@ function App(){
             h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center",borderColor:C.kirmiziB}},
               h("div",{style:{fontSize:11,color:C.kirmiziB,fontWeight:700}},"⚠ KAYIP"),
               h("div",{style:{fontSize:15,fontWeight:800,marginTop:4}},fmtSureSaat(toplamKayip/60000)),
-              h("div",{style:{fontWeight:800,color:C.kirmiziB}},"(%"+yuzde(toplamKayip)+")"))))) ),
+              h("div",{style:{fontWeight:800,color:C.kirmiziB}},"(%"+yuzde(toplamKayip)+")")),
+            h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center",borderColor:"#c2410c"}},
+              h("div",{style:{fontSize:11,color:"#c2410c",fontWeight:700}},"⏱ GECİKME"),
+              h("div",{style:{fontSize:15,fontWeight:800,marginTop:4}},fmtSureSaat(toplamGecikme/60000)),
+              h("div",{style:{fontWeight:800,color:"#c2410c"}},"("+toplamGecikmeSayi+" baskı)"))))) ),
 
     h("div",{style:{textAlign:"right",fontSize:12,color:C.mut,marginTop:12}},"Güncelleme: "+fmtTarihSaat(now)),
 
