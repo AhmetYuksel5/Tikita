@@ -112,6 +112,7 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     basladi:  !!kayit.basladi,
   }));
   const [tekrar,setTekrar] = useState(false);
+  const [planReset,setPlanReset] = useState(false);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
   const onceki = useMemo(()=>(plan||[])
     .filter(p=>p.makineId===f.makineId && p.id!==kayit.id)
@@ -127,8 +128,8 @@ function IsModal({ kayit, makineler, plan, onKapat }){
     if(!f.ad.trim()) return alert("İş/ürün adı gir.");
     if(!f.sureDk)   return alert("Süre gir (dk).");
     const sMs = new Date(f.baslangic).getTime();
-    // planSureDk = ilk plan süresi (gecikme baz çizgisi). Başlamadıkça güncel kalır; başlayınca dondurulur.
-    const planSureDk = f.basladi ? (kayit.planSureDk!=null ? num(kayit.planSureDk) : num(f.sureDk)) : num(f.sureDk);
+    // planSureDk = ilk plan süresi (gecikme baz çizgisi). İlk kayıtta sabitlenir; "yeni plan kabul et" ile sıfırlanabilir.
+    const planSureDk = (planReset || kayit.planSureDk==null) ? num(f.sureDk) : num(kayit.planSureDk);
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
       baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), planSureDk, ams:!!f.ams, not:f.not,
       basladi:!!f.basladi, gercekBaslangic: f.basladi ? (kayit.gercekBaslangic || new Date(f.baslangic).toISOString()) : null });
@@ -178,9 +179,11 @@ function IsModal({ kayit, makineler, plan, onKapat }){
             h(Field,{label:"Planlanan bitiş"}, h("input",{type:"datetime-local",style:S.input,
               value:toInput(new Date(f.baslangic).getTime()+num(f.sureDk)*60000),
               onChange:e=>{ const ms=new Date(e.target.value).getTime()-new Date(f.baslangic).getTime(); set("sureDk",Math.max(0,Math.round(ms/60000))); }}))),
-          (()=>{ const base=kayit.planSureDk!=null?num(kayit.planSureDk):num(f.sureDk); const gec=Math.max(0,num(f.sureDk)-base);
+          (()=>{ const base=(planReset||kayit.planSureDk==null)?num(f.sureDk):num(kayit.planSureDk); const gec=Math.max(0,num(f.sureDk)-base);
             return h("div",{style:{fontSize:12,marginTop:-4,marginBottom:12,color: gec>0?C.kirmiziB:C.mut, fontWeight: gec>0?700:400}},
-              gec>0 ? ("⏱ Gecikme: "+fmtSureSaat(gec)+"  (ilk plan bitişi: "+fmtTarihSaat(new Date(f.baslangic).getTime()+base*60000)+")")
+              gec>0 ? h(React.Fragment,null,
+                       "⏱ Gecikme: "+fmtSureSaat(gec)+"  (ilk plan bitişi: "+fmtTarihSaat(new Date(f.baslangic).getTime()+base*60000)+")  ",
+                       h("button",{type:"button",style:{...S.ibtn,padding:"2px 7px",fontSize:11},onClick:()=>setPlanReset(true)},"↺ yeni plan kabul et"))
                     : ("Bitiş: "+fmtTarihSaat(bitis)+" · "+fmtSureSaat(f.sureDk))); })(),
           h("label",{style:{display:"flex",alignItems:"center",gap:8,fontWeight:600,marginBottom:8}},
             h("input",{type:"checkbox",checked:!!f.ams,onChange:e=>set("ams",e.target.checked)}), "AMS'li iş (renkli)"),
