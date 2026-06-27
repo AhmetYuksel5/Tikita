@@ -13,6 +13,14 @@
   button{cursor:pointer}
   ::-webkit-scrollbar{height:10px;width:10px}
   ::-webkit-scrollbar-thumb{background:#c3cedd;border-radius:10px}
+  .tk-prog{transition:width .6s cubic-bezier(.4,0,.2,1)}
+  .tk-stripe{position:relative;overflow:hidden}
+  .tk-stripe::after{content:"";position:absolute;inset:0;
+    background-image:linear-gradient(45deg,rgba(255,255,255,.35) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.35) 50%,rgba(255,255,255,.35) 75%,transparent 75%);
+    background-size:22px 22px;animation:tkmove 1s linear infinite}
+  @keyframes tkmove{to{background-position:22px 0}}
+  @keyframes tkglow{0%,100%{box-shadow:0 0 0 0 rgba(34,211,238,.0)}50%{box-shadow:0 0 14px 1px rgba(34,211,238,.55)}}
+  .tk-live{animation:tkglow 1.8s ease-in-out infinite}
 </style>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -114,6 +122,8 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
   }));
   const [tekrar,setTekrar] = useState(false);
   const [planReset,setPlanReset] = useState(false);
+  const [tik,setTik] = useState(Date.now());
+  useEffect(()=>{ const t=setInterval(()=>setTik(Date.now()),1000); return ()=>clearInterval(t); },[]);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
   const onceki = useMemo(()=>(plan||[])
     .filter(p=>p.makineId===f.makineId && p.id!==kayit.id)
@@ -149,11 +159,28 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
     onKapat();
   }
   const bitis = new Date(f.baslangic).getTime() + num(f.sureDk)*60000;
+  // ilerleme (% tamamlandı) — canlı
+  const st0=new Date(f.baslangic).getTime(), dur0=num(f.sureDk)*60000, en0=st0+dur0;
+  const pct = dur0<=0 ? 0 : Math.max(0,Math.min(100,Math.round((tik-st0)/dur0*100)));
+  const devam = tik>=st0 && tik<en0;
   return h(Modal,{ baslik: yeni?(tekrar?"Tekrarla":"Baskı Planla"):"İşi Düzenle", onKapat,
     alt: h(React.Fragment,null,
       h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet}, yeni?"Planla":"Kaydet"),
       !yeni && h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{ if(confirm("Bu iş silinsin mi?")){ onSnap&&onSnap(); remove("plan",kayit.id); onKapat(); } }},"Sil"),
       h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
+    !yeni && !tekrar && h("div",{style:{marginBottom:16}},
+      h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}},
+        h("span",{style:S.label},"İlerleme"),
+        h("span",{style:{fontWeight:800,fontSize:26,lineHeight:1,
+          color: pct>=100?C.yesilB:(devam?"#0e9bb8":C.mut)}}, pct+"%")),
+      h("div",{style:{height:18,background:"#e8eef6",borderRadius:99,overflow:"hidden",border:"1px solid "+C.line}},
+        h("div",{className:"tk-prog"+(devam?" tk-stripe tk-live":""),
+          style:{height:"100%",width:pct+"%",borderRadius:99,
+            background: pct>=100?"linear-gradient(90deg,#22c55e,#16a34a)":"linear-gradient(90deg,#22c55e,#22d3ee)"}})),
+      h("div",{style:{fontSize:12.5,color:C.mut,marginTop:7,fontWeight:600}},
+        pct>=100 ? ("✓ Tamamlandı · "+fmtTarihSaat(en0))
+        : tik<st0 ? ("⏳ Başlamasına "+fmtSureSaat((st0-tik)/60000)+" var")
+        : ("🔥 Kalan "+fmtSureSaat((en0-tik)/60000)+" · bitiş ~"+fmtTarihSaat(en0)))),
     h(Field,{label:"Makine"},
       h("select",{style:S.input,value:f.makineId,onChange:e=>set("makineId",e.target.value)},
         makineler.map(m=>h("option",{key:m.id,value:m.id},m.ad)))),
