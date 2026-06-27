@@ -34,7 +34,7 @@ const cfg = {
 };
 const db = getFirestore(initializeApp(cfg));
 
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 const h = React.createElement;
 
 /* ---------- yardımcılar ---------- */
@@ -170,6 +170,11 @@ function MakineYonetim({ makineler, onKapat }){
 /* ============================================================
    GANTT — zaman çizelgesi hesapları
    ============================================================ */
+function tickStep(gunW){ // saat aralığı — zoom'a göre detay
+  const slots = Math.max(1, Math.floor(gunW/36));
+  for(const o of [1,2,3,4,6,8,12,24]){ if(24/o <= slots) return o; }
+  return 24;
+}
 function makineTimeline(makineId, plan, baslaMs, bitMs){
   const js = plan.filter(p=>p.makineId===makineId)
     .map(p=>({ p, s:new Date(p.baslangic).getTime(), e:new Date(p.baslangic).getTime()+num(p.sureDk)*60000 }))
@@ -194,12 +199,24 @@ function App(){
   const [isModal, setIsModal] = useState(null);
   const [makineAcik, setMakineAcik] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [zoom, setZoom] = useState(1);
+  const [containerW, setContainerW] = useState(1000);
+  const scrollRef = useRef(null);
   useEffect(()=>{ const t=setInterval(()=>setNow(Date.now()),60000); return ()=>clearInterval(t); },[]);
+  useEffect(()=>{
+    if(!scrollRef.current || !window.ResizeObserver) return;
+    const ro=new ResizeObserver(es=>{ for(const e of es) setContainerW(e.contentRect.width); });
+    ro.observe(scrollRef.current); return ()=>ro.disconnect();
+  },[]);
 
+  const LABEL_W = 104, ROW_H = 74;
   const baslaMs = bas;
   const bitMs = bas + gunSayisi*24*3600*1000;
   const toplamMs = bitMs - baslaMs;
-  const GUN_W = 240, LABEL_W = 150, ROW_H = 74;
+  const fitGunW = Math.max(150, (containerW - LABEL_W) / gunSayisi); // zoom 1 → sağda boşluk kalmaz
+  const GUN_W = Math.round(fitGunW * zoom);
+  const step = tickStep(GUN_W);
+  const ticks = []; for(let hr=0; hr<=24; hr+=step) ticks.push(hr);
   const toplamW = gunSayisi*GUN_W;
   const px = toplamW / toplamMs;
 
@@ -208,9 +225,17 @@ function App(){
     const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id, plan, baslaMs, bitMs); }); return m;
   },[plan, makineler, baslaMs, bitMs]);
 
-  // boş kalacak makineler (gelecekteki boşluklar)
+  // boş kalacak makineler — art arda planlı işlerde SON bitiş saatini baz al (makine başına tek satır)
   const bosListe = [];
-  mlist.forEach(mk=>{ (timelines[mk.id]?.bos||[]).forEach(b=>{ if(b.end-b.start > 5*60000) bosListe.push({ makine:mk, ...b }); }); });
+  mlist.forEach(mk=>{
+    const jobs = plan.filter(p=>p.makineId===mk.id)
+      .map(p=>new Date(p.baslangic).getTime()+num(p.sureDk)*60000)
+      .filter(e=>e>baslaMs);
+    let start;
+    if(!jobs.length){ start = Math.max(baslaMs, now); }       // hiç işi yok → şu an boşta
+    else { const son = Math.max.apply(null, jobs); if(son>=bitMs) return; start = son; } // son iş bitince boşta
+    bosListe.push({ makine:mk, start });
+  });
   bosListe.sort((a,b)=>a.start-b.start);
 
   // genel özet
@@ -239,6 +264,10 @@ function App(){
         h("button",{style:S.ibtn,onClick:()=>setBas(gunBasi(Date.now()).getTime())},"Bugün"),
         h("select",{style:{...S.input,width:90},value:gunSayisi,onChange:e=>setGunSayisi(num(e.target.value))},
           [3,4,7,14].map(g=>h("option",{key:g,value:g},g+" gün"))),
+        h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+          h("button",{style:S.ibtn,title:"Uzaklaştır",onClick:()=>setZoom(z=>Math.max(1,Math.round((z-0.5)*10)/10))},"🔍−"),
+          h("span",{style:{fontSize:12,color:C.mut,minWidth:30,textAlign:"center"}},zoom+"x"),
+          h("button",{style:S.ibtn,title:"Yakınlaştır",onClick:()=>setZoom(z=>Math.min(6,Math.round((z+0.5)*10)/10))},"🔍+")),
         h("button",{style:S.btn(),onClick:()=>setMakineAcik(true)},"⚙ Makineler"),
         h("button",{style:S.btn("p"),onClick:()=>setIsModal({})},"+ Baskı Planla"))),
 
@@ -252,7 +281,7 @@ function App(){
           h(Lejant,{renk:C.mavi,ad:"AMS'li iş"}),
           h(Lejant,{renk:C.sari,ad:"AMS gerektirmeyen"}))),
       // kaydırmalı alan
-      h("div",{style:{overflowX:"auto"}},
+      h("div",{ref:scrollRef,style:{overflowX:"auto"}},
         h("div",{style:{minWidth:LABEL_W+toplamW}},
           // gün başlık satırı
           h("div",{style:{display:"flex",borderBottom:"1px solid "+C.line,background:"#f3f6fb"}},
@@ -261,7 +290,7 @@ function App(){
               h("div",{style:{fontWeight:800,fontSize:13}},pad(g.getDate())+" "+AYLAR[g.getMonth()]),
               h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},GUNLER[g.getDay()]),
               h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:10,color:C.mut,marginTop:3,padding:"0 2px"}},
-                ["00","06","12","18","24"].map(t=>h("span",{key:t},t)))))),
+                ticks.map(hr=>h("span",{key:hr}, step>=2 ? pad(hr)+":00" : pad(hr))))))),
           // makine satırları
           mlist.length===0 ? h("div",{style:{padding:20,color:C.mut,textAlign:"center"}},"Makine yok. ⚙ Makineler'den ekle.")
           : mlist.map(mk=>{
@@ -271,7 +300,8 @@ function App(){
                   h("div",{style:{fontWeight:800,fontSize:14}},mk.ad),
                   mk.tur && h("div",{style:{fontSize:11,color:C.mut}},mk.tur)),
                 h("div",{style:{position:"relative",width:toplamW,flexShrink:0,
-                  backgroundImage:"repeating-linear-gradient(90deg,"+C.line+" 0 1px,transparent 1px "+(GUN_W/4)+"px)"}},
+                  backgroundImage:"repeating-linear-gradient(90deg,#c8d3e0 0 1px,transparent 1px "+GUN_W+"px),"+
+                    "repeating-linear-gradient(90deg,#eef2f7 0 1px,transparent 1px "+(GUN_W*step/24)+"px)"}},
                   // boş bloklar
                   tl.bos.map((b,i)=>{
                     const left=(b.start-baslaMs)*px, width=(b.end-b.start)*px;
