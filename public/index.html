@@ -132,15 +132,20 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
   const [tik,setTik] = useState(Date.now());
   useEffect(()=>{ const t=setInterval(()=>setTik(Date.now()),1000); return ()=>clearInterval(t); },[]);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
-  // önceki baskılar — tekil (ad+adet+süre+ams), en yeni önce
+  // önceki baskılar — tekil (ad+adet+süre+ams). Seçili makinede basılanlar en üstte,
+  // o makinenin en son baskısı en başta; sonra diğer makineler. Her grup en yeni önce.
   const oncekiler = useMemo(()=>{
     const seen=new Set(), out=[];
     (plan||[]).filter(p=>p.id!==kayit.id)
-      .sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))
+      .sort((a,b)=>{
+        const am=(a.makineId===f.makineId)?1:0, bm=(b.makineId===f.makineId)?1:0;
+        if(am!==bm) return bm-am;                              // seçili makine önce
+        return new Date(b.baslangic)-new Date(a.baslangic);    // en yeni önce
+      })
       .forEach(p=>{ const sig=(p.ad||"")+"|"+num(p.adet)+"|"+num(p.sureDk)+"|"+(p.ams?1:0);
         if(!seen.has(sig)){ seen.add(sig); out.push(p); } });
     return out.slice(0,30);
-  },[plan,kayit.id]);
+  },[plan,kayit.id,f.makineId]);
   function tekrarla(o){
     if(!o) return;
     setF(s=>({ ...s, ad:o.ad, urunId:o.urunId||"", parcaAd:o.parcaAd||"", adet:o.adet, sureDk:o.sureDk, ams:!!o.ams, not:o.not||"" }));
@@ -216,7 +221,11 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
       h("select",{style:{...S.input,borderColor:C.navyHdr,fontWeight:700},value:"",
         onChange:e=>{ const o=oncekiler[+e.target.value]; if(o) tekrarla(o); }},
         h("option",{value:""},"— önceki baskılardan seç —"),
-        oncekiler.map((o,i)=>h("option",{key:i,value:i}, num(o.adet)+" x "+o.ad+" · "+fmtSureSaat(o.sureDk)+(o.ams?" · AMS":""))))),
+        oncekiler.map((o,i)=>{
+          const baskaMak = o.makineId!==f.makineId;
+          const makAd = baskaMak ? ((makineler.find(m=>m.id===o.makineId)||{}).ad||"") : "";
+          return h("option",{key:i,value:i}, num(o.adet)+" x "+o.ad+" · "+fmtSureSaat(o.sureDk)+(o.ams?" · AMS":"")+(makAd?" · ["+makAd+"]":""));
+        }))),
     tekrar
       ? h(React.Fragment,null,
           h("div",{style:{...S.card,padding:"10px 12px",marginBottom:12,background:"#f3f6fb"}},
