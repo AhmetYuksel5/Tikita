@@ -456,7 +456,10 @@ function StokTab({ urunler, plan }){
   },[plan,urunler]);
 
   // montajda = basımı bitmiş ama montajı bitmemiş (montaja hazır havuz) — parçalıda takım sayısı
-  const parcaAvail=(u,p)=> Math.max(0, num((basildiParca[u.id]||{})[p]) - num((u.parcaTuket||{})[p]));
+  //  parça stoğu = basımdan gelen + elle eklenen − montajda kullanılan
+  const parcaAvail=(u,p)=> Math.max(0, num((basildiParca[u.id]||{})[p]) + num((u.parcaElle||{})[p]) - num((u.parcaTuket||{})[p]));
+  async function parcaElleDegis(u,p,d){ const pe={...(u.parcaElle||{})}; pe[p]=num(pe[p])+d; await save("stok_urun",{id:u.id,parcaElle:pe}); }
+  const miniBtn={...S.ibtn,padding:"1px 9px",fontSize:16,lineHeight:1.2,fontWeight:800};
   const montajdaOf=(u)=> (u.parcalar||[]).length
     ? Math.min.apply(null, u.parcalar.map(p=>parcaAvail(u,p)))
     : Math.max(0, num(basildiMap[u.id]) - num(u.montajBitti));
@@ -486,6 +489,7 @@ function StokTab({ urunler, plan }){
     h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},ad), h("div",{style:{fontSize:22,fontWeight:800,color:renk}},num(deg)));
 
   return h("div",null,
+    h("div",{style:{userSelect:"none",WebkitUserSelect:"none"}},
     h("div",{style:{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}},
       ozetKart("🖨 Basımda toplam",T.basim,"#0e7490"),
       ozetKart("🔧 Montajda toplam",T.montajda,"#c2410c"),
@@ -508,15 +512,18 @@ function StokTab({ urunler, plan }){
                 h("button",{style:{...S.ibtn,color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{if(confirm(u.ad+" silinsin mi?"))remove("stok_urun",u.id);}},"🗑"))),
             u.not && h("div",{style:{fontSize:12,color:C.mut,marginTop:4}},u.not),
             parcali && h("div",{style:{margin:"10px 0",borderTop:"1px solid "+C.line,paddingTop:8}},
-              h("div",{style:{...S.label,marginBottom:6}},"Parça stoğu (basımdan) · "+takim+" takım montaja hazır"),
+              h("div",{style:{...S.label,marginBottom:6}},"Parça stoğu · "+takim+" takım montaja hazır"),
               (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p)); const mx=Math.max.apply(null,avails);
                 return u.parcalar.map((p,idx)=>{ const eksik = mx-avails[idx];
-                  return h("div",{key:p,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",fontSize:14,
+                  return h("div",{key:p,style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"4px 0",fontSize:14,
                     color: eksik>0?C.kirmiziB:C.txt}},
-                    h("span",null,p, eksik>0?h("span",{style:{marginLeft:6,fontSize:11,fontWeight:700}},"⚠ "+eksik+" eksik"):null),
-                    h("div",{style:{display:"flex",alignItems:"center",gap:10}},
-                      h("span",{style:{fontSize:11,color:C.mut}}, num((basildiParca[u.id]||{})[p])+" basıldı · "+num((u.parcaTuket||{})[p])+" kullanıldı"),
-                      h("b",{style:{minWidth:28,textAlign:"right",color: eksik>0?C.kirmiziB:"#0369a1"}},avails[idx])));
+                    h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p,
+                      eksik>0?h("span",{style:{marginLeft:6,fontSize:11,fontWeight:700}},"⚠ "+eksik+" eksik"):null),
+                    h("div",{style:{display:"flex",alignItems:"center",gap:7,flexShrink:0}},
+                      h("span",{style:{fontSize:11,color:C.mut}}, num((basildiParca[u.id]||{})[p])+" basıldı"+(num((u.parcaElle||{})[p])?" +"+num((u.parcaElle||{})[p])+" elle":"")),
+                      h("button",{style:miniBtn,title:"elle azalt",onClick:()=>parcaElleDegis(u,p,-1)},"−"),
+                      h("b",{style:{minWidth:26,textAlign:"center",color: eksik>0?C.kirmiziB:"#0369a1"}},avails[idx]),
+                      h("button",{style:miniBtn,title:"elle ekle",onClick:()=>parcaElleDegis(u,p,1)},"+")));
                 }); })(),
               (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p)); const mx=Math.max.apply(null,avails);
                 const eksikler=u.parcalar.map((p,idx)=>({p,n:mx-avails[idx]})).filter(x=>x.n>0);
@@ -555,7 +562,7 @@ function StokTab({ urunler, plan }){
                         h("div",{style:{fontSize:11,color:C.mut}}, fmtTarihSaat(st)+(num(p.gram)?" · "+num(p.gram)+" gr":"")+(p.ams?" · AMS":""))),
                       h("span",{style:{flexShrink:0,fontSize:11,fontWeight:800,color:d.c,background:"#f3f6fb",borderRadius:6,padding:"2px 7px"}},d.t));
                   }))); })());
-        })),
+        }))),
     edit && h(StokModal,{kayit:edit,onKapat:()=>setEdit(null)}));
 }
 
