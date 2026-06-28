@@ -108,11 +108,13 @@ function Lejant({ renk, ad }){
 /* ============================================================
    İŞ (plan kaydı) modalı
    ============================================================ */
-function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
+function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
   const yeni = !kayit.id;
   const [f,setF] = useState(()=>({
     makineId: kayit.makineId || (makineler[0]&&makineler[0].id) || "",
     ad:       kayit.ad       || "",
+    urunId:   kayit.urunId   || "",
+    parcaAd:  kayit.parcaAd  || "",
     adet:     kayit.adet     || 1,
     baslangic:toInput(kayit.baslangic || Date.now()),
     sureDk:   kayit.sureDk   || "",
@@ -120,6 +122,11 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
     not:      kayit.not      || "",
     basladi:  !!kayit.basladi,
   }));
+  // ürün seçimi: kayıtlı bir ürüne bağlıysa o ürünü/parçasını seç, yoksa elle giriş ("diger")
+  const urunListe = (urunler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const [urunMod,setUrunMod] = useState(()=> (kayit.urunId || !kayit.ad) ? "urun" : "diger");
+  // mevcut seçimin select value'su
+  const urunVal = f.urunId ? ("u:"+f.urunId+(f.parcaAd?("|"+f.parcaAd):"")) : "";
   const [tekrar,setTekrar] = useState(false);
   const [planReset,setPlanReset] = useState(false);
   const [tik,setTik] = useState(Date.now());
@@ -136,8 +143,18 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
   },[plan,kayit.id]);
   function tekrarla(o){
     if(!o) return;
-    setF(s=>({ ...s, ad:o.ad, adet:o.adet, sureDk:o.sureDk, ams:!!o.ams, not:o.not||"" }));
+    setF(s=>({ ...s, ad:o.ad, urunId:o.urunId||"", parcaAd:o.parcaAd||"", adet:o.adet, sureDk:o.sureDk, ams:!!o.ams, not:o.not||"" }));
+    setUrunMod((o.urunId||!o.ad)?"urun":"diger");
     setTekrar(true);
+  }
+  // ürün açılır listesinden seçim: value "u:<id>" veya "u:<id>|<parça>"
+  function urunSec(val){
+    if(!val){ setF(s=>({...s,urunId:"",parcaAd:"",ad:""})); return; }
+    const [, rest] = val.split(/^u:/);
+    const [id,parca] = (rest||"").split("|");
+    const u = urunListe.find(x=>x.id===id);
+    if(!u) return;
+    setF(s=>({...s, urunId:id, parcaAd:parca||"", ad: parca ? (u.ad+" · "+parca) : u.ad }));
   }
   async function kaydet(){
     if(!f.makineId) return alert("Makine seç.");
@@ -150,6 +167,7 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
     // planSureDk = ilk plan süresi (gecikme baz çizgisi). İlk kayıtta sabitlenir; "yeni plan kabul et" ile sıfırlanabilir.
     const planSureDk = (planReset || kayit.planSureDk==null) ? num(f.sureDk) : num(kayit.planSureDk);
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
+      urunId: (urunMod==="urun" ? f.urunId : "") || "", parcaAd: (urunMod==="urun" ? f.parcaAd : "") || "",
       baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), planSureDk, ams:!!f.ams, not:f.not,
       basladi, gercekBaslangic: basladi ? (kayit.gercekBaslangic || new Date(f.baslangic).toISOString()) : null });
     if(!yeni && kayit.makineId===f.makineId){
@@ -209,7 +227,24 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
           h("div",{style:{fontSize:12,color:C.mut,marginTop:-4}}, f.sureDk?("Bitiş: "+fmtTarihSaat(bitis)):""))
       : h(React.Fragment,null,
           h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12}},
-            h(Field,{label:"İş / ürün adı"}, h("input",{style:S.input,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Sudoku / SD"})),
+            h(Field,{label:"Ürün"},
+              urunMod==="diger"
+                ? h("div",{style:{display:"flex",gap:6}},
+                    h("input",{style:{...S.input,flex:1},value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"İş / ürün adı (elle gir)",autoFocus:true}),
+                    h("button",{type:"button",style:{...S.ibtn,whiteSpace:"nowrap"},
+                      onClick:()=>{ setUrunMod("urun"); setF(s=>({...s,ad:"",urunId:"",parcaAd:""})); }},"⬅ Listeden"))
+                : h("select",{style:{...S.input,fontWeight:f.urunId?700:400},value:urunVal,
+                    onChange:e=>{ const v=e.target.value; if(v==="diger"){ setUrunMod("diger"); setF(s=>({...s,urunId:"",parcaAd:"",ad:""})); } else urunSec(v); }},
+                    h("option",{value:""},"— ürün seç —"),
+                    urunListe.map(u=>{
+                      const parcali=(u.parcalar||[]).length>0;
+                      return parcali
+                        ? h("optgroup",{key:u.id,label:u.ad},
+                            h("option",{value:"u:"+u.id},u.ad+" (tümü / takım)"),
+                            u.parcalar.map(p=>h("option",{key:p,value:"u:"+u.id+"|"+p},"↳ "+p)))
+                        : h("option",{key:u.id,value:"u:"+u.id},u.ad);
+                    }),
+                    h("option",{value:"diger"},"✎ Diğer (elle gir)…"))),
             h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:f.adet,onChange:e=>set("adet",e.target.value)}))),
           h(Field,{label:"Başlangıç"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1.3fr",gap:12}},
@@ -348,8 +383,7 @@ function StokModal({ kayit, onKapat }){
     h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not||"",onChange:e=>set("not",e.target.value)})));
 }
 
-function StokTab(){
-  const urunler = useColl("stok_urun");
+function StokTab({ urunler }){
   const [edit,setEdit]=useState(null);
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
   const T = liste.reduce((a,u)=>{a.montajda+=num(u.montajda);a.hazir+=num(u.hazir);a.konsinye+=num(u.konsinye);return a;},{montajda:0,hazir:0,konsinye:0});
@@ -420,6 +454,7 @@ function App(){
   const [sekme, setSekme] = useState("plan");
   const makineler = useColl("makineler");
   const plan = useColl("plan");
+  const stokUrun = useColl("stok_urun");
   const [bas, setBas] = useState(()=>gunBasi(Date.now()).getTime());
   const [gunSayisi, setGunSayisi] = useState(7);
   const [isModal, setIsModal] = useState(null);
@@ -504,7 +539,7 @@ function App(){
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       [["plan","📅 Üretim Planı"],["stok","📦 Stok"]].map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
-    sekme==="stok" && h(StokTab,null),
+    sekme==="stok" && h(StokTab,{urunler:stokUrun}),
     sekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
@@ -690,7 +725,7 @@ function App(){
 
     h("div",{style:{textAlign:"right",fontSize:12,color:C.mut,marginTop:12}},"Güncelleme: "+fmtTarihSaat(now)),
 
-    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,onSnap:snapAl,onKapat:()=>setIsModal(null)}),
+    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,urunler:stokUrun,onSnap:snapAl,onKapat:()=>setIsModal(null)}),
     makineAcik && h(MakineYonetim,{makineler:mlist,onKapat:()=>setMakineAcik(false)})
   ));
 }
