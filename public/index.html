@@ -125,13 +125,18 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
   const [tik,setTik] = useState(Date.now());
   useEffect(()=>{ const t=setInterval(()=>setTik(Date.now()),1000); return ()=>clearInterval(t); },[]);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
-  const onceki = useMemo(()=>(plan||[])
-    .filter(p=>p.makineId===f.makineId && p.id!==kayit.id)
-    .sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))[0] || null,
-    [plan,f.makineId,kayit.id]);
-  function tekrarla(){
-    if(!onceki) return;
-    setF(s=>({ ...s, ad:onceki.ad, adet:onceki.adet, sureDk:onceki.sureDk, ams:!!onceki.ams, not:onceki.not||"" }));
+  // önceki baskılar — tekil (ad+adet+süre+ams), en yeni önce
+  const oncekiler = useMemo(()=>{
+    const seen=new Set(), out=[];
+    (plan||[]).filter(p=>p.id!==kayit.id)
+      .sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))
+      .forEach(p=>{ const sig=(p.ad||"")+"|"+num(p.adet)+"|"+num(p.sureDk)+"|"+(p.ams?1:0);
+        if(!seen.has(sig)){ seen.add(sig); out.push(p); } });
+    return out.slice(0,30);
+  },[plan,kayit.id]);
+  function tekrarla(o){
+    if(!o) return;
+    setF(s=>({ ...s, ad:o.ad, adet:o.adet, sureDk:o.sureDk, ams:!!o.ams, not:o.not||"" }));
     setTekrar(true);
   }
   async function kaydet(){
@@ -189,9 +194,11 @@ function IsModal({ kayit, makineler, plan, onSnap, onKapat }){
         borderColor: f.basladi?C.yesilB:C.line, color: f.basladi?C.yesilT:C.txt}},
       h("input",{type:"checkbox",checked:!!f.basladi,onChange:e=>set("basladi",e.target.checked)}),
       f.basladi ? "✓ Baskı başladı" : "▶ Baskı başladı mı? (manuel)"),
-    yeni && onceki && !tekrar && h("button",{ type:"button", onClick:tekrarla,
-      style:{...S.btn(), width:"100%", marginBottom:12, borderColor:C.navyHdr, color:C.navyHdr, fontWeight:700} },
-      "↻ Bir öncekini tekrarla ("+num(onceki.adet)+" x "+onceki.ad+")"),
+    yeni && !tekrar && oncekiler.length>0 && h(Field,{label:"↻ Önceki baskıdan seç (otomatik doldur)"},
+      h("select",{style:{...S.input,borderColor:C.navyHdr,fontWeight:700},value:"",
+        onChange:e=>{ const o=oncekiler[+e.target.value]; if(o) tekrarla(o); }},
+        h("option",{value:""},"— önceki baskılardan seç —"),
+        oncekiler.map((o,i)=>h("option",{key:i,value:i}, num(o.adet)+" x "+o.ad+" · "+fmtSureSaat(o.sureDk)+(o.ams?" · AMS":""))))),
     tekrar
       ? h(React.Fragment,null,
           h("div",{style:{...S.card,padding:"10px 12px",marginBottom:12,background:"#f3f6fb"}},
