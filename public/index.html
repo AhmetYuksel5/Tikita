@@ -392,10 +392,20 @@ function StokModal({ kayit, onKapat }){
     h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not||"",onChange:e=>set("not",e.target.value)})));
 }
 
-function StokTab({ urunler }){
+function StokTab({ urunler, plan }){
   const [edit,setEdit]=useState(null);
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
-  const T = liste.reduce((a,u)=>{a.montajda+=num(u.montajda);a.hazir+=num(u.hazir);a.konsinye+=num(u.konsinye);return a;},{montajda:0,hazir:0,konsinye:0});
+  // basım aşamasında olan miktar — şu an makinede çalışan (başlamış, bitmemiş) baskılardan ürüne göre
+  const basimMap = useMemo(()=>{
+    const now=Date.now(), m={};
+    (plan||[]).forEach(p=>{
+      if(!p.urunId || !p.basladi) return;
+      const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000;
+      if(s<=now && e>now) m[p.urunId]=num(m[p.urunId])+num(p.adet||1);   // çalışıyor
+    });
+    return m;
+  },[plan]);
+  const T = liste.reduce((a,u)=>{a.basim+=num(basimMap[u.id]);a.montajda+=num(u.montajda);a.hazir+=num(u.hazir);a.konsinye+=num(u.konsinye);return a;},{basim:0,montajda:0,hazir:0,konsinye:0});
 
   async function parcaDegis(u,part,d){ const ps={...(u.parcaStok||{})}; ps[part]=Math.max(0,num(ps[part])+d); await save("stok_urun",{id:u.id,parcaStok:ps}); }
   async function montajaAl(u){
@@ -418,6 +428,7 @@ function StokTab({ urunler }){
 
   return h("div",null,
     h("div",{style:{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}},
+      ozetKart("🖨 Basımda toplam",T.basim,"#0e7490"),
       ozetKart("🔧 Montajda toplam",T.montajda,"#c2410c"),
       ozetKart("📦 Hazır toplam",T.hazir,C.yesilB),
       ozetKart("🏬 Konsinyede toplam",T.konsinye,"#7c3aed")),
@@ -443,7 +454,8 @@ function StokTab({ urunler }){
                   h("button",{style:miniBtn,onClick:()=>parcaDegis(u,p,-1)},"−"),
                   h("b",{style:{minWidth:28,textAlign:"center"}},num((u.parcaStok||{})[p])),
                   h("button",{style:miniBtn,onClick:()=>parcaDegis(u,p,1)},"+"))))),
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,margin:"10px 0 12px",textAlign:"center"}},
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,margin:"10px 0 12px",textAlign:"center"}},
+              asamaKutu("🖨 Basımda",basimMap[u.id],"#0e7490"),
               asamaKutu("Montajda",u.montajda,"#c2410c"),
               asamaKutu("Hazır",u.hazir,C.yesilB),
               asamaKutu("Konsinye",u.konsinye,"#7c3aed")),
@@ -551,7 +563,7 @@ function App(){
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       [["plan","📅 Üretim Planı"],["stok","📦 Stok"]].map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
-    sekme==="stok" && h(StokTab,{urunler:stokUrun}),
+    sekme==="stok" && h(StokTab,{urunler:stokUrun,plan}),
     sekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
