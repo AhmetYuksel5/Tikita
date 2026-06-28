@@ -416,7 +416,21 @@ function StokModal({ kayit, onKapat }){
 
 function StokTab({ urunler, plan }){
   const [edit,setEdit]=useState(null);
+  const [acik,setAcik]=useState({});   // ürün kartında baskı listesi açık mı
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
+  // her ürünün TÜM baskıları (urunId'ye göre) — aynı ürünün baskıları tek kartta toplanır
+  const baskiMap = useMemo(()=>{
+    const m={};
+    (plan||[]).forEach(p=>{ if(!p.urunId) return; (m[p.urunId]=m[p.urunId]||[]).push(p); });
+    Object.values(m).forEach(arr=>arr.sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)));
+    return m;
+  },[plan]);
+  const baskiDurum=(p)=>{
+    const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000, now=Date.now();
+    if(!p.basladi) return s>now?{t:"planlandı",c:C.mut}:{t:"onay bekliyor",c:"#e0a200"};
+    if(e<=now) return {t:"bitti",c:C.bitT};
+    return {t:"basımda",c:"#0e7490"};
+  };
   // baskılardan otomatik türetim: aynı üründen toplanır (ayrı kayıt açılmaz)
   //  basimMap  = şu an makinede çalışan (başlamış, bitmemiş) adet
   //  basildiMap= basımı bitmiş toplam adet (urunId'ye göre)
@@ -508,7 +522,26 @@ function StokTab({ urunler, plan }){
               h("button",{style:S.ibtn,onClick:()=>montajaAl(u)}, "🔧 Montaja al"),
               h("button",{style:S.ibtn,onClick:()=>montajBitir(u)}, "✓ Montajı bitir"),
               h("button",{style:S.ibtn,onClick:()=>konsinyeVer(u)}, "🏬 Konsinyeye ver"),
-              h("button",{style:S.ibtn,onClick:()=>iade(u)}, "↩ İade")));
+              h("button",{style:S.ibtn,onClick:()=>iade(u)}, "↩ İade")),
+            // bu ürünün tüm baskıları (basım bilgileri buraya düşer)
+            (()=>{ const bl=baskiMap[u.id]||[]; if(!bl.length) return null;
+              const toplamAdet=bl.reduce((s,p)=>s+num(p.adet||1),0);
+              const toplamGram=bl.reduce((s,p)=>s+num(p.gram),0);
+              const ac=!!acik[u.id];
+              return h("div",{style:{marginTop:12,borderTop:"1px solid "+C.line,paddingTop:8}},
+                h("button",{type:"button",style:{...S.ibtn,width:"100%",textAlign:"left",fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"},
+                  onClick:()=>setAcik(s=>({...s,[u.id]:!s[u.id]}))},
+                  h("span",null,(ac?"▾":"▸")+" Baskılar ("+bl.length+")"),
+                  h("span",{style:{fontSize:11,color:C.mut,fontWeight:600}}, toplamAdet+" adet"+(toplamGram?" · "+toplamGram+" gr":""))),
+                ac && h("div",{style:{marginTop:8,maxHeight:230,overflowY:"auto"}},
+                  bl.map((p,i)=>{ const d=baskiDurum(p), st=new Date(p.baslangic).getTime();
+                    return h("div",{key:p.id||i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,
+                      padding:"6px 8px",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
+                      h("div",{style:{minWidth:0}},
+                        h("div",{style:{fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}, num(p.adet||1)+" x "+p.ad),
+                        h("div",{style:{fontSize:11,color:C.mut}}, fmtTarihSaat(st)+(num(p.gram)?" · "+num(p.gram)+" gr":"")+(p.ams?" · AMS":""))),
+                      h("span",{style:{flexShrink:0,fontSize:11,fontWeight:800,color:d.c,background:"#f3f6fb",borderRadius:6,padding:"2px 7px"}},d.t));
+                  }))); })());
         })),
     edit && h(StokModal,{kayit:edit,onKapat:()=>setEdit(null)}));
 }
