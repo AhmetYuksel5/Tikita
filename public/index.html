@@ -105,6 +105,29 @@ function Lejant({ renk, ad }){
     h("span",{style:{width:16,height:16,borderRadius:4,background:renk,display:"inline-block"}}), ad);
 }
 
+/* Sağa kaydır → solda Sil çıkan satır (önceki baskılar listesi) */
+function OncekiSatir({ label, alt, onSec, onSil }){
+  const [dx,setDx]=useState(0);
+  const [open,setOpen]=useState(false);
+  const st=React.useRef({x:0,base:0,drag:false,moved:false});
+  const REVEAL=84;
+  const xOf=e=>(e.touches&&e.touches[0]?e.touches[0].clientX:e.clientX);
+  function down(e){ st.current={x:xOf(e),base:dx,drag:true,moved:false}; }
+  function move(e){ const s=st.current; if(!s.drag)return; const dxRaw=xOf(e)-s.x; if(Math.abs(dxRaw)>4)s.moved=true;
+    setDx(Math.max(0,Math.min(REVEAL,s.base+dxRaw))); }
+  function up(){ const s=st.current; if(!s.drag)return; s.drag=false; const o=dx>REVEAL/2; setOpen(o); setDx(o?REVEAL:0); }
+  function tikla(){ if(st.current.moved)return; if(open){ setOpen(false); setDx(0); return; } onSec&&onSec(); }
+  return h("div",{style:{position:"relative",overflow:"hidden",borderRadius:8,marginBottom:6,border:"1px solid "+C.line}},
+    h("button",{type:"button",onClick:onSil,style:{position:"absolute",left:0,top:0,bottom:0,width:REVEAL,border:"none",
+      background:C.kirmiziB,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}},"🗑 Sil"),
+    h("div",{onMouseDown:down,onMouseMove:move,onMouseUp:up,onMouseLeave:up,
+      onTouchStart:down,onTouchMove:move,onTouchEnd:up,onClick:tikla,
+      style:{position:"relative",transform:"translateX("+dx+"px)",transition:st.current.drag?"none":"transform .18s",
+        background:"#fff",padding:"9px 12px",cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",touchAction:"pan-y"}},
+      h("div",{style:{fontWeight:700,fontSize:14}},label),
+      alt&&h("div",{style:{fontSize:11.5,color:C.mut,marginTop:2}},alt)));
+}
+
 /* ============================================================
    İŞ (plan kaydı) modalı
    ============================================================ */
@@ -159,7 +182,7 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
     const [id,parca] = (rest||"").split("|");
     const u = urunListe.find(x=>x.id===id);
     if(!u) return;
-    setF(s=>({...s, urunId:id, parcaAd:parca||"", ad: parca ? (u.ad+" · "+parca) : u.ad }));
+    setF(s=>({...s, urunId:id, parcaAd:parca||"", ad: parca ? (u.ad+" "+parca) : u.ad }));
   }
   async function kaydet(){
     if(!f.makineId) return alert("Makine seç.");
@@ -217,14 +240,16 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
         borderColor: f.basladi?C.yesilB:C.line, color: f.basladi?C.yesilT:C.txt}},
       h("input",{type:"checkbox",checked:!!f.basladi,onChange:e=>set("basladi",e.target.checked)}),
       f.basladi ? "✓ Baskı başladı" : "▶ Baskı başladı mı? (manuel)"),
-    yeni && !tekrar && oncekiler.length>0 && h(Field,{label:"↻ Önceki baskıdan seç (otomatik doldur)"},
-      h("select",{style:{...S.input,borderColor:C.navyHdr,fontWeight:700},value:"",
-        onChange:e=>{ const o=oncekiler[+e.target.value]; if(o) tekrarla(o); }},
-        h("option",{value:""},"— önceki baskılardan seç —"),
+    yeni && !tekrar && oncekiler.length>0 && h(Field,{label:"↻ Önceki baskıdan seç (dokun → doldur · sağa kaydır → sil)"},
+      h("div",{style:{maxHeight:230,overflowY:"auto",paddingRight:2}},
         oncekiler.map((o,i)=>{
           const baskaMak = o.makineId!==f.makineId;
           const makAd = baskaMak ? ((makineler.find(m=>m.id===o.makineId)||{}).ad||"") : "";
-          return h("option",{key:i,value:i}, num(o.adet)+" x "+o.ad+" · "+fmtSureSaat(o.sureDk)+(o.ams?" · AMS":"")+(makAd?" · ["+makAd+"]":""));
+          return h(OncekiSatir,{ key:o.id||i,
+            label: num(o.adet)+" x "+o.ad,
+            alt: fmtSureSaat(o.sureDk)+(o.ams?" · AMS":"")+(makAd?" · ["+makAd+"]":""),
+            onSec: ()=>tekrarla(o),
+            onSil: ()=>{ if(o.id && confirm(o.ad+" baskısı listeden silinsin mi?\n(Bu baskı kaydı tamamen silinir.)")){ onSnap&&onSnap(); remove("plan",o.id); } } });
         }))),
     tekrar
       ? h(React.Fragment,null,
