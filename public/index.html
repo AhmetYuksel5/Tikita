@@ -805,8 +805,59 @@ function PazUrunModal({ kayit, onKapat }){
     h(Field,{label:"Satış fiyatı (₺ — öneri)"}, h("input",{type:"number",min:0,step:"0.01",style:S.input,value:satisFiyat,onChange:e=>setSatisFiyat(e.target.value)})));
 }
 
+// KONUM SEÇİCİ — mekan adı ara (OpenStreetMap, anahtarsız) + GPS + harita
+function KonumSec({ ad, lat, lng, onChange }){
+  const [q,setQ]=useState(ad||"");
+  const [sonuc,setSonuc]=useState([]); const [ara,setAra]=useState(false);
+  async function aramaYap(){ const t=q.trim(); if(!t) return; setAra(true); setSonuc([]);
+    try{ const r=await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=tr&q="+encodeURIComponent(t));
+      setSonuc(await r.json()); }catch(e){ alert("Arama başarısız (internet?)."); } finally{ setAra(false); } }
+  function sec(r){ const kisa=(r.display_name||"").split(",")[0]||q; onChange({ad:kisa,lat:(+r.lat).toFixed(6),lng:(+r.lon).toFixed(6),tam:r.display_name}); setQ(kisa); setSonuc([]); }
+  function gps(){ if(!navigator.geolocation) return alert("Cihaz konum desteklemiyor.");
+    navigator.geolocation.getCurrentPosition(async p=>{ const la=p.coords.latitude.toFixed(6),lo=p.coords.longitude.toFixed(6); let nm=q||ad||"";
+      try{ const r=await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=tr&lat="+la+"&lon="+lo); const j=await r.json(); nm=j.name||(j.display_name||"").split(",")[0]||nm; }catch(e){}
+      onChange({ad:nm,lat:la,lng:lo}); setQ(nm); }, e=>alert("Konum alınamadı: "+e.message),{enableHighAccuracy:true,timeout:10000,maximumAge:0}); }
+  return h("div",null,
+    h("div",{style:{display:"flex",gap:6}},
+      h("input",{style:{...S.input,flex:1},value:q,onChange:e=>setQ(e.target.value),
+        onKeyDown:e=>{ if(e.key==="Enter"){ e.preventDefault(); aramaYap(); } },placeholder:"Mekan adı ara — örn. Migros Üsküdar"}),
+      h("button",{type:"button",style:S.btn("p"),onClick:aramaYap},ara?"…":"🔎"),
+      h("button",{type:"button",style:S.btn(),onClick:gps,title:"Konumumu al"},"📍")),
+    sonuc.length>0 && h("div",{style:{...S.card,marginTop:6,maxHeight:180,overflowY:"auto"}},
+      sonuc.map((r,i)=>h("div",{key:i,onClick:()=>sec(r),style:{padding:"8px 10px",borderTop:i?"1px solid "+C.line:"none",cursor:"pointer",fontSize:12.5}},
+        h("b",null,(r.display_name||"").split(",")[0]), h("div",{style:{color:C.mut,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.display_name)))),
+    (lat&&lng) && h(React.Fragment,null,
+      h("div",{style:{fontSize:11.5,color:C.mut,marginTop:6}}, "📍 "+lat+", "+lng+"  ",
+        h("a",{href:"https://www.google.com/maps/search/?api=1&query="+lat+","+lng,target:"_blank",style:{color:"#0369a1",fontWeight:700,textDecoration:"none"}},"haritada aç")),
+      h("iframe",{title:"harita",loading:"lazy",src:"https://maps.google.com/maps?q="+lat+","+lng+"&z=16&output=embed",style:{width:"100%",height:160,border:0,borderRadius:10,marginTop:6}})));
+}
+
+// MÜŞTERİ ekle / düzenle
+function MusteriModal({ kayit, bolgeler, onKapat }){
+  const yeni=!kayit.id;
+  const [f,setF]=useState(()=>({ ad:kayit.ad||"",telefon:kayit.telefon||"",bolge:kayit.bolge||"",adres:kayit.adres||"",
+    lat:kayit.lat||"",lng:kayit.lng||"",not:kayit.not||"" }));
+  const set=(k,v)=>setF(s=>({...s,[k]:v}));
+  async function kaydet(){ if(!f.ad.trim()) return alert("Müşteri / mekan adı gir."); await save("musteri",{id:kayit.id,...f,ad:f.ad.trim()}); onKapat(); }
+  return h(Modal,{ baslik:yeni?"Yeni Müşteri":"Müşteri Düzenle", onKapat,
+    alt:h(React.Fragment,null,
+      h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet},"Kaydet"),
+      !yeni&&h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{if(confirm(f.ad+" silinsin mi?")){remove("musteri",kayit.id);onKapat();}}},"Sil"),
+      h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
+    h(Field,{label:"Müşteri / mekan adı"}, h("input",{style:S.input,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Migros Bağlarbaşı"})),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      h(Field,{label:"📞 Telefon"}, h("input",{type:"tel",style:S.input,value:f.telefon,onChange:e=>set("telefon",e.target.value),placeholder:"05xx…"})),
+      h(Field,{label:"Bölge (ilçe)"}, h(React.Fragment,null,
+        h("input",{style:S.input,list:"mus-bolge-list",value:f.bolge,onChange:e=>set("bolge",e.target.value),placeholder:"Üsküdar"}),
+        h("datalist",{id:"mus-bolge-list"},(bolgeler||[]).map(b=>h("option",{key:b.id,value:b.ad})))))),
+    h(Field,{label:"📍 Konum (mekan ara veya 📍 ile al)"},
+      h(KonumSec,{ad:f.adres||f.ad,lat:f.lat,lng:f.lng,onChange:o=>setF(s=>({...s,lat:o.lat,lng:o.lng,adres:o.tam||o.ad||s.adres,ad:s.ad||o.ad||""}))})),
+    h(Field,{label:"Açık adres"}, h("input",{style:S.input,value:f.adres,onChange:e=>set("adres",e.target.value),placeholder:"Cadde / sokak / no"})),
+    h(Field,{label:"📝 Not (yetkili, çalışma saati, anlaşma…)"}, h("textarea",{style:{...S.input,minHeight:64,resize:"vertical"},value:f.not,onChange:e=>set("not",e.target.value)})));
+}
+
 // stoktan al / iade / satış / konsinye işlemleri
-function PazIslemModal({ u, mod, alisVar, bolgeler, onKapat }){
+function PazIslemModal({ u, mod, alisVar, bolgeler, musteriler, onKapat }){
   const cfg={ al:{baslik:"📥 Stoktan al",max:num(u.stokta),renk:"#0369a1"},
     iade:{baslik:"↩ Stoğa iade",max:num(u.pazStok),renk:"#0369a1"},
     sat:{baslik:"💰 Satış",max:num(u.pazStok),renk:C.yesilB},
@@ -818,12 +869,11 @@ function PazIslemModal({ u, mod, alisVar, bolgeler, onKapat }){
   const [bolge,setBolge]=useState("");
   const [telefon,setTelefon]=useState("");
   const [musteriNot,setMusteriNot]=useState("");
-  const [lat,setLat]=useState(""); const [lng,setLng]=useState("");
+  const [lat,setLat]=useState(""); const [lng,setLng]=useState(""); const [konumAd,setKonumAd]=useState("");
+  const [musteriId,setMusteriId]=useState("");
   const [fotoK,setFotoK]=useState([]); const [yk,setYk]=useState(false);
-  function konumAl(){ if(!navigator.geolocation) return alert("Cihaz konum desteklemiyor.");
-    navigator.geolocation.getCurrentPosition(p=>{ setLat(p.coords.latitude.toFixed(6)); setLng(p.coords.longitude.toFixed(6)); },
-      e=>alert("Konum alınamadı: "+e.message),{enableHighAccuracy:true,timeout:10000,maximumAge:0}); }
-  function konumYapistir(v){ const m=(v||"").match(/(-?\d{1,3}\.\d+)[, ]+(-?\d{1,3}\.\d+)/); if(m){ setLat(m[1]); setLng(m[2]); } }
+  function musSec(id){ setMusteriId(id); const m=(musteriler||[]).find(x=>x.id===id); if(!m) return;
+    setYer(m.ad||""); setTelefon(m.telefon||""); setBolge(m.bolge||""); setLat(m.lat||""); setLng(m.lng||""); setKonumAd(m.ad||""); if(m.not) setMusteriNot(m.not); }
   async function fotoEkle(e){ const fs=Array.from(e.target.files||[]); if(!fs.length) return; setYk(true);
     try{ const y=[]; for(const f of fs) y.push(await resizeImg(f,1000)); setFotoK(s=>[...s,...y].slice(0,6)); }
     catch(err){ alert("Görsel eklenemedi."); } finally{ setYk(false); e.target.value=""; } }
@@ -839,7 +889,7 @@ function PazIslemModal({ u, mod, alisVar, bolgeler, onKapat }){
     else if(mod==="konsinye"){ if(!yer.trim()) return alert("Nereye bıraktığını yaz.");
       await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-ad});
       await save("pazarlama_hareket",{tip:"konsinye",urunId:u.id,urunAd:u.ad,adet:ad,kalan:ad,alisFiyat:num(alis),satisFiyat:num(satis),
-        yer:yer.trim(),bolge:bolge.trim(),telefon:telefon.trim(),musteriNot:musteriNot.trim(),lat,lng,fotoK,tarih:iso}); }
+        yer:yer.trim(),bolge:bolge.trim(),telefon:telefon.trim(),musteriNot:musteriNot.trim(),musteriId,lat,lng,fotoK,tarih:iso}); }
     onKapat();
   }
   return h(Modal,{ baslik:cfg.baslik+" — "+u.ad, onKapat,
@@ -861,17 +911,14 @@ function PazIslemModal({ u, mod, alisVar, bolgeler, onKapat }){
     // —— Konsinye: müşteri bilgileri ——
     mod==="konsinye" && h("div",{style:{marginTop:6,paddingTop:12,borderTop:"1px solid "+C.line}},
       h("div",{style:{...S.label,marginBottom:8}},"📋 Müşteri bilgileri (konsinye)"),
+      (musteriler||[]).length>0 && h(Field,{label:"👥 Kayıtlı müşteriden seç"},
+        h("select",{style:{...S.input,fontWeight:musteriId?700:400},value:musteriId,onChange:e=>musSec(e.target.value)},
+          h("option",{value:""},"— yeni / kayıtsız —"),
+          (musteriler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(m=>
+            h("option",{key:m.id,value:m.id}, m.ad+(m.bolge?(" · "+m.bolge):""))))),
       h(Field,{label:"📞 Telefon"}, h("input",{type:"tel",style:S.input,value:telefon,onChange:e=>setTelefon(e.target.value),placeholder:"05xx xxx xx xx"})),
-      h(Field,{label:"📍 Konum (Google Maps)"}, h(React.Fragment,null,
-        h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
-          h("button",{type:"button",style:{...S.btn("p"),flex:"1 1 140px"},onClick:konumAl},"📍 Konumumu al"),
-          (lat&&lng) && h("a",{href:"https://www.google.com/maps/search/?api=1&query="+lat+","+lng,target:"_blank",
-            style:{...S.btn(),display:"inline-flex",alignItems:"center",textDecoration:"none"}},"🗺️ Haritada aç")),
-        h("input",{style:{...S.input,marginTop:8},value:(lat&&lng)?(lat+", "+lng):"",
-          onChange:e=>konumYapistir(e.target.value),placeholder:"veya enlem, boylam yapıştır"}),
-        (lat&&lng) && h("iframe",{title:"harita",loading:"lazy",
-          src:"https://maps.google.com/maps?q="+lat+","+lng+"&z=16&output=embed",
-          style:{width:"100%",height:170,border:0,borderRadius:10,marginTop:8}}))),
+      h(Field,{label:"📍 Konum (mekan ara / 📍 al)"},
+        h(KonumSec,{ad:konumAd||yer,lat,lng,onChange:o=>{ setLat(o.lat); setLng(o.lng); if(o.ad){ setKonumAd(o.ad); if(!yer.trim()) setYer(o.ad); } }})),
       h(Field,{label:"📝 Müşteri notu"}, h("textarea",{style:{...S.input,minHeight:60,resize:"vertical"},value:musteriNot,onChange:e=>setMusteriNot(e.target.value),placeholder:"Yetkili, çalışma saatleri, anlaşma…"})),
       h(Field,{label:"📷 Bırakılan konsinye fotoğrafları"},
         h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(78px,1fr))",gap:8}},
@@ -920,7 +967,9 @@ function KonsinyeCozModal({ k, u, onKapat }){
       h("button",{style:{...S.btn(),flex:1,borderColor:"#0369a1",color:"#0369a1",fontWeight:800},onClick:iade},"↩ Bana iade")));
 }
 
-function PazarlamaTab({ urunler, plan, filamentler, hareketler, bolgeler }){
+function PazarlamaTab({ urunler, plan, filamentler, hareketler, bolgeler, musteriler }){
+  const [gor,setGor]=useState("urun");        // urun | musteri
+  const [musEdit,setMusEdit]=useState(null);  // müşteri ekle/düzenle
   const [islem,setIslem]=useState(null);     // {u,mod}
   const [duzen,setDuzen]=useState(null);      // foto/bilgi düzenle
   const [kons,setKons]=useState(null);        // {k,u}
@@ -947,6 +996,35 @@ function PazarlamaTab({ urunler, plan, filamentler, hareketler, bolgeler }){
 
   return h("div",null,
     h("div",{style:{userSelect:"none",WebkitUserSelect:"none"}},
+    h("div",{style:{display:"flex",gap:8,marginBottom:16}},
+      [["urun","🛒 Ürünler"],["musteri","👥 Müşterilerim"]].map(([k,adL])=>
+        h("button",{key:k,onClick:()=>setGor(k),style:{...S.btn(gor===k?"p":""),padding:"9px 16px",fontWeight:700}},adL))),
+    // —— MÜŞTERİLERİM ——
+    gor==="musteri" && h("div",null,
+      h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Müşteri"),
+      !(musteriler||[]).length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Müşteri yok. + Müşteri ile ekle — konumunu, telefonunu, notlarını kaydet.")
+      : h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))"}},
+          (musteriler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(m=>{ const r=adRenk(m.ad);
+            const adetK=har.filter(x=>x.musteriId===m.id).length;
+            return h("div",{key:m.id,className:"tk-pcard",style:{...S.card,borderTop:"5px solid "+r.ana,boxShadow:"0 4px 14px rgba(15,23,42,.09)"}},
+              h("div",{style:{display:"flex",alignItems:"center",gap:10}},
+                h("div",{style:{width:40,height:40,borderRadius:10,flexShrink:0,background:"linear-gradient(135deg,"+r.ana+","+r.acik+")",
+                  color:"#fff",fontWeight:800,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}, (m.ad||"?").trim().charAt(0).toLocaleUpperCase("tr")),
+                h("div",{style:{minWidth:0,flex:1}},
+                  h("div",{style:{fontWeight:800,fontSize:15.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad),
+                  m.bolge && h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700}},"📍 "+m.bolge)),
+                h("button",{style:{...S.ibtn,flexShrink:0},onClick:()=>setMusEdit(m)},"✎")),
+              m.telefon && h("div",{style:{fontSize:13,marginTop:8}}, "📞 ",
+                h("a",{href:"tel:"+m.telefon,style:{fontWeight:700,color:"#0369a1",textDecoration:"none"}},m.telefon),
+                h("a",{href:"https://wa.me/9"+(m.telefon||"").replace(/\D/g,""),target:"_blank",style:{marginLeft:8,color:"#16a34a",fontWeight:700,textDecoration:"none",fontSize:12}},"WhatsApp")),
+              m.adres && h("div",{style:{fontSize:12,color:C.mut,marginTop:6}},"🏠 "+m.adres),
+              m.not && h("div",{style:{fontSize:12,color:C.txt,marginTop:6,background:"#faf7ff",borderRadius:8,padding:"6px 9px"}},"📝 "+m.not),
+              h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}},
+                (m.lat&&m.lng) ? h("a",{href:"https://www.google.com/maps/search/?api=1&query="+m.lat+","+m.lng,target:"_blank",
+                  style:{fontSize:12.5,fontWeight:700,color:"#0369a1",textDecoration:"none"}},"🗺️ Haritada aç") : h("span",{style:{fontSize:11.5,color:C.mut}},"konum yok"),
+                adetK>0 && h("span",{style:{fontSize:11,color:C.mut}},adetK+" işlem"))); }))),
+    // —— ÜRÜNLER ——
+    gor==="urun" && h(React.Fragment,null,
     h("div",{style:{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}},
       perfKart("📅 Bugün",pGun,"#0e7490"),
       perfKart("🗓 Bu hafta",pHaf,"#0369a1"),
@@ -1009,10 +1087,11 @@ function PazarlamaTab({ urunler, plan, filamentler, hareketler, bolgeler }){
             h("div",{style:{minWidth:0}},
               h("div",{style:{fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}, tb.i+" "+num(s.adet)+" × "+s.urunAd+(s.yer?(" → "+s.yer):"")),
               h("div",{style:{fontSize:11,color:C.mut}}, fmtTarihSaat(new Date(s.tarih).getTime())+(s.tip==="satis"?(" · "+tl(s.satisFiyat)+"/adet"):"")+(s.tip==="konsinye"&&num(s.kalan)>0?(" · kalan "+num(s.kalan)):""))),
-            s.tip==="satis" && h("div",{style:{flexShrink:0,fontWeight:800,color:"#047857"}},"+"+tl(num(s.satisFiyat)*num(s.adet)))); }))) ),
+            s.tip==="satis" && h("div",{style:{flexShrink:0,fontWeight:800,color:"#047857"}},"+"+tl(num(s.satisFiyat)*num(s.adet)))); }))) )),
     islem && (()=>{ const u=liste.find(x=>x.id===islem.u.id)||islem.u;
-      return h(PazIslemModal,{u,mod:islem.mod,alisVar:num(u.pazFiyat)||null,bolgeler,onKapat:()=>setIslem(null)}); })(),
+      return h(PazIslemModal,{u,mod:islem.mod,alisVar:num(u.pazFiyat)||null,bolgeler,musteriler,onKapat:()=>setIslem(null)}); })(),
     duzen && h(PazUrunModal,{kayit:liste.find(x=>x.id===duzen.id)||duzen,onKapat:()=>setDuzen(null)}),
+    musEdit && h(MusteriModal,{kayit:musEdit,bolgeler,onKapat:()=>setMusEdit(null)}),
     kons && (()=>{ const u=liste.find(x=>x.id===kons.u.id)||kons.u; const k=acikKonsinye.find(x=>x.id===kons.k.id)||kons.k;
       return h(KonsinyeCozModal,{k,u,onKapat:()=>setKons(null)}); })());
 }
@@ -1300,6 +1379,7 @@ function App(){
   const filamentler = useColl("filament");
   const pazHareket = useColl("pazarlama_hareket");
   const bolgeler = useColl("bolge");
+  const musteriler = useColl("musteri");
   const [bas, setBas] = useState(()=>haftaBasi(Date.now()).getTime());
   const [gunSayisi, setGunSayisi] = useState(7);
   const [isModal, setIsModal] = useState(null);
@@ -1389,7 +1469,7 @@ function App(){
       [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"],["oyun","🎮 Oyunlaştırma"]].map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
     sekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
-    sekme==="pazarlama" && h(PazarlamaTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket,bolgeler}),
+    sekme==="pazarlama" && h(PazarlamaTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket,bolgeler,musteriler}),
     sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler}),
     sekme==="plan" && h("div",null,
     // başlık
