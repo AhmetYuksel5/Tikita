@@ -792,7 +792,7 @@ function PazUrunModal({ kayit, onKapat }){
 }
 
 // stoktan al / iade / satış / konsinye işlemleri
-function PazIslemModal({ u, mod, maliyet, onKapat }){
+function PazIslemModal({ u, mod, maliyet, bolgeler, onKapat }){
   const cfg={ al:{baslik:"📥 Stoktan al",max:num(u.stokta),renk:"#0369a1"},
     iade:{baslik:"↩ Stoğa iade",max:num(u.pazStok),renk:"#0369a1"},
     sat:{baslik:"💰 Satış",max:num(u.pazStok),renk:C.yesilB},
@@ -801,6 +801,7 @@ function PazIslemModal({ u, mod, maliyet, onKapat }){
   const [alis,setAlis]=useState(maliyet!=null?maliyet.toFixed(2):"");
   const [satis,setSatis]=useState(u.satisFiyat||"");
   const [yer,setYer]=useState("");
+  const [bolge,setBolge]=useState("");
   async function uygula(){
     const ad=Math.floor(num(n)); if(ad<1) return alert("Adet gir.");
     if(ad>cfg.max) return alert("En fazla "+cfg.max+" adet.");
@@ -809,10 +810,10 @@ function PazIslemModal({ u, mod, maliyet, onKapat }){
     else if(mod==="iade"){ await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-ad,stokta:num(u.stokta)+ad}); }
     else if(mod==="sat"){ if(!yer.trim()) return alert("Nereye sattığını yaz.");
       await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-ad});
-      await save("pazarlama_hareket",{tip:"satis",urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(alis),satisFiyat:num(satis),yer:yer.trim(),tarih:iso}); }
+      await save("pazarlama_hareket",{tip:"satis",urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(alis),satisFiyat:num(satis),yer:yer.trim(),bolge:bolge.trim(),tarih:iso}); }
     else if(mod==="konsinye"){ if(!yer.trim()) return alert("Nereye bıraktığını yaz.");
       await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-ad});
-      await save("pazarlama_hareket",{tip:"konsinye",urunId:u.id,urunAd:u.ad,adet:ad,kalan:ad,alisFiyat:num(alis),satisFiyat:num(satis),yer:yer.trim(),tarih:iso}); }
+      await save("pazarlama_hareket",{tip:"konsinye",urunId:u.id,urunAd:u.ad,adet:ad,kalan:ad,alisFiyat:num(alis),satisFiyat:num(satis),yer:yer.trim(),bolge:bolge.trim(),tarih:iso}); }
     onKapat();
   }
   return h(Modal,{ baslik:cfg.baslik+" — "+u.ad, onKapat,
@@ -821,7 +822,11 @@ function PazIslemModal({ u, mod, maliyet, onKapat }){
       h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
     h("div",{style:{fontSize:13,color:C.mut,marginBottom:10}}, mod==="al"?"Ana stokta ":"Bende ", h("b",{style:{color:C.txt}},cfg.max+" adet")),
     h(Field,{label:"Adet"}, h("input",{type:"number",min:1,max:cfg.max,style:{...S.input,fontWeight:700,fontSize:17},value:n,autoFocus:true,onFocus:e=>e.target.select(),onChange:e=>setN(e.target.value)})),
-    (mod==="sat"||mod==="konsinye") && h(Field,{label: mod==="sat"?"Nereye / kime satıldı":"Nereye konsinye bırakıldı"}, h("input",{style:S.input,value:yer,onChange:e=>setYer(e.target.value),placeholder:"Mekan / müşteri"})),
+    (mod==="sat"||mod==="konsinye") && h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      h(Field,{label: mod==="sat"?"Nereye / kime":"Nereye"}, h("input",{style:S.input,value:yer,onChange:e=>setYer(e.target.value),placeholder:"Mekan / müşteri"})),
+      h(Field,{label:"Bölge (ilçe) 🗺️"}, h(React.Fragment,null,
+        h("input",{style:S.input,list:"paz-bolge-list",value:bolge,onChange:e=>setBolge(e.target.value),placeholder:"Üsküdar…"}),
+        h("datalist",{id:"paz-bolge-list"}, (bolgeler||[]).map(b=>h("option",{key:b.id,value:b.ad})))))),
     (mod==="sat"||mod==="konsinye") && h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       h(Field,{label:"Alış (maliyet ₺/adet)"}, h("input",{type:"number",min:0,step:"0.01",style:S.input,value:alis,onChange:e=>setAlis(e.target.value)})),
       h(Field,{label:"Satış (₺/adet)"}, h("input",{type:"number",min:0,step:"0.01",style:S.input,value:satis,onChange:e=>setSatis(e.target.value)}))),
@@ -851,7 +856,7 @@ function KonsinyeCozModal({ k, u, onKapat }){
       h("button",{style:{...S.btn(),flex:1,borderColor:"#0369a1",color:"#0369a1",fontWeight:800},onClick:iade},"↩ Bana iade")));
 }
 
-function PazarlamaTab({ urunler, plan, filamentler, hareketler }){
+function PazarlamaTab({ urunler, plan, filamentler, hareketler, bolgeler }){
   const [islem,setIslem]=useState(null);     // {u,mod}
   const [duzen,setDuzen]=useState(null);      // foto/bilgi düzenle
   const [kons,setKons]=useState(null);        // {k,u}
@@ -932,7 +937,7 @@ function PazarlamaTab({ urunler, plan, filamentler, hareketler }){
               h("div",{style:{fontSize:11,color:C.mut}}, fmtTarihSaat(new Date(s.tarih).getTime())+(s.tip==="satis"?(" · "+tl(s.satisFiyat)+"/adet"):"")+(s.tip==="konsinye"&&num(s.kalan)>0?(" · kalan "+num(s.kalan)):""))),
             s.tip==="satis" && h("div",{style:{flexShrink:0,fontWeight:800,color:"#047857"}},"+"+tl(num(s.satisFiyat)*num(s.adet)))); }))) ),
     islem && (()=>{ const u=liste.find(x=>x.id===islem.u.id)||islem.u;
-      return h(PazIslemModal,{u,mod:islem.mod,maliyet:urunMaliyet(u,baskiMap[u.id]||[],filById),onKapat:()=>setIslem(null)}); })(),
+      return h(PazIslemModal,{u,mod:islem.mod,maliyet:urunMaliyet(u,baskiMap[u.id]||[],filById),bolgeler,onKapat:()=>setIslem(null)}); })(),
     duzen && h(PazUrunModal,{kayit:liste.find(x=>x.id===duzen.id)||duzen,onKapat:()=>setDuzen(null)}),
     kons && (()=>{ const u=liste.find(x=>x.id===kons.u.id)||kons.u; const k=acikKonsinye.find(x=>x.id===kons.k.id)||kons.k;
       return h(KonsinyeCozModal,{k,u,onKapat:()=>setKons(null)}); })());
@@ -947,6 +952,18 @@ function nextRank(xp){ for(const x of RANKS) if(xp<x[0]) return x; return null; 
 const TIERS=[[0,"Bronz","🥉","#b45309","#fde9d4"],[1200,"Gümüş","🥈","#64748b","#eef2f7"],[3500,"Altın","🥇","#b8860b","#fef3c7"],[8000,"Platin","💎","#0e7490","#cffafe"]];
 function tierOf(p){ let t=TIERS[0]; for(const x of TIERS) if(p>=x[0]) t=x; return t; }
 function seriHesap(set){ let c=0,d=gunBasi(Date.now()).getTime(); if(!set.has(d)) d-=86400000; while(set.has(d)){ c++; d-=86400000; } return c; }
+// RISK temalı fetih: bölge nüfuzuna (ciro) göre uydurma unvanlar
+const FETIH_UNVAN=[[1,"Sefiri","🎖️","#64748b"],[1500,"Reisi","🦅","#0e7490"],[5000,"Baronu","💼","#7c3aed"],[12000,"Paşası","⚔️","#b45309"],[30000,"Fatihi","🏰","#b91c1c"],[60000,"Sultanı","👑","#a16207"]];
+function unvanOf(ciro){ let u=null; for(const x of FETIH_UNVAN) if(ciro>=x[0]) u=x; return u; }   // null = fethedilmedi
+function unvanNext(ciro){ for(const x of FETIH_UNVAN) if(ciro<x[0]) return x; return null; }
+// Türkçe tamlama eki: Üsküdar → Üsküdar'ın · Ümraniye → Ümraniye'nin · Kadıköy → Kadıköy'ün
+function genitive(s){ s=(s||"").trim(); if(!s) return s;
+  const v="aeıioöuü", low=s.toLocaleLowerCase("tr"); let last="ı";
+  for(const ch of low) if(v.includes(ch)) last=ch;
+  const vowelEnd=v.includes(low.slice(-1));
+  const har=(last==="a"||last==="ı")?"ı":(last==="e"||last==="i")?"i":(last==="o"||last==="u")?"u":"ü";
+  return s+"'"+(vowelEnd?"n":"")+har+"n";
+}
 
 function XpBar({ xp, renk }){
   const r=rankOf(xp), nx=nextRank(xp); const taban=r[0], tavan=nx?nx[0]:r[0];
@@ -990,8 +1007,9 @@ function Madalya({ sira, ad, deg, renk, max }){
         h("div",{style:{height:"100%",width:p+"%",background:renk,borderRadius:99}}))));
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler }){
+function OyunTab({ plan, urunler, hareketler, makineler, bolgeler }){
   const [alt,setAlt]=useState("seviye");
+  const [yeniBolge,setYeniBolge]=useState("");
   const now=Date.now(), gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
   // ÜRETİM metrikleri
   const biten=(plan||[]).filter(p=>p.basladi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=now);
@@ -1031,7 +1049,21 @@ function OyunTab({ plan, urunler, hareketler, makineler }){
     {ikon:"💎",ad:"Ciro 10K",ac:ciro>=10000},{ikon:"🏬",ad:"Konsinyeci",ac:konsAdet>=20},
     {ikon:"📈",ad:"Kâr 5K",ac:kar>=5000},{ikon:"🔥",ad:"7 Gün Seri",ac:pSeri>=7}];
 
-  const altlar=[["seviye","⭐ Seviye"],["gorev","🎯 Görev"],["lig","🏆 Liderlik"],["seri","🔥 Seri & Hedef"],["odul","🎁 Ödül"]];
+  // FETİH (Risk) — bölgelere göre nüfuz/asker
+  const konsList=(hareketler||[]).filter(h2=>h2.tip==="konsinye");
+  const bolgeAdlari=Array.from(new Set([...(bolgeler||[]).map(b=>b.ad),
+    ...satis.map(s=>s.bolge).filter(Boolean), ...konsList.map(s=>s.bolge).filter(Boolean)]));
+  const bolgeStat=bolgeAdlari.map(ad=>{
+    const ss=satis.filter(s=>s.bolge===ad);
+    const asker=ss.reduce((a,s)=>a+num(s.adet),0);
+    const nufuz=ss.reduce((a,s)=>a+num(s.satisFiyat)*num(s.adet),0);
+    const kusatma=konsList.filter(s=>s.bolge===ad).reduce((a,s)=>a+num(s.kalan),0);
+    return { ad, asker, nufuz, kusatma, unvan:unvanOf(nufuz), next:unvanNext(nufuz) };
+  }).sort((a,b)=>b.nufuz-a.nufuz);
+  const fethedilen=bolgeStat.filter(b=>b.unvan).length;
+  const hakimiyet=bolgeAdlari.length?Math.round(fethedilen/bolgeAdlari.length*100):0;
+
+  const altlar=[["seviye","⭐ Seviye"],["gorev","🎯 Görev"],["lig","🏆 Liderlik"],["seri","🔥 Seri & Hedef"],["fetih","🗺️ Fetih"],["odul","🎁 Ödül"]];
 
   // —— TASARIM 1: SEVİYE (RPG kahraman kartı) ——
   const heroKart=(renk,renk2,ikon,baslik,xp,statlar,rozetler)=>h("div",{style:{borderRadius:16,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
@@ -1121,12 +1153,64 @@ function OyunTab({ plan, urunler, hareketler, makineler }){
             cursor:alinabilir?"pointer":"not-allowed"},onClick:()=>alinabilir&&alert("🎉 "+d[1]+" — bu bir konsept. Gerçek ödül akışını birlikte tanımlayalım!")},
             alinabilir?"Al":"Kilitli")); })));
 
-  const viewMap={seviye:seviyeView,gorev:gorevView,lig:ligView,seri:seriView,odul:odulView};
+  // —— TASARIM 6: FETİH (Risk teması — bölge fethi) ——
+  async function bolgeEkle(){ const ad=yeniBolge.trim(); if(!ad) return; await save("bolge",{ad}); setYeniBolge(""); }
+  const fetihView=()=>h("div",null,
+    // komuta merkezi
+    h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:16,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
+      h("div",{style:{background:"linear-gradient(135deg,#7f1d1d,#b45309)",color:"#fff",padding:"18px"}},
+        h("div",{style:{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}},
+          h("div",{className:"tk-float",style:{fontSize:44}},"🗺️"),
+          h("div",{style:{flex:1,minWidth:160}},
+            h("div",{style:{fontSize:12,opacity:.85,fontWeight:700,letterSpacing:.5}},"CEPHE KOMUTANLIĞI"),
+            h("div",{style:{fontSize:22,fontWeight:800}},"Hakimiyet: %"+hakimiyet),
+            h("div",{style:{fontSize:12.5,opacity:.9,marginTop:2}}, fethedilen+" / "+bolgeAdlari.length+" bölge fethedildi · "+sAdet+" asker · "+tl(ciro)+" nüfuz")),
+          h("div",{style:{textAlign:"center"}},
+            h("div",{style:{fontSize:34,fontWeight:800,lineHeight:1}},"%"+hakimiyet),
+            h("div",{style:{fontSize:11,opacity:.85}},"dünya hakimiyeti"))),
+        h("div",{style:{height:12,marginTop:14,background:"rgba(255,255,255,.25)",borderRadius:99,overflow:"hidden"}},
+          h("div",{className:"tk-shine",style:{height:"100%",width:Math.max(4,hakimiyet)+"%",borderRadius:99,background:"linear-gradient(90deg,#fbbf24,#fff,#fbbf24)"}}))),
+      h("div",{style:{background:"#fff",padding:"10px 14px",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}},
+        h("input",{style:{...S.input,flex:1,minWidth:140},value:yeniBolge,onChange:e=>setYeniBolge(e.target.value),
+          onKeyDown:e=>{ if(e.key==="Enter") bolgeEkle(); },placeholder:"Yeni bölge / hedef (örn. Üsküdar)"}),
+        h("button",{style:S.btn("p"),onClick:bolgeEkle},"⚑ Bölge ekle"))),
+    // unvan merdiveni
+    h("div",{style:{...S.card,padding:"10px 14px",marginBottom:14,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",fontSize:12}},
+      h("b",null,"Rütbe merdiveni:"),
+      FETIH_UNVAN.map((x,i)=>h("span",{key:i,style:{color:x[3],fontWeight:700}}, x[2]+" "+x[1]+(i<FETIH_UNVAN.length-1?"  ›":""))) ),
+    !bolgeAdlari.length
+      ? h("div",{style:{...S.card,padding:24,textAlign:"center",color:C.mut}},"Henüz bölge yok. Yukarıdan bölge ekle ya da satış yaparken bölge gir — fetih başlasın! ⚔️")
+      : h("div",{style:{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}},
+          bolgeStat.map((b,i)=>{ const fethedildi=!!b.unvan; const u=b.unvan;
+            const ilerleme = b.next ? Math.round((b.nufuz-(u?u[0]:0))/(b.next[0]-(u?u[0]:0))*100) : 100;
+            return h("div",{key:i,style:{...S.card,padding:0,overflow:"hidden",borderColor:fethedildi?u[3]:C.line,
+              borderStyle:fethedildi?"solid":"dashed",borderWidth:fethedildi?2:1.5}},
+              h("div",{style:{padding:"10px 12px",color:"#fff",
+                background: fethedildi?"linear-gradient(135deg,"+u[3]+","+u[3]+"cc)":"#9aa6b4"}},
+                h("div",{style:{fontSize:13,fontWeight:800,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                  h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, "📍 "+b.ad),
+                  h("span",{style:{fontSize:20}}, fethedildi?u[2]:"🎯")),
+                h("div",{style:{fontSize:13.5,fontWeight:800,marginTop:3}},
+                  fethedildi ? (genitive(b.ad)+" "+u[1]) : "Hedef bölge — fethet!")),
+              h("div",{style:{padding:"10px 12px"}},
+                h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12.5,marginBottom:4}},
+                  h("span",null,"⚔️ ",h("b",null,b.asker)," asker"),
+                  h("span",null,"💰 ",h("b",null,tl(b.nufuz)))),
+                b.kusatma>0 && h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700,marginBottom:4}},"🏰 "+b.kusatma+" adet kuşatmada (konsinye)"),
+                b.next ? h(React.Fragment,null,
+                  h("div",{style:{height:8,background:"#eef2f7",borderRadius:99,overflow:"hidden",marginTop:6}},
+                    h("div",{style:{height:"100%",width:Math.max(3,ilerleme)+"%",background:(u?u[3]:"#9aa6b4"),borderRadius:99}})),
+                  h("div",{style:{fontSize:11,color:C.mut,marginTop:4}},
+                    tl(b.next[0]-b.nufuz)+" → "+b.next[2]+" "+genitive(b.ad)+" "+b.next[1]))
+                  : h("div",{style:{fontSize:11.5,color:u[3],fontWeight:800,marginTop:6}},"⭐ En üst rütbe — tam hakimiyet!")));
+          })));
+
+  const viewMap={seviye:seviyeView,gorev:gorevView,lig:ligView,seri:seriView,fetih:fetihView,odul:odulView};
   return h("div",null,
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}},
       altlar.map(([k,ad])=>h("button",{key:k,onClick:()=>setAlt(k),
         style:{...S.btn(alt===k?"p":""),padding:"9px 14px",fontWeight:700,fontSize:13}},ad))),
-    h("div",{style:{fontSize:12,color:C.mut,marginBottom:14}},"💡 5 farklı tasarım konsepti — beğendiğin yön(ler)i seç, onu derinleştirelim (gerçek XP/ödül kuralları, pazarlamacı hesapları, otomatik bildirimler…)."),
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:14}},"💡 6 tasarım konsepti — beğendiğin yön(ler)i seç, derinleştirelim. 🗺️ Fetih: satışları bölgeye (ilçe) göre işle, bölgeyi fethet, unvan kazan."),
     (viewMap[alt]||seviyeView)());
 }
 
@@ -1141,6 +1225,7 @@ function App(){
   const stokUrun = useColl("stok_urun");
   const filamentler = useColl("filament");
   const pazHareket = useColl("pazarlama_hareket");
+  const bolgeler = useColl("bolge");
   const [bas, setBas] = useState(()=>haftaBasi(Date.now()).getTime());
   const [gunSayisi, setGunSayisi] = useState(7);
   const [isModal, setIsModal] = useState(null);
@@ -1230,8 +1315,8 @@ function App(){
       [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"],["oyun","🎮 Oyunlaştırma"]].map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
     sekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
-    sekme==="pazarlama" && h(PazarlamaTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket}),
-    sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist}),
+    sekme==="pazarlama" && h(PazarlamaTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket,bolgeler}),
+    sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler}),
     sekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
