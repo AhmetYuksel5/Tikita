@@ -286,7 +286,7 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, onSnap, onKapat
           h(Field,{label:"Başlangıç"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1.3fr",gap:12}},
             h(Field,{label:"Süre (dk)"}, h("input",{type:"number",min:0,style:S.input,value:f.sureDk,onChange:e=>set("sureDk",e.target.value)})),
-            h(Field,{label:"Filament (gr)"}, h("input",{type:"number",min:0,style:S.input,value:f.gram,onChange:e=>set("gram",e.target.value),placeholder:"gram"})),
+            h(Field,{label:"Filament (gr · toplam)"}, h("input",{type:"number",min:0,style:S.input,value:f.gram,onChange:e=>set("gram",e.target.value),placeholder:"tüm baskı"})),
             h(Field,{label:"Planlanan bitiş"}, h("input",{type:"datetime-local",style:S.input,
               value:toInput(new Date(f.baslangic).getTime()+num(f.sureDk)*60000),
               onChange:e=>{ const ms=new Date(e.target.value).getTime()-new Date(f.baslangic).getTime(); set("sureDk",Math.max(0,Math.round(ms/60000))); }}))),
@@ -300,7 +300,9 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, onSnap, onKapat
             if(!ok) return h("div",{style:{fontSize:12,color:C.mut,marginTop:-4,marginBottom:12}},"💡 Maliyet için süre + gram + fiyatlı filament gir.");
             const mak=(num(f.sureDk)/60)*SAAT_MALIYET, fila=(num(f.gram)/1000)*num(fl.kgFiyat), ad=Math.max(1,num(f.adet));
             return h("div",{style:{fontSize:12.5,fontWeight:700,color:"#0369a1",marginTop:-4,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 10px"}},
-              "₺ Maliyet: "+(((mak+fila)/ad)).toFixed(2)+" / adet  ("+ad+" adet toplam "+(mak+fila).toFixed(2)+" ₺ · makine "+mak.toFixed(2)+" + filament "+fila.toFixed(2)+")"); })(),
+              "₺ Maliyet: "+(((mak+fila)/ad)).toFixed(2)+" / adet",
+              h("div",{style:{fontSize:11,fontWeight:600,marginTop:3}},
+                "adet başına "+(num(f.gram)/ad).toFixed(1)+" gr · "+(num(f.sureDk)/ad).toFixed(0)+" dk  ·  "+ad+" adet toplam "+(mak+fila).toFixed(2)+" ₺ (makine "+mak.toFixed(2)+" + filament "+fila.toFixed(2)+")")); })(),
           (()=>{ const base=(planReset||kayit.planSureDk==null)?num(f.sureDk):num(kayit.planSureDk); const gec=Math.max(0,num(f.sureDk)-base);
             return h("div",{style:{fontSize:12,marginTop:-4,marginBottom:12,color: gec>0?C.kirmiziB:C.mut, fontWeight: gec>0?700:400}},
               gec>0 ? h(React.Fragment,null,
@@ -486,26 +488,29 @@ function StokTab({ urunler, plan, filamentler }){
     Object.values(m).forEach(arr=>arr.sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)));
     return m;
   },[plan]);
-  // bir baskının birim maliyeti (₺/adet) — süre×saatlik + gram×filament; eksik veri → null
-  function birimMaliyet(p){
+  // bir baskının birim (adet başına) detayı — toplam gram/süre adede bölünür; eksik veri → null
+  //  örn: 300 gr · 50 adet → 6 gr/adet ; 600 dk · 50 adet → 12 dk/adet
+  function birimDetay(p){
     const fl=filById[p.filamentId];
     if(!(num(p.sureDk)>0 && num(p.gram)>0 && fl && num(fl.kgFiyat)>0)) return null;
     const adet=Math.max(1,num(p.adet||1));
-    return ((num(p.sureDk)/60)*SAAT_MALIYET + (num(p.gram)/1000)*num(fl.kgFiyat)) / adet;
+    const gram=num(p.gram)/adet, dk=num(p.sureDk)/adet;
+    return { gram, dk, maliyet:(dk/60)*SAAT_MALIYET + (gram/1000)*num(fl.kgFiyat) };
   }
-  // ürünün hesaplanan birim maliyeti — parçalıda her parçanın ortalaması toplanır
-  function hesaplanan(u){
+  // ürünün adet başına detayı — parçalıda her parçanın ortalaması toplanır (1 takım)
+  function urunDetay(u){
     const prints=baskiMap[u.id]||[]; const parts=u.parcalar||[];
-    const ort=arr=>{ const cs=arr.map(birimMaliyet).filter(x=>x!=null); return cs.length? cs.reduce((a,b)=>a+b,0)/cs.length : null; };
+    const ort=arr=>{ const cs=arr.map(birimDetay).filter(Boolean); if(!cs.length) return null; const n=cs.length;
+      return { gram:cs.reduce((a,b)=>a+b.gram,0)/n, dk:cs.reduce((a,b)=>a+b.dk,0)/n, maliyet:cs.reduce((a,b)=>a+b.maliyet,0)/n }; };
     if(parts.length){
-      let toplam=0;
-      for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(c==null){ const tum=ort(prints.filter(p=>!p.parcaAd)); return tum; } toplam+=c; }
-      return toplam;
+      const tot={gram:0,dk:0,maliyet:0};
+      for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(!c) return ort(prints.filter(p=>!p.parcaAd)); tot.gram+=c.gram; tot.dk+=c.dk; tot.maliyet+=c.maliyet; }
+      return tot;
     }
     return ort(prints);
   }
-  // gösterilecek maliyet: elle girilmişse o, değilse hesaplanan, yoksa null
-  const maliyetOf=(u)=> num(u.maliyet)>0 ? {v:num(u.maliyet),elle:true} : (()=>{ const h2=hesaplanan(u); return h2!=null?{v:h2,elle:false}:null; })();
+  // gösterilecek maliyet: elle girilmişse o, değilse baskılardan hesaplanan, yoksa null
+  const maliyetOf=(u)=> num(u.maliyet)>0 ? {v:num(u.maliyet),elle:true} : (()=>{ const d=urunDetay(u); return d?{v:d.maliyet,elle:false,detay:d}:null; })();
   const baskiDurum=(p)=>{
     const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000, now=Date.now();
     if(!p.basladi) return s>now?{t:"planlandı",c:C.mut}:{t:"onay bekliyor",c:"#e0a200"};
@@ -621,12 +626,14 @@ function StokTab({ urunler, plan, filamentler }){
             (()=>{ const m=maliyetOf(u);
               return h("div",{style:{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,
                 background:m?"#ecfdf5":"#f3f6fb",border:"1px solid "+(m?"#a7f3d0":C.line),borderRadius:8,padding:"7px 10px"}},
-                h("div",{style:{fontSize:13}},
+                h("div",{style:{fontSize:13,minWidth:0}},
                   h("span",{style:{color:C.mut,fontWeight:700}},"₺ Maliyet: "),
                   m ? h("b",{style:{fontSize:15,color:"#047857"}}, m.v.toFixed(2)+" ₺/adet")
                     : h("span",{style:{color:C.mut}},"— (süre+gram+filament gir)"),
-                  m && m.elle ? h("span",{style:{marginLeft:6,fontSize:10,fontWeight:700,color:"#92400e",background:"#fde68a",borderRadius:5,padding:"1px 5px"}},"elle"):null),
-                h("button",{style:{...S.ibtn,fontSize:12,padding:"3px 8px"},onClick:()=>setEdit(u)}, m&&m.elle?"✎ maliyet":"✎ elle gir")); })(),
+                  m && m.elle ? h("span",{style:{marginLeft:6,fontSize:10,fontWeight:700,color:"#92400e",background:"#fde68a",borderRadius:5,padding:"1px 5px"}},"elle"):null,
+                  m && !m.elle && m.detay ? h("div",{style:{fontSize:11,color:C.mut,marginTop:2}},
+                    "adet başına "+m.detay.gram.toFixed(1)+" gr · "+m.detay.dk.toFixed(0)+" dk (baskıdan otomatik)"):null),
+                h("button",{style:{...S.ibtn,fontSize:12,padding:"3px 8px",flexShrink:0},onClick:()=>setEdit(u)}, m&&m.elle?"✎ maliyet":"✎ elle gir")); })(),
             parcali && h("div",{style:{margin:"10px 0",borderTop:"1px solid "+C.line,paddingTop:8}},
               h("div",{style:{...S.label,marginBottom:6}},"Parça stoğu · "+takim+" takım montaja hazır"),
               (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p)); const mx=Math.max.apply(null,avails);
