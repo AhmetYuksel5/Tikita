@@ -62,6 +62,7 @@ const fmtTarih = d => { const t=new Date(d); return pad(t.getDate())+"."+pad(t.g
 const fmtTarihSaat = d => fmtTarih(d)+" "+fmtSaat(d);
 const GUNLER = ["PAZAR","PAZARTESİ","SALI","ÇARŞAMBA","PERŞEMBE","CUMA","CUMARTESİ"];
 const AYLAR = ["OCAK","ŞUBAT","MART","NİSAN","MAYIS","HAZİRAN","TEMMUZ","AĞUSTOS","EYLÜL","EKİM","KASIM","ARALIK"];
+const SAAT_MALIYET = 12;   // makine çalışma maliyeti (₺/saat)
 function fmtSureSaat(dk){ dk=Math.max(0,Math.round(num(dk))); return Math.floor(dk/60)+" sa "+pad(dk%60)+" dk"; }
 function toInput(d){ const t=new Date(d); return t.getFullYear()+"-"+pad(t.getMonth()+1)+"-"+pad(t.getDate())+"T"+pad(t.getHours())+":"+pad(t.getMinutes()); }
 function gunBasi(d){ const t=new Date(d); t.setHours(0,0,0,0); return t; }
@@ -131,7 +132,7 @@ function OncekiSatir({ label, alt, onSec, onSil }){
 /* ============================================================
    İŞ (plan kaydı) modalı
    ============================================================ */
-function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
+function IsModal({ kayit, makineler, plan, urunler, filamentler, onSnap, onKapat }){
   const yeni = !kayit.id;
   const [f,setF] = useState(()=>({
     makineId: kayit.makineId || (makineler[0]&&makineler[0].id) || "",
@@ -142,6 +143,7 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
     baslangic:toInput(kayit.baslangic || Date.now()),
     sureDk:   kayit.sureDk   || "",
     gram:     kayit.gram     || "",
+    filamentId: kayit.filamentId || "",
     ams:      kayit.ams != null ? kayit.ams : true,
     not:      kayit.not      || "",
     basladi:  !!kayit.basladi,
@@ -172,7 +174,7 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
   },[plan,kayit.id,f.makineId]);
   function tekrarla(o){
     if(!o) return;
-    setF(s=>({ ...s, ad:o.ad, urunId:o.urunId||"", parcaAd:o.parcaAd||"", adet:o.adet, sureDk:o.sureDk, gram:o.gram||"", ams:!!o.ams, not:o.not||"" }));
+    setF(s=>({ ...s, ad:o.ad, urunId:o.urunId||"", parcaAd:o.parcaAd||"", adet:o.adet, sureDk:o.sureDk, gram:o.gram||"", filamentId:o.filamentId||"", ams:!!o.ams, not:o.not||"" }));
     setUrunMod((o.urunId||!o.ad)?"urun":"diger");
     setTekrar(true);
   }
@@ -197,7 +199,7 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
     const planSureDk = (planReset || kayit.planSureDk==null) ? num(f.sureDk) : num(kayit.planSureDk);
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
       urunId: (urunMod==="urun" ? f.urunId : "") || "", parcaAd: (urunMod==="urun" ? f.parcaAd : "") || "",
-      baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), planSureDk, gram:num(f.gram), ams:!!f.ams, not:f.not,
+      baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), planSureDk, gram:num(f.gram), filamentId:f.filamentId||"", ams:!!f.ams, not:f.not,
       basladi, gercekBaslangic: basladi ? (kayit.gercekBaslangic || new Date(f.baslangic).toISOString()) : null });
     if(!yeni && kayit.makineId===f.makineId){
       // başlama/süre değişti → sonraki işleri aynı delta (bitiş kayması) kadar otele
@@ -288,6 +290,17 @@ function IsModal({ kayit, makineler, plan, urunler, onSnap, onKapat }){
             h(Field,{label:"Planlanan bitiş"}, h("input",{type:"datetime-local",style:S.input,
               value:toInput(new Date(f.baslangic).getTime()+num(f.sureDk)*60000),
               onChange:e=>{ const ms=new Date(e.target.value).getTime()-new Date(f.baslangic).getTime(); set("sureDk",Math.max(0,Math.round(ms/60000))); }}))),
+          h(Field,{label:"Filament (maliyet için)"},
+            h("select",{style:S.input,value:f.filamentId,onChange:e=>set("filamentId",e.target.value)},
+              h("option",{value:""},(filamentler||[]).length?"— filament seç —":"— önce 🧵 Filament ekle —"),
+              (filamentler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(fl=>
+                h("option",{key:fl.id,value:fl.id}, fl.ad+(num(fl.kgFiyat)>0?" ("+num(fl.kgFiyat).toLocaleString("tr")+" ₺/kg)":""))))),
+          (()=>{ const fl=(filamentler||[]).find(x=>x.id===f.filamentId);
+            const ok = num(f.sureDk)>0 && num(f.gram)>0 && fl && num(fl.kgFiyat)>0;
+            if(!ok) return h("div",{style:{fontSize:12,color:C.mut,marginTop:-4,marginBottom:12}},"💡 Maliyet için süre + gram + fiyatlı filament gir.");
+            const mak=(num(f.sureDk)/60)*SAAT_MALIYET, fila=(num(f.gram)/1000)*num(fl.kgFiyat), ad=Math.max(1,num(f.adet));
+            return h("div",{style:{fontSize:12.5,fontWeight:700,color:"#0369a1",marginTop:-4,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 10px"}},
+              "₺ Maliyet: "+(((mak+fila)/ad)).toFixed(2)+" / adet  ("+ad+" adet toplam "+(mak+fila).toFixed(2)+" ₺ · makine "+mak.toFixed(2)+" + filament "+fila.toFixed(2)+")"); })(),
           (()=>{ const base=(planReset||kayit.planSureDk==null)?num(f.sureDk):num(kayit.planSureDk); const gec=Math.max(0,num(f.sureDk)-base);
             return h("div",{style:{fontSize:12,marginTop:-4,marginBottom:12,color: gec>0?C.kirmiziB:C.mut, fontWeight: gec>0?700:400}},
               gec>0 ? h(React.Fragment,null,
@@ -329,6 +342,38 @@ function MakineYonetim({ makineler, onKapat }){
         makineler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(m=>
           h("div",{key:m.id,style:{...S.card,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
             h("div",null, h("div",{style:{fontWeight:700}},m.ad), m.tur&&h("div",{style:{fontSize:12,color:C.mut}},m.tur)),
+            h("button",{style:S.ibtn,onClick:()=>setEdit(m)},"Düzenle")))));
+}
+
+/* ============================================================
+   FİLAMENT — fiyat (maliyet hesabı için)
+   ============================================================ */
+function FilamentModal({ kayit, onKapat }){
+  const yeni=!kayit.id;
+  const [f,setF]=useState({...kayit});
+  const set=(k,v)=>setF(s=>({...s,[k]:v}));
+  async function kaydet(){ if(!f.ad.trim()) return alert("Ad gir."); await save("filament",{...f,kgFiyat:num(f.kgFiyat)}); onKapat(); }
+  return h(Modal,{ baslik: yeni?"Yeni Filament":"Filament Düzenle", onKapat,
+    alt: h(React.Fragment,null,
+      h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet},"Kaydet"),
+      !yeni && h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{ if(confirm(f.ad+" silinsin mi?")){ remove("filament",f.id); onKapat(); } }},"Sil"),
+      h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
+    h(Field,{label:"Filament adı / rengi"}, h("input",{style:S.input,value:f.ad||"",onChange:e=>set("ad",e.target.value),placeholder:"PLA Siyah"})),
+    h(Field,{label:"Fiyat (₺ / kg)"}, h("input",{type:"number",min:0,step:"0.01",style:S.input,value:f.kgFiyat||"",onChange:e=>set("kgFiyat",e.target.value),placeholder:"600"})),
+    h("div",{style:{fontSize:12,color:C.mut,marginTop:-4}}, num(f.kgFiyat)>0 ? ("= "+(num(f.kgFiyat)/1000).toFixed(3)+" ₺/gram") : ""));
+}
+
+function FilamentYonetim({ filamentler, onKapat }){
+  const [edit,setEdit]=useState(null);
+  return h(Modal,{ baslik:"Filamentler (₺/kg)", onKapat,
+    alt: h("button",{style:{...S.btn("p"),flex:1},onClick:()=>setEdit({ad:"",kgFiyat:""})},"+ Filament") },
+    edit && h(FilamentModal,{kayit:edit,onKapat:()=>setEdit(null)}),
+    !filamentler.length ? h("div",{style:{color:C.mut,textAlign:"center"}},"Filament yok. Maliyet hesabı için ekle.")
+    : h("div",{style:{display:"grid",gap:8}},
+        filamentler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr")).map(m=>
+          h("div",{key:m.id,style:{...S.card,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            h("div",null, h("div",{style:{fontWeight:700}},m.ad),
+              h("div",{style:{fontSize:12,color:C.mut}}, num(m.kgFiyat)>0?(num(m.kgFiyat).toLocaleString("tr")+" ₺/kg · "+(num(m.kgFiyat)/1000).toFixed(3)+" ₺/gr"):"fiyat girilmemiş")),
             h("button",{style:S.ibtn,onClick:()=>setEdit(m)},"Düzenle")))));
 }
 
@@ -390,13 +435,13 @@ function makineTimeline(makineId, plan, baslaMs, bitMs, now){
 function StokModal({ kayit, onKapat }){
   const yeni=!kayit.id;
   const [f,setF]=useState(()=>({ ad:kayit.ad||"", parcaStr:(kayit.parcalar||[]).join(", "),
-    stokta:kayit.stokta||0, konsinye:kayit.konsinye||0, not:kayit.not||"" }));
+    stokta:kayit.stokta||0, konsinye:kayit.konsinye||0, maliyet:kayit.maliyet||"", not:kayit.not||"" }));
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
   const parcalar = f.parcaStr.split(",").map(x=>x.trim()).filter(Boolean);
   async function kaydet(){
     if(!f.ad.trim()) return alert("Ad gir.");
     await save("stok_urun",{ id:kayit.id, ad:f.ad.trim(), parcalar,
-      stokta:num(f.stokta), konsinye:num(f.konsinye), not:f.not });
+      stokta:num(f.stokta), konsinye:num(f.konsinye), maliyet:num(f.maliyet), not:f.not });
     onKapat();
   }
   return h(Modal,{ baslik:yeni?"Yeni Ürün":"Ürün Düzenle", onKapat,
@@ -411,6 +456,8 @@ function StokModal({ kayit, onKapat }){
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       h(Field,{label:"📥 Stokta"}, h("input",{type:"number",min:0,style:S.input,value:f.stokta,onChange:e=>set("stokta",e.target.value)})),
       h(Field,{label:"🏬 Konsinyede"}, h("input",{type:"number",min:0,style:S.input,value:f.konsinye,onChange:e=>set("konsinye",e.target.value)}))),
+    h(Field,{label:"₺ Maliyet (elle, ₺/adet) — boşsa baskılardan otomatik hesaplanır"},
+      h("input",{type:"number",min:0,step:"0.01",style:S.input,value:f.maliyet,onChange:e=>set("maliyet",e.target.value),placeholder:"otomatik"})),
     h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not||"",onChange:e=>set("not",e.target.value)})));
 }
 
@@ -426,11 +473,12 @@ function StokAksiyonModal({ baslik, mevcut, acts, onKapat }){
         onClick:async()=>{ await a.fn(num(n)); onKapat(); }},a.label))));
 }
 
-function StokTab({ urunler, plan }){
+function StokTab({ urunler, plan, filamentler }){
   const [edit,setEdit]=useState(null);
   const [aks,setAks]=useState(null);   // kutucuk komut penceresi {u,stage}
   const [acik,setAcik]=useState({});   // ürün kartında baskı listesi açık mı
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
+  const filById = useMemo(()=>{ const m={}; (filamentler||[]).forEach(f=>m[f.id]=f); return m; },[filamentler]);
   // her ürünün TÜM baskıları (urunId'ye göre) — aynı ürünün baskıları tek kartta toplanır
   const baskiMap = useMemo(()=>{
     const m={};
@@ -438,6 +486,26 @@ function StokTab({ urunler, plan }){
     Object.values(m).forEach(arr=>arr.sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)));
     return m;
   },[plan]);
+  // bir baskının birim maliyeti (₺/adet) — süre×saatlik + gram×filament; eksik veri → null
+  function birimMaliyet(p){
+    const fl=filById[p.filamentId];
+    if(!(num(p.sureDk)>0 && num(p.gram)>0 && fl && num(fl.kgFiyat)>0)) return null;
+    const adet=Math.max(1,num(p.adet||1));
+    return ((num(p.sureDk)/60)*SAAT_MALIYET + (num(p.gram)/1000)*num(fl.kgFiyat)) / adet;
+  }
+  // ürünün hesaplanan birim maliyeti — parçalıda her parçanın ortalaması toplanır
+  function hesaplanan(u){
+    const prints=baskiMap[u.id]||[]; const parts=u.parcalar||[];
+    const ort=arr=>{ const cs=arr.map(birimMaliyet).filter(x=>x!=null); return cs.length? cs.reduce((a,b)=>a+b,0)/cs.length : null; };
+    if(parts.length){
+      let toplam=0;
+      for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(c==null){ const tum=ort(prints.filter(p=>!p.parcaAd)); return tum; } toplam+=c; }
+      return toplam;
+    }
+    return ort(prints);
+  }
+  // gösterilecek maliyet: elle girilmişse o, değilse hesaplanan, yoksa null
+  const maliyetOf=(u)=> num(u.maliyet)>0 ? {v:num(u.maliyet),elle:true} : (()=>{ const h2=hesaplanan(u); return h2!=null?{v:h2,elle:false}:null; })();
   const baskiDurum=(p)=>{
     const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000, now=Date.now();
     if(!p.basladi) return s>now?{t:"planlandı",c:C.mut}:{t:"onay bekliyor",c:"#e0a200"};
@@ -550,6 +618,15 @@ function StokTab({ urunler, plan }){
                 h("button",{style:S.ibtn,onClick:()=>setEdit(u)},"✎"),
                 h("button",{style:{...S.ibtn,color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{if(confirm(u.ad+" silinsin mi?"))remove("stok_urun",u.id);}},"🗑"))),
             u.not && h("div",{style:{fontSize:12,color:C.mut,marginTop:4}},u.not),
+            (()=>{ const m=maliyetOf(u);
+              return h("div",{style:{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,
+                background:m?"#ecfdf5":"#f3f6fb",border:"1px solid "+(m?"#a7f3d0":C.line),borderRadius:8,padding:"7px 10px"}},
+                h("div",{style:{fontSize:13}},
+                  h("span",{style:{color:C.mut,fontWeight:700}},"₺ Maliyet: "),
+                  m ? h("b",{style:{fontSize:15,color:"#047857"}}, m.v.toFixed(2)+" ₺/adet")
+                    : h("span",{style:{color:C.mut}},"— (süre+gram+filament gir)"),
+                  m && m.elle ? h("span",{style:{marginLeft:6,fontSize:10,fontWeight:700,color:"#92400e",background:"#fde68a",borderRadius:5,padding:"1px 5px"}},"elle"):null),
+                h("button",{style:{...S.ibtn,fontSize:12,padding:"3px 8px"},onClick:()=>setEdit(u)}, m&&m.elle?"✎ maliyet":"✎ elle gir")); })(),
             parcali && h("div",{style:{margin:"10px 0",borderTop:"1px solid "+C.line,paddingTop:8}},
               h("div",{style:{...S.label,marginBottom:6}},"Parça stoğu · "+takim+" takım montaja hazır"),
               (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p)); const mx=Math.max.apply(null,avails);
@@ -612,10 +689,12 @@ function App(){
   const makineler = useColl("makineler");
   const plan = useColl("plan");
   const stokUrun = useColl("stok_urun");
+  const filamentler = useColl("filament");
   const [bas, setBas] = useState(()=>gunBasi(Date.now()).getTime());
   const [gunSayisi, setGunSayisi] = useState(7);
   const [isModal, setIsModal] = useState(null);
   const [makineAcik, setMakineAcik] = useState(false);
+  const [filamentAcik, setFilamentAcik] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [zoom, setZoom] = useState(1);
   const [containerW, setContainerW] = useState(1000);
@@ -699,7 +778,7 @@ function App(){
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       [["plan","📅 Üretim Planı"],["stok","📦 Stok"]].map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
-    sekme==="stok" && h(StokTab,{urunler:stokUrun,plan}),
+    sekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
     sekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
@@ -720,6 +799,7 @@ function App(){
           h("button",{style:S.ibtn,title:"Yakınlaştır",onClick:()=>setZoom(z=>Math.min(6,Math.round((z+0.5)*10)/10))},"🔍+")),
         undoVar && h("button",{style:{...S.btn(),borderColor:"#c2410c",color:"#c2410c",fontWeight:800},onClick:geriAl,title:"Son değişikliği geri al"},"↶ Geri al"),
         h("button",{style:S.btn(),onClick:()=>setMakineAcik(true)},"⚙ Makineler"),
+        h("button",{style:S.btn(),onClick:()=>setFilamentAcik(true)},"🧵 Filament"),
         h("button",{style:S.btn("p"),onClick:()=>setIsModal({})},"+ Baskı Planla"))),
 
     // gantt kartı
@@ -885,8 +965,9 @@ function App(){
 
     h("div",{style:{textAlign:"right",fontSize:12,color:C.mut,marginTop:12}},"Güncelleme: "+fmtTarihSaat(now)),
 
-    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,urunler:stokUrun,onSnap:snapAl,onKapat:()=>setIsModal(null)}),
-    makineAcik && h(MakineYonetim,{makineler:mlist,onKapat:()=>setMakineAcik(false)})
+    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,urunler:stokUrun,filamentler,onSnap:snapAl,onKapat:()=>setIsModal(null)}),
+    makineAcik && h(MakineYonetim,{makineler:mlist,onKapat:()=>setMakineAcik(false)}),
+    filamentAcik && h(FilamentYonetim,{filamentler,onKapat:()=>setFilamentAcik(false)})
   ));
 }
 
