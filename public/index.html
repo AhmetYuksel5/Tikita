@@ -438,12 +438,13 @@ function makineTimeline(makineId, plan, baslaMs, bitMs, now){
 function StokModal({ kayit, onKapat }){
   const yeni=!kayit.id;
   const [f,setF]=useState(()=>({ ad:kayit.ad||"", parcaStr:(kayit.parcalar||[]).join(", "),
-    stokta:kayit.stokta||0, konsinye:kayit.konsinye||0, maliyet:kayit.maliyet||"", not:kayit.not||"" }));
+    parcaAdet:{...(kayit.parcaAdet||{})}, stokta:kayit.stokta||0, konsinye:kayit.konsinye||0, maliyet:kayit.maliyet||"", not:kayit.not||"" }));
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
   const parcalar = f.parcaStr.split(",").map(x=>x.trim()).filter(Boolean);
   async function kaydet(){
     if(!f.ad.trim()) return alert("Ad gir.");
-    await save("stok_urun",{ id:kayit.id, ad:f.ad.trim(), parcalar,
+    const pa={}; parcalar.forEach(p=>pa[p]=Math.max(1,Math.round(num(f.parcaAdet[p]||1))));
+    await save("stok_urun",{ id:kayit.id, ad:f.ad.trim(), parcalar, parcaAdet:pa,
       stokta:num(f.stokta), konsinye:num(f.konsinye), maliyet:num(f.maliyet), not:f.not });
     onKapat();
   }
@@ -453,8 +454,15 @@ function StokModal({ kayit, onKapat }){
       !yeni&&h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{if(confirm("Silinsin mi?")){remove("stok_urun",kayit.id);onKapat();}}},"Sil"),
       h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
     h(Field,{label:"Ürün adı"}, h("input",{style:S.input,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Ejderha"})),
-    h(Field,{label:"Parçalar (virgülle ayır — boşsa tek parça)"}, h("input",{style:S.input,value:f.parcaStr,onChange:e=>set("parcaStr",e.target.value),placeholder:"alt, üst"})),
-    parcalar.length>0 && h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"ℹ️ Parça stoğu basımdan otomatik sayılır; elle girmeye gerek yok."),
+    h(Field,{label:"Parçalar (virgülle ayır — boşsa tek parça)"}, h("input",{style:S.input,value:f.parcaStr,onChange:e=>set("parcaStr",e.target.value),placeholder:"alt, üst, göz"})),
+    parcalar.length>0 && h("div",{style:{marginBottom:12}},
+      h("div",{style:{...S.label,marginBottom:6}},"Bir üründe kaç adet gerekli? (örn. göz: 2)"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}},
+        parcalar.map(p=>h("label",{key:p,style:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,fontSize:13,...S.card,padding:"6px 10px"}},
+          h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p),
+          h("input",{type:"number",min:1,style:{...S.input,width:62,padding:"4px 6px",textAlign:"center"},value:f.parcaAdet[p]??1,
+            onChange:e=>setF(s=>({...s,parcaAdet:{...s.parcaAdet,[p]:e.target.value}}))})))),
+      h("div",{style:{fontSize:12,color:C.mut,marginTop:6}},"ℹ️ Parça stoğu basımdan otomatik sayılır; montaj bu adetlere göre parça düşer.")),
     h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:6}},"Açılış stoğu (elde mevcut adet) — istersen boş bırak:"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       h(Field,{label:"📥 Stokta"}, h("input",{type:"number",min:0,style:S.input,value:f.stokta,onChange:e=>set("stokta",e.target.value)})),
@@ -505,7 +513,8 @@ function StokTab({ urunler, plan, filamentler }){
       return { gram:cs.reduce((a,b)=>a+b.gram,0)/n, dk:cs.reduce((a,b)=>a+b.dk,0)/n, maliyet:cs.reduce((a,b)=>a+b.maliyet,0)/n }; };
     if(parts.length){
       const tot={gram:0,dk:0,maliyet:0};
-      for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(!c) return ort(prints.filter(p=>!p.parcaAd)); tot.gram+=c.gram; tot.dk+=c.dk; tot.maliyet+=c.maliyet; }
+      for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(!c) return ort(prints.filter(p=>!p.parcaAd));
+        const g=gereken(u,part); tot.gram+=c.gram*g; tot.dk+=c.dk*g; tot.maliyet+=c.maliyet*g; }
       return tot;
     }
     return ort(prints);
@@ -545,6 +554,8 @@ function StokTab({ urunler, plan, filamentler }){
   // montajda = basımı bitmiş ama montajı bitmemiş (montaja hazır havuz) — parçalıda takım sayısı
   //  parça stoğu = basımdan gelen + elle eklenen − montajda kullanılan
   const parcaAvail=(u,p)=> Math.max(0, num((basildiParca[u.id]||{})[p]) + num((u.parcaElle||{})[p]) - num((u.parcaTuket||{})[p]));
+  const gereken=(u,p)=> Math.max(1, Math.round(num((u.parcaAdet||{})[p]||1)));   // bir üründe kaç adet gerekli
+  const parcaTakim=(u,p)=> Math.floor(parcaAvail(u,p)/gereken(u,p));             // bu parçadan kaç takım çıkar
   // parçanın mevcut (montaja hazır) stoğunu doğrudan hedef sayıya ayarla → elle ofseti hesapla
   async function parcaStokAyarla(u,p,hedef){
     const otomatik = num((basildiParca[u.id]||{})[p]) - num((u.parcaTuket||{})[p]);
@@ -552,7 +563,7 @@ function StokTab({ urunler, plan, filamentler }){
     await save("stok_urun",{id:u.id,parcaElle:pe});
   }
   const montajdaOf=(u)=> (u.parcalar||[]).length
-    ? Math.min.apply(null, u.parcalar.map(p=>parcaAvail(u,p)))
+    ? Math.min.apply(null, u.parcalar.map(p=>parcaTakim(u,p)))
     : Math.max(0, num(basildiMap[u.id]) - num(u.montajBitti) - num(u.zayiat));
 
   const T = liste.reduce((a,u)=>{a.basim+=num(basimMap[u.id]);a.montajda+=montajdaOf(u);a.stokta+=num(u.stokta);a.konsinye+=num(u.konsinye);a.satildi+=num(u.satildi);return a;},{basim:0,montajda:0,stokta:0,konsinye:0,satildi:0});
@@ -562,8 +573,8 @@ function StokTab({ urunler, plan, filamentler }){
     n=Math.floor(num(n)); if(n<1) return;
     const parcalar=u.parcalar||[];
     if(parcalar.length){
-      for(const p of parcalar){ if(parcaAvail(u,p)<n) return alert("Montajda yeterli takım yok ("+montajdaOf(u)+" hazır)."); }
-      const tk={...(u.parcaTuket||{})}; parcalar.forEach(p=>tk[p]=num(tk[p])+n);
+      if(montajdaOf(u)<n) return alert("Montajda yeterli takım yok ("+montajdaOf(u)+" hazır).");
+      const tk={...(u.parcaTuket||{})}; parcalar.forEach(p=>tk[p]=num(tk[p])+n*gereken(u,p));   // her parçadan gereken×n
       const ek = hedef==="stokta" ? {stokta:num(u.stokta)+n} : {zayiat:num(u.zayiat)+n};
       await save("stok_urun",{id:u.id,parcaTuket:tk,...ek});
     } else {
@@ -625,7 +636,7 @@ function StokTab({ urunler, plan, filamentler }){
     : h("div",{style:{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))"}},
         liste.map(u=>{
           const parcali=(u.parcalar||[]).length>0;
-          const takim = parcali ? Math.min.apply(null,u.parcalar.map(p=>parcaAvail(u,p))) : null;
+          const takim = parcali ? montajdaOf(u) : null;
           return h("div",{key:u.id,style:S.card},
             h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
               h("div",{style:{fontWeight:800,fontSize:16}}, u.ad,
@@ -647,11 +658,13 @@ function StokTab({ urunler, plan, filamentler }){
                 h("button",{style:{...S.ibtn,fontSize:12,padding:"3px 8px",flexShrink:0},onClick:()=>setEdit(u)}, m&&m.elle?"✎ maliyet":"✎ elle gir")); })(),
             parcali && h("div",{style:{margin:"10px 0",borderTop:"1px solid "+C.line,paddingTop:8}},
               h("div",{style:{...S.label,marginBottom:6}},"Parça stoğu · "+takim+" takım montaja hazır"),
-              (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p)); const mx=Math.max.apply(null,avails);
-                return u.parcalar.map((p,idx)=>{ const eksik = mx-avails[idx];
+              (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p));
+                const hedefTakim=Math.max.apply(null,u.parcalar.map(p=>parcaTakim(u,p)));   // en çok takım çıkan parça
+                return u.parcalar.map((p,idx)=>{ const ger=gereken(u,p); const eksik = Math.max(0, hedefTakim*ger - avails[idx]);
                   return h("div",{key:p,style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"4px 0",fontSize:14,
                     color: eksik>0?C.kirmiziB:C.txt}},
                     h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p,
+                      ger>1?h("span",{style:{marginLeft:5,fontSize:11,fontWeight:700,color:"#7c3aed"}},"×"+ger):null,
                       eksik>0?h("span",{style:{marginLeft:6,fontSize:11,fontWeight:700}},"⚠ "+eksik+" eksik"):null),
                     h("div",{style:{display:"flex",alignItems:"center",gap:8,flexShrink:0}},
                       h("span",{style:{fontSize:11,color:C.mut}}, num((basildiParca[u.id]||{})[p])+" basıldı"+(num((u.parcaElle||{})[p])?" "+(num((u.parcaElle||{})[p])>0?"+":"")+num((u.parcaElle||{})[p])+" elle":"")),
@@ -663,8 +676,9 @@ function StokTab({ urunler, plan, filamentler }){
                         style:{width:58,padding:"3px 6px",border:"1px solid "+C.line,borderRadius:7,textAlign:"center",
                           fontWeight:800,fontSize:14,color: eksik>0?C.kirmiziB:"#0369a1"}})));
                 }); })(),
-              (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p)); const mx=Math.max.apply(null,avails);
-                const eksikler=u.parcalar.map((p,idx)=>({p,n:mx-avails[idx]})).filter(x=>x.n>0);
+              (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p));
+                const hedefTakim=Math.max.apply(null,u.parcalar.map(p=>parcaTakim(u,p)));
+                const eksikler=u.parcalar.map((p,idx)=>({p,n:Math.max(0,hedefTakim*gereken(u,p)-avails[idx])})).filter(x=>x.n>0);
                 if(!eksikler.length) return null;
                 return h("div",{style:{marginTop:8,fontSize:12.5,fontWeight:700,color:"#7a1d12",background:"#fdecea",
                   border:"1px solid "+C.kirmiziB,borderRadius:8,padding:"7px 10px"}},
