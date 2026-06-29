@@ -545,8 +545,12 @@ function StokTab({ urunler, plan, filamentler }){
   // montajda = basımı bitmiş ama montajı bitmemiş (montaja hazır havuz) — parçalıda takım sayısı
   //  parça stoğu = basımdan gelen + elle eklenen − montajda kullanılan
   const parcaAvail=(u,p)=> Math.max(0, num((basildiParca[u.id]||{})[p]) + num((u.parcaElle||{})[p]) - num((u.parcaTuket||{})[p]));
-  async function parcaElleDegis(u,p,d){ const pe={...(u.parcaElle||{})}; pe[p]=num(pe[p])+d; await save("stok_urun",{id:u.id,parcaElle:pe}); }
-  const miniBtn={...S.ibtn,padding:"1px 9px",fontSize:16,lineHeight:1.2,fontWeight:800};
+  // parçanın mevcut (montaja hazır) stoğunu doğrudan hedef sayıya ayarla → elle ofseti hesapla
+  async function parcaStokAyarla(u,p,hedef){
+    const otomatik = num((basildiParca[u.id]||{})[p]) - num((u.parcaTuket||{})[p]);
+    const pe={...(u.parcaElle||{})}; pe[p]=Math.round(num(hedef))-otomatik;
+    await save("stok_urun",{id:u.id,parcaElle:pe});
+  }
   const montajdaOf=(u)=> (u.parcalar||[]).length
     ? Math.min.apply(null, u.parcalar.map(p=>parcaAvail(u,p)))
     : Math.max(0, num(basildiMap[u.id]) - num(u.montajBitti) - num(u.zayiat));
@@ -643,11 +647,15 @@ function StokTab({ urunler, plan, filamentler }){
                     color: eksik>0?C.kirmiziB:C.txt}},
                     h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p,
                       eksik>0?h("span",{style:{marginLeft:6,fontSize:11,fontWeight:700}},"⚠ "+eksik+" eksik"):null),
-                    h("div",{style:{display:"flex",alignItems:"center",gap:7,flexShrink:0}},
-                      h("span",{style:{fontSize:11,color:C.mut}}, num((basildiParca[u.id]||{})[p])+" basıldı"+(num((u.parcaElle||{})[p])?" +"+num((u.parcaElle||{})[p])+" elle":"")),
-                      h("button",{style:miniBtn,title:"elle azalt",onClick:()=>parcaElleDegis(u,p,-1)},"−"),
-                      h("b",{style:{minWidth:26,textAlign:"center",color: eksik>0?C.kirmiziB:"#0369a1"}},avails[idx]),
-                      h("button",{style:miniBtn,title:"elle ekle",onClick:()=>parcaElleDegis(u,p,1)},"+")));
+                    h("div",{style:{display:"flex",alignItems:"center",gap:8,flexShrink:0}},
+                      h("span",{style:{fontSize:11,color:C.mut}}, num((basildiParca[u.id]||{})[p])+" basıldı"+(num((u.parcaElle||{})[p])?" "+(num((u.parcaElle||{})[p])>0?"+":"")+num((u.parcaElle||{})[p])+" elle":"")),
+                      h("input",{type:"number",min:0,key:"pin"+avails[idx],defaultValue:avails[idx],title:"montaja hazır adet — doğrudan yaz",
+                        onClick:e=>e.stopPropagation(),
+                        onFocus:e=>e.target.select(),
+                        onKeyDown:e=>{ if(e.key==="Enter") e.target.blur(); },
+                        onBlur:e=>{ if(e.target.value!=="") parcaStokAyarla(u,p,e.target.value); },
+                        style:{width:58,padding:"3px 6px",border:"1px solid "+C.line,borderRadius:7,textAlign:"center",
+                          fontWeight:800,fontSize:14,color: eksik>0?C.kirmiziB:"#0369a1"}})));
                 }); })(),
               (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p)); const mx=Math.max.apply(null,avails);
                 const eksikler=u.parcalar.map((p,idx)=>({p,n:mx-avails[idx]})).filter(x=>x.n>0);
