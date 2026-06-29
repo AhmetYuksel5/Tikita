@@ -414,8 +414,21 @@ function StokModal({ kayit, onKapat }){
     h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not||"",onChange:e=>set("not",e.target.value)})));
 }
 
+/* Kutucuğa tıklayınca açılan komut penceresi — adet gir, komut seç */
+function StokAksiyonModal({ baslik, mevcut, acts, onKapat }){
+  const [n,setN]=useState(1);
+  return h(Modal,{ baslik, onKapat, alt:h("button",{style:S.btn(),onClick:onKapat},"Kapat") },
+    h("div",{style:{fontSize:13.5,color:C.mut,marginBottom:12}},"Mevcut: ",h("b",{style:{color:C.txt}},mevcut+" adet")),
+    h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:{...S.input,fontSize:18,fontWeight:700},value:n,autoFocus:true,
+      onChange:e=>setN(e.target.value),onFocus:e=>e.target.select()})),
+    h("div",{style:{display:"flex",flexWrap:"wrap",gap:8,marginTop:4}},
+      acts.map((a,i)=>h("button",{key:i,style:{...S.btn(),flex:"1 1 45%",borderColor:a.renk,color:a.renk,fontWeight:800,padding:"12px 8px"},
+        onClick:async()=>{ await a.fn(num(n)); onKapat(); }},a.label))));
+}
+
 function StokTab({ urunler, plan }){
   const [edit,setEdit]=useState(null);
+  const [aks,setAks]=useState(null);   // kutucuk komut penceresi {u,stage}
   const [acik,setAcik]=useState({});   // ürün kartında baskı listesi açık mı
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
   // her ürünün TÜM baskıları (urunId'ye göre) — aynı ürünün baskıları tek kartta toplanır
@@ -462,31 +475,57 @@ function StokTab({ urunler, plan }){
   const miniBtn={...S.ibtn,padding:"1px 9px",fontSize:16,lineHeight:1.2,fontWeight:800};
   const montajdaOf=(u)=> (u.parcalar||[]).length
     ? Math.min.apply(null, u.parcalar.map(p=>parcaAvail(u,p)))
-    : Math.max(0, num(basildiMap[u.id]) - num(u.montajBitti));
+    : Math.max(0, num(basildiMap[u.id]) - num(u.montajBitti) - num(u.zayiat));
 
   const T = liste.reduce((a,u)=>{a.basim+=num(basimMap[u.id]);a.montajda+=montajdaOf(u);a.stokta+=num(u.stokta);a.konsinye+=num(u.konsinye);a.satildi+=num(u.satildi);return a;},{basim:0,montajda:0,stokta:0,konsinye:0,satildi:0});
 
-  // montajı bitir: montajdaki ürün/takım tamamlanır → Stokta'ya geçer
-  async function montajBitir(u){
+  // montajdaki havuzdan N adet tüket (stoğa ekle veya zayiat) — parçalıda her parçadan N
+  async function montajdanTuket(u,n,hedef){   // hedef: "stokta" | "zayiat"
+    n=Math.floor(num(n)); if(n<1) return;
     const parcalar=u.parcalar||[];
     if(parcalar.length){
-      for(const p of parcalar){ if(parcaAvail(u,p)<1) return alert("Montaja hazır parça yok: "+p); }
-      const tk={...(u.parcaTuket||{})}; parcalar.forEach(p=>tk[p]=num(tk[p])+1);
-      await save("stok_urun",{id:u.id,parcaTuket:tk,stokta:num(u.stokta)+1});
+      for(const p of parcalar){ if(parcaAvail(u,p)<n) return alert("Montajda yeterli takım yok ("+montajdaOf(u)+" hazır)."); }
+      const tk={...(u.parcaTuket||{})}; parcalar.forEach(p=>tk[p]=num(tk[p])+n);
+      const ek = hedef==="stokta" ? {stokta:num(u.stokta)+n} : {zayiat:num(u.zayiat)+n};
+      await save("stok_urun",{id:u.id,parcaTuket:tk,...ek});
     } else {
-      if(montajdaOf(u)<1) return alert("Montajda ürün yok.");
-      await save("stok_urun",{id:u.id,montajBitti:num(u.montajBitti)+1,stokta:num(u.stokta)+1});
+      if(montajdaOf(u)<n) return alert("Montajda yeterli ürün yok ("+montajdaOf(u)+" hazır).");
+      const ek = hedef==="stokta" ? {montajBitti:num(u.montajBitti)+n,stokta:num(u.stokta)+n} : {zayiat:num(u.zayiat)+n};
+      await save("stok_urun",{id:u.id,...ek});
     }
   }
-  async function konsinyeVer(u){ if(num(u.stokta)<1)return; await save("stok_urun",{id:u.id,stokta:num(u.stokta)-1,konsinye:num(u.konsinye)+1}); }
-  async function satStok(u){ if(num(u.stokta)<1)return; await save("stok_urun",{id:u.id,stokta:num(u.stokta)-1,satildi:num(u.satildi)+1}); }
-  async function satKonsinye(u){ if(num(u.konsinye)<1)return; await save("stok_urun",{id:u.id,konsinye:num(u.konsinye)-1,satildi:num(u.satildi)+1}); }
-  async function iade(u){ if(num(u.konsinye)<1)return; await save("stok_urun",{id:u.id,konsinye:num(u.konsinye)-1,stokta:num(u.stokta)+1}); }
+  async function stoktanCikar(u,n,hedef){     // hedef: "satildi" | "konsinye"
+    n=Math.floor(num(n)); if(n<1) return; if(num(u.stokta)<n) return alert("Stokta yeterli ürün yok ("+num(u.stokta)+" var).");
+    const ek = hedef==="satildi" ? {satildi:num(u.satildi)+n} : {konsinye:num(u.konsinye)+n};
+    await save("stok_urun",{id:u.id,stokta:num(u.stokta)-n,...ek});
+  }
+  async function konsinyedenCikar(u,n,hedef){ // hedef: "stokta" (iade) | "satildi"
+    n=Math.floor(num(n)); if(n<1) return; if(num(u.konsinye)<n) return alert("Konsinyede yeterli ürün yok ("+num(u.konsinye)+" var).");
+    const ek = hedef==="stokta" ? {stokta:num(u.stokta)+n} : {satildi:num(u.satildi)+n};
+    await save("stok_urun",{id:u.id,konsinye:num(u.konsinye)-n,...ek});
+  }
+  // kutucuğa tıklayınca açılan komut listesi
+  function aksiyonCfg(u,stage){
+    if(stage==="montajda") return { baslik:"🔧 Montajda — "+u.ad, mevcut:montajdaOf(u), acts:[
+      {label:"📥 Stoğa ekle",renk:"#0369a1",fn:(n)=>montajdanTuket(u,n,"stokta")},
+      {label:"⚠ Zayiat",renk:C.kirmiziB,fn:(n)=>montajdanTuket(u,n,"zayiat")} ]};
+    if(stage==="stokta") return { baslik:"📥 Stokta — "+u.ad, mevcut:num(u.stokta), acts:[
+      {label:"💰 Satış",renk:C.yesilB,fn:(n)=>stoktanCikar(u,n,"satildi")},
+      {label:"🏬 Konsinyeye ver",renk:"#7c3aed",fn:(n)=>stoktanCikar(u,n,"konsinye")} ]};
+    if(stage==="konsinye") return { baslik:"🏬 Konsinye — "+u.ad, mevcut:num(u.konsinye), acts:[
+      {label:"↩ İade (stoğa)",renk:"#0369a1",fn:(n)=>konsinyedenCikar(u,n,"stokta")},
+      {label:"💰 Satıldı",renk:C.yesilB,fn:(n)=>konsinyedenCikar(u,n,"satildi")} ]};
+    return null;
+  }
 
   const ozetKart=(ad,deg,renk)=>h("div",{style:{...S.card,padding:"12px 16px",flex:"1 1 120px"}},
     h("div",{style:{fontSize:12,color:C.mut,fontWeight:700}},ad), h("div",{style:{fontSize:26,fontWeight:800,color:renk}},deg));
-  const asamaKutu=(ad,deg,renk)=>h("div",{style:{background:"#f3f6fb",borderRadius:10,padding:"8px 4px"}},
-    h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},ad), h("div",{style:{fontSize:22,fontWeight:800,color:renk}},num(deg)));
+  const asamaKutu=(ad,deg,renk,onClick)=>h("div",{onClick,title:onClick?"Tıkla → komutlar":null,
+    style:{background:"#f3f6fb",borderRadius:10,padding:"8px 4px",cursor:onClick?"pointer":"default",
+      border:onClick?"1px solid "+C.line:"1px solid transparent",position:"relative"}},
+    h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},ad),
+    h("div",{style:{fontSize:22,fontWeight:800,color:renk}},num(deg)),
+    onClick && h("span",{style:{position:"absolute",top:3,right:5,fontSize:9,color:C.mut}},"▾"));
 
   return h("div",null,
     h("div",{style:{userSelect:"none",WebkitUserSelect:"none"}},
@@ -496,7 +535,7 @@ function StokTab({ urunler, plan }){
       ozetKart("📥 Stokta toplam",T.stokta,"#0369a1"),
       ozetKart("🏬 Konsinyede toplam",T.konsinye,"#7c3aed"),
       ozetKart("💰 Satılmış toplam",T.satildi,C.yesilB)),
-    h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"ℹ️ Basımı biten baskılar otomatik 🔧 Montajda'ya düşer; montajı bitince 📥 Stokta'ya geçer. Stoktan 🏬 Konsinye veya 💰 Satılmış olur."),
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"ℹ️ Basımı biten baskılar otomatik 🔧 Montajda'ya düşer. Aşama kutucuğuna dokun → komutlar (adet girerek): Montajda → Stoğa ekle / Zayiat · Stokta → Satış / Konsinyeye ver · Konsinye → İade / Satıldı."),
     h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setEdit({ad:"",parcalar:[],stokta:0,konsinye:0,not:""})},"+ Ürün"),
     !liste.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Ürün yok. + Ürün ile ekle.")
     : h("div",{style:{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))"}},
@@ -531,18 +570,14 @@ function StokTab({ urunler, plan }){
                 return h("div",{style:{marginTop:8,fontSize:12.5,fontWeight:700,color:"#7a1d12",background:"#fdecea",
                   border:"1px solid "+C.kirmiziB,borderRadius:8,padding:"7px 10px"}},
                   "⚠ Eksik parça — montaj için bas: "+eksikler.map(x=>x.p+" ×"+x.n).join(", ")); })()),
-            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,margin:"10px 0 12px",textAlign:"center"}},
+            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,margin:"10px 0 6px",textAlign:"center"}},
               asamaKutu("🖨 Basımda",basimMap[u.id],"#0e7490"),
-              asamaKutu("🔧 Montajda",montajdaOf(u),"#c2410c"),
-              asamaKutu("📥 Stokta",u.stokta,"#0369a1"),
-              asamaKutu("🏬 Konsinye",u.konsinye,"#7c3aed"),
+              asamaKutu("🔧 Montajda",montajdaOf(u),"#c2410c",()=>setAks({u,stage:"montajda"})),
+              asamaKutu("📥 Stokta",u.stokta,"#0369a1",()=>setAks({u,stage:"stokta"})),
+              asamaKutu("🏬 Konsinye",u.konsinye,"#7c3aed",()=>setAks({u,stage:"konsinye"})),
               asamaKutu("💰 Satıldı",u.satildi,C.yesilB)),
-            h("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},
-              h("button",{style:S.ibtn,onClick:()=>montajBitir(u)}, "✓ Montajı bitir"),
-              h("button",{style:S.ibtn,onClick:()=>konsinyeVer(u)}, "🏬 Konsinyeye ver"),
-              h("button",{style:S.ibtn,onClick:()=>satStok(u)}, "💰 Satıldı"),
-              h("button",{style:S.ibtn,onClick:()=>satKonsinye(u)}, "💰 Konsinye satıldı"),
-              h("button",{style:S.ibtn,onClick:()=>iade(u)}, "↩ Konsinye iade")),
+            h("div",{style:{fontSize:11,color:C.mut,marginBottom:6}},
+              "Komutlar için kutucuğa dokun"+(num(u.zayiat)?"  ·  ⚠ Zayiat: "+num(u.zayiat):"")),
             // bu ürünün tüm baskıları (basım bilgileri buraya düşer)
             (()=>{ const bl=baskiMap[u.id]||[]; if(!bl.length) return null;
               const toplamAdet=bl.reduce((s,p)=>s+num(p.adet||1),0);
@@ -563,7 +598,9 @@ function StokTab({ urunler, plan }){
                       h("span",{style:{flexShrink:0,fontSize:11,fontWeight:800,color:d.c,background:"#f3f6fb",borderRadius:6,padding:"2px 7px"}},d.t));
                   }))); })());
         }))),
-    edit && h(StokModal,{kayit:edit,onKapat:()=>setEdit(null)}));
+    edit && h(StokModal,{kayit:edit,onKapat:()=>setEdit(null)}),
+    aks && (()=>{ const cfg=aksiyonCfg(aks.u,aks.stage); if(!cfg) return null;
+      return h(StokAksiyonModal,{baslik:cfg.baslik,mevcut:cfg.mevcut,acts:cfg.acts,onKapat:()=>setAks(null)}); })());
 }
 
 /* ============================================================
