@@ -21,6 +21,12 @@
   @keyframes tkmove{to{background-position:22px 0}}
   @keyframes tkglow{0%,100%{box-shadow:0 0 0 0 rgba(34,211,238,.0)}50%{box-shadow:0 0 14px 1px rgba(34,211,238,.55)}}
   .tk-live{animation:tkglow 1.8s ease-in-out infinite}
+  @keyframes tkpop{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}
+  .tk-pop{animation:tkpop .5s cubic-bezier(.2,.8,.2,1.2) both}
+  @keyframes tkfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+  .tk-float{animation:tkfloat 2.4s ease-in-out infinite}
+  @keyframes tkshine{to{background-position:200% 0}}
+  .tk-shine{background-size:200% auto;animation:tkshine 2.5s linear infinite}
 </style>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -933,6 +939,198 @@ function PazarlamaTab({ urunler, plan, filamentler, hareketler }){
 }
 
 /* ============================================================
+   OYUNLAŞTIRMA — teşvik / gamification (5 tasarım konsepti)
+   ============================================================ */
+const RANKS=[[0,"Çırak","🌱"],[250,"Kalfa","🔧"],[700,"Usta","⭐"],[1600,"Üstat","🔥"],[3200,"Efsane","👑"]];
+function rankOf(xp){ let r=RANKS[0]; for(const x of RANKS) if(xp>=x[0]) r=x; return r; }
+function nextRank(xp){ for(const x of RANKS) if(xp<x[0]) return x; return null; }
+const TIERS=[[0,"Bronz","🥉","#b45309","#fde9d4"],[1200,"Gümüş","🥈","#64748b","#eef2f7"],[3500,"Altın","🥇","#b8860b","#fef3c7"],[8000,"Platin","💎","#0e7490","#cffafe"]];
+function tierOf(p){ let t=TIERS[0]; for(const x of TIERS) if(p>=x[0]) t=x; return t; }
+function seriHesap(set){ let c=0,d=gunBasi(Date.now()).getTime(); if(!set.has(d)) d-=86400000; while(set.has(d)){ c++; d-=86400000; } return c; }
+
+function XpBar({ xp, renk }){
+  const r=rankOf(xp), nx=nextRank(xp); const taban=r[0], tavan=nx?nx[0]:r[0];
+  const p= nx? Math.max(3,Math.round((xp-taban)/(tavan-taban)*100)) : 100;
+  return h("div",null,
+    h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4,color:"#fff"}},
+      h("span",{style:{fontWeight:800}}, xp+" XP"),
+      nx? h("span",{style:{opacity:.85}}, (tavan-xp)+" XP → "+nx[2]+" "+nx[1]) : h("span",null,"MAX")),
+    h("div",{style:{height:13,background:"rgba(255,255,255,.25)",borderRadius:99,overflow:"hidden"}},
+      h("div",{className:"tk-stripe",style:{height:"100%",width:p+"%",background:renk,borderRadius:99}})));
+}
+function Ring({ pct, size, renk, ust, alt2 }){
+  const p=Math.max(0,Math.min(100,Math.round(pct)));
+  return h("div",{style:{width:size,height:size,borderRadius:"50%",
+    background:"conic-gradient("+renk+" "+(p*3.6)+"deg,#e8eef6 0deg)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},
+    h("div",{style:{width:size-16,height:size-16,borderRadius:"50%",background:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}},
+      h("div",{style:{fontWeight:800,fontSize:Math.round(size*0.2),color:renk,lineHeight:1}},ust),
+      alt2&&h("div",{style:{fontSize:10,color:C.mut,marginTop:2}},alt2)));
+}
+function Rozet({ ikon, ad, ac }){
+  return h("div",{className:ac?"tk-pop":"",style:{textAlign:"center",width:74,opacity:ac?1:.4}},
+    h("div",{style:{fontSize:30,filter:ac?"none":"grayscale(1)"}},ac?ikon:"🔒"),
+    h("div",{style:{fontSize:10.5,fontWeight:700,marginTop:2,color:ac?C.txt:C.mut}},ad));
+}
+function Gorev({ ad, deg, hedef, renk, birim }){
+  const p=hedef?Math.min(100,Math.round(deg/hedef*100)):0, tam=deg>=hedef;
+  return h("div",{style:{...S.card,padding:"10px 12px",borderColor:tam?C.yesilB:C.line}},
+    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,fontWeight:700,marginBottom:6}},
+      h("span",null,(tam?"✅ ":"🎯 ")+ad),
+      h("span",{style:{color:tam?C.yesilB:C.mut,fontSize:12}}, (birim==="tl"?tl(deg):Math.round(deg))+" / "+(birim==="tl"?tl(hedef):hedef))),
+    h("div",{style:{height:9,background:"#eef2f7",borderRadius:99,overflow:"hidden"}},
+      h("div",{className:tam?"":"tk-stripe",style:{height:"100%",width:p+"%",background:tam?C.yesilB:renk,borderRadius:99}})));
+}
+function Madalya({ sira, ad, deg, renk, max }){
+  const m=["🥇","🥈","🥉"][sira]||(sira+1+"."); const p=max?Math.round(deg/max*100):0;
+  return h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"8px 4px"}},
+    h("div",{style:{fontSize:sira<3?22:14,width:30,textAlign:"center",fontWeight:800,color:C.mut}},m),
+    h("div",{style:{flex:1,minWidth:0}},
+      h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700}}, h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},ad), h("span",null,deg)),
+      h("div",{style:{height:8,background:"#eef2f7",borderRadius:99,marginTop:3,overflow:"hidden"}},
+        h("div",{style:{height:"100%",width:p+"%",background:renk,borderRadius:99}}))));
+}
+
+function OyunTab({ plan, urunler, hareketler, makineler }){
+  const [alt,setAlt]=useState("seviye");
+  const now=Date.now(), gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
+  // ÜRETİM metrikleri
+  const biten=(plan||[]).filter(p=>p.basladi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=now);
+  const uAdet=biten.reduce((s,p)=>s+num(p.adet||1),0);
+  const uGram=biten.reduce((s,p)=>s+num(p.gram),0);
+  const uSaat=biten.reduce((s,p)=>s+num(p.sureDk),0)/60;
+  const zamaninda=biten.filter(p=> num(p.sureDk) <= (p.planSureDk!=null?num(p.planSureDk):num(p.sureDk))).length;
+  const dakiklik=biten.length?Math.round(zamaninda/biten.length*100):0;
+  const uXp=biten.length*15 + uAdet*2 + zamaninda*8;
+  const bitenSet=new Set(biten.map(p=>gunBasi(new Date(p.baslangic).getTime()+num(p.sureDk)*60000).getTime()));
+  const uSeri=seriHesap(bitenSet);
+  const bitenBugun=biten.filter(p=> new Date(p.baslangic).getTime()+num(p.sureDk)*60000>=gun0).length;
+  const adetHafta=biten.filter(p=> new Date(p.baslangic).getTime()+num(p.sureDk)*60000>=haf0).reduce((s,p)=>s+num(p.adet||1),0);
+  // PAZARLAMA metrikleri
+  const satis=(hareketler||[]).filter(h2=>h2.tip==="satis");
+  const sAdet=satis.reduce((s,x)=>s+num(x.adet),0);
+  const ciro=satis.reduce((s,x)=>s+num(x.satisFiyat)*num(x.adet),0);
+  const kar=satis.reduce((s,x)=>s+(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet),0);
+  const konsAdet=(hareketler||[]).filter(h2=>h2.tip==="konsinye").reduce((s,x)=>s+num(x.adet),0);
+  const pXp=sAdet*8 + Math.floor(kar/5) + konsAdet*3;
+  const satisSet=new Set(satis.map(x=>gunBasi(new Date(x.tarih).getTime()).getTime()));
+  const pSeri=seriHesap(satisSet);
+  const satisBugun=satis.filter(x=>new Date(x.tarih).getTime()>=gun0).length;
+  const ciroHafta=satis.filter(x=>new Date(x.tarih).getTime()>=haf0).reduce((s,x)=>s+num(x.satisFiyat)*num(x.adet),0);
+  const ciroAy=satis.filter(x=>new Date(x.tarih).getTime()>=ay0).reduce((s,x)=>s+num(x.satisFiyat)*num(x.adet),0);
+  // ligler
+  const makAd={}; (makineler||[]).forEach(m=>makAd[m.id]=m.ad);
+  const makSkor={}; biten.forEach(p=>{ makSkor[p.makineId]=(makSkor[p.makineId]||0)+num(p.adet||1); });
+  const makLig=Object.keys(makSkor).map(id=>({ad:makAd[id]||"—",v:makSkor[id]})).sort((a,b)=>b.v-a.v);
+  const urunSkor={}; satis.forEach(x=>{ urunSkor[x.urunAd]=(urunSkor[x.urunAd]||0)+num(x.adet); });
+  const urunLig=Object.keys(urunSkor).map(ad=>({ad,v:urunSkor[ad]})).sort((a,b)=>b.v-a.v);
+
+  const uRozet=[{ikon:"🌱",ad:"İlk Baskı",ac:biten.length>=1},{ikon:"🔧",ad:"10 Baskı",ac:biten.length>=10},
+    {ikon:"⭐",ad:"50 Baskı",ac:biten.length>=50},{ikon:"⏱",ad:"Dakik ×10",ac:zamaninda>=10},
+    {ikon:"🧵",ad:"5kg Filament",ac:uGram>=5000},{ikon:"👑",ad:"200 Baskı",ac:biten.length>=200}];
+  const pRozet=[{ikon:"💰",ad:"İlk Satış",ac:satis.length>=1},{ikon:"🛒",ad:"50 Adet",ac:sAdet>=50},
+    {ikon:"💎",ad:"Ciro 10K",ac:ciro>=10000},{ikon:"🏬",ad:"Konsinyeci",ac:konsAdet>=20},
+    {ikon:"📈",ad:"Kâr 5K",ac:kar>=5000},{ikon:"🔥",ad:"7 Gün Seri",ac:pSeri>=7}];
+
+  const altlar=[["seviye","⭐ Seviye"],["gorev","🎯 Görev"],["lig","🏆 Liderlik"],["seri","🔥 Seri & Hedef"],["odul","🎁 Ödül"]];
+
+  // —— TASARIM 1: SEVİYE (RPG kahraman kartı) ——
+  const heroKart=(renk,renk2,ikon,baslik,xp,statlar,rozetler)=>h("div",{style:{borderRadius:16,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
+    h("div",{style:{background:"linear-gradient(135deg,"+renk+","+renk2+")",padding:"18px 18px 16px",color:"#fff"}},
+      h("div",{style:{display:"flex",alignItems:"center",gap:14,marginBottom:14}},
+        h("div",{className:"tk-float",style:{fontSize:46,width:70,height:70,borderRadius:"50%",background:"rgba(255,255,255,.18)",display:"flex",alignItems:"center",justifyContent:"center"}},ikon),
+        h("div",null, h("div",{style:{fontSize:12,opacity:.85,fontWeight:700,letterSpacing:.5}},baslik),
+          h("div",{style:{fontSize:22,fontWeight:800}}, rankOf(xp)[2]+" "+rankOf(xp)[1]))),
+      h(XpBar,{xp,renk:"linear-gradient(90deg,#fff,#dbeafe)"})),
+    h("div",{style:{background:"#fff",padding:"14px 16px"}},
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,textAlign:"center",marginBottom:12}},
+        statlar.map((s,i)=>h("div",{key:i},h("div",{style:{fontSize:20,fontWeight:800,color:renk}},s[1]),h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},s[0])))),
+      h("div",{style:{display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center"}}, rozetler.map((r,i)=>h(Rozet,{key:i,...r})))));
+  const seviyeView=()=>h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))"}},
+    heroKart("#1d4ed8","#0e7490","🖨","ÜRETİM EKİBİ",uXp,
+      [["Baskı",biten.length],["Üretilen",uAdet],["Dakiklik","%"+dakiklik]],uRozet),
+    heroKart("#15803d","#65a30d","🛒","PAZARLAMACI",pXp,
+      [["Satış",sAdet],["Ciro",tl(ciro)],["Kâr",tl(kar)]],pRozet));
+
+  // —— TASARIM 2: GÖREV (günlük/haftalık quest board) ——
+  const gorevView=()=>h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fit,minmax(290px,1fr))"}},
+    h("div",{style:{...S.card,padding:16}},
+      h("div",{style:{fontWeight:800,fontSize:16,marginBottom:4}},"🖨 Üretim görevleri"),
+      h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"Tamamladıkça XP & rozet kazan"),
+      h("div",{style:{display:"grid",gap:10}},
+        h(Gorev,{ad:"Bugün 5 baskı bitir",deg:bitenBugun,hedef:5,renk:"#0e7490"}),
+        h(Gorev,{ad:"Bu hafta 100 ürün üret",deg:adetHafta,hedef:100,renk:"#1d4ed8"}),
+        h(Gorev,{ad:"Dakiklik %90 (zamanında)",deg:dakiklik,hedef:90,renk:"#7c3aed"}),
+        h(Gorev,{ad:"Toplam 50 baskı (kariyer)",deg:biten.length,hedef:50,renk:"#c2410c"}))),
+    h("div",{style:{...S.card,padding:16}},
+      h("div",{style:{fontWeight:800,fontSize:16,marginBottom:4}},"🛒 Pazarlama görevleri"),
+      h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"Hedefleri vur, prim kapısını aç"),
+      h("div",{style:{display:"grid",gap:10}},
+        h(Gorev,{ad:"Bugün 3 satış yap",deg:satisBugun,hedef:3,renk:"#15803d"}),
+        h(Gorev,{ad:"Bu hafta 2.000 ₺ ciro",deg:ciroHafta,hedef:2000,renk:"#16a34a",birim:"tl"}),
+        h(Gorev,{ad:"20 ürün konsinye bırak",deg:konsAdet,hedef:20,renk:"#7c3aed"}),
+        h(Gorev,{ad:"Bu ay 10.000 ₺ ciro",deg:ciroAy,hedef:10000,renk:"#b45309",birim:"tl"}))));
+
+  // —— TASARIM 3: LİDERLİK (lig tablosu + podyum) ——
+  const ligKutu=(baslik,liste,renk,birimAd)=>h("div",{style:{...S.card,padding:16}},
+    h("div",{style:{fontWeight:800,fontSize:16,marginBottom:10}},baslik),
+    !liste.length? h("div",{style:{color:C.mut,fontSize:13,textAlign:"center",padding:14}},"Henüz veri yok.")
+    : liste.slice(0,6).map((x,i)=>h(Madalya,{key:i,sira:i,ad:x.ad,deg:x.v,renk,max:liste[0].v})),
+    liste.length? h("div",{style:{fontSize:11,color:C.mut,marginTop:8,textAlign:"right"}},"birim: "+birimAd):null);
+  const ligView=()=>h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fit,minmax(290px,1fr))"}},
+    ligKutu("🏭 Makine Ligi",makLig,"#1d4ed8","üretilen adet"),
+    ligKutu("🔥 Çok Satan Ürünler",urunLig,"#15803d","satılan adet"));
+
+  // —— TASARIM 4: SERİ & HEDEF (streak + halka) ——
+  const seriKart=(renk,ikon,baslik,seri,ringPct,ringUst,ringAlt,hedefAd,hedefDeg,hedefMax,birim)=>h("div",{style:{...S.card,padding:18}},
+    h("div",{style:{display:"flex",alignItems:"center",gap:14,marginBottom:14}},
+      h(Ring,{pct:ringPct,size:96,renk,ust:ringUst,alt2:ringAlt}),
+      h("div",null,
+        h("div",{style:{fontSize:12,color:C.mut,fontWeight:700}},baslik),
+        h("div",{style:{fontSize:34,fontWeight:800,lineHeight:1.1,color:renk}}, ikon+" "+seri),
+        h("div",{style:{fontSize:12,color:C.mut}},"gün üst üste"+(seri>=3?" — kızışıyor!":"")))),
+    h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:700,marginBottom:5}},
+      h("span",null,hedefAd), h("span",{style:{color:C.mut}},(birim==="tl"?tl(hedefDeg):hedefDeg)+" / "+(birim==="tl"?tl(hedefMax):hedefMax))),
+    h("div",{style:{height:11,background:"#eef2f7",borderRadius:99,overflow:"hidden"}},
+      h("div",{className:"tk-stripe",style:{height:"100%",width:Math.min(100,hedefMax?hedefDeg/hedefMax*100:0)+"%",background:renk,borderRadius:99}})));
+  const seriView=()=>h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))"}},
+    seriKart("#0e7490","🔥","🖨 ÜRETİM SERİSİ",uSeri,dakiklik,"%"+dakiklik,"dakiklik","Haftalık üretim",adetHafta,100),
+    seriKart("#16a34a","🔥","🛒 SATIŞ SERİSİ",pSeri, ciroAy/10000*100,tl(ciroAy),"aylık ciro","Aylık ciro hedefi",ciroAy,10000,"tl"));
+
+  // —— TASARIM 5: ÖDÜL (puan ekonomisi / tier) ——
+  const toplamPuan=uXp+pXp; const tier=tierOf(toplamPuan); const nextTier=TIERS.find(t=>t[0]>toplamPuan);
+  const dukkan=[["☕","Kahve molası",150],["🍕","Ekip pizzası",400],["💸","%1 ekstra prim",800],["🎧","Kablosuz kulaklık",2000],["🏖","Yarım gün izin",3500],["📱","Telefon hediyesi",9000]];
+  const odulView=()=>h("div",null,
+    h("div",{style:{borderRadius:16,padding:"20px 18px",marginBottom:16,textAlign:"center",
+      background:"linear-gradient(135deg,"+tier[3]+"22,"+tier[4]+")",border:"1px solid "+tier[3]+"55"}},
+      h("div",{className:"tk-float",style:{fontSize:52}},tier[2]),
+      h("div",{style:{fontSize:26,fontWeight:800,color:tier[3]}},tier[1]+" Seviye"),
+      h("div",{style:{fontSize:15,fontWeight:700,marginTop:2}},toplamPuan+" puan"),
+      nextTier? h("div",{style:{fontSize:12.5,color:C.mut,marginTop:6}}, (nextTier[0]-toplamPuan)+" puan → "+nextTier[2]+" "+nextTier[1]) : h("div",{style:{fontSize:12.5,color:C.mut,marginTop:6}},"En üst seviye! 🎉"),
+      h("div",{style:{height:12,maxWidth:380,margin:"10px auto 0",background:"rgba(0,0,0,.07)",borderRadius:99,overflow:"hidden"}},
+        h("div",{className:"tk-shine",style:{height:"100%",width:(nextTier?Math.max(5,Math.round((toplamPuan-tier[0])/(nextTier[0]-tier[0])*100)):100)+"%",borderRadius:99,
+          background:"linear-gradient(90deg,"+tier[3]+",#fff,"+tier[3]+")"}}))),
+    h("div",{style:{fontWeight:800,fontSize:16,marginBottom:10}},"🎁 Ödül dükkanı"),
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"Kazanılan puanlarla (konsept) — gerçek ödüllere siz karar verirsiniz"),
+    h("div",{style:{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))"}},
+      dukkan.map((d,i)=>{ const alinabilir=toplamPuan>=d[2];
+        return h("div",{key:i,style:{...S.card,padding:"14px 12px",textAlign:"center",opacity:alinabilir?1:.6,borderColor:alinabilir?C.yesilB:C.line}},
+          h("div",{style:{fontSize:34}},d[0]),
+          h("div",{style:{fontWeight:700,fontSize:13,margin:"6px 0"}},d[1]),
+          h("div",{style:{fontSize:13,fontWeight:800,color:alinabilir?C.yesilB:C.mut}},d[2]+" puan"),
+          h("button",{disabled:!alinabilir,style:{...S.btn(alinabilir?"p":""),width:"100%",marginTop:8,opacity:alinabilir?1:.5,
+            cursor:alinabilir?"pointer":"not-allowed"},onClick:()=>alinabilir&&alert("🎉 "+d[1]+" — bu bir konsept. Gerçek ödül akışını birlikte tanımlayalım!")},
+            alinabilir?"Al":"Kilitli")); })));
+
+  const viewMap={seviye:seviyeView,gorev:gorevView,lig:ligView,seri:seriView,odul:odulView};
+  return h("div",null,
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}},
+      altlar.map(([k,ad])=>h("button",{key:k,onClick:()=>setAlt(k),
+        style:{...S.btn(alt===k?"p":""),padding:"9px 14px",fontWeight:700,fontSize:13}},ad))),
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:14}},"💡 5 farklı tasarım konsepti — beğendiğin yön(ler)i seç, onu derinleştirelim (gerçek XP/ödül kuralları, pazarlamacı hesapları, otomatik bildirimler…)."),
+    (viewMap[alt]||seviyeView)());
+}
+
+/* ============================================================
    APP
    ============================================================ */
 function App(){
@@ -1029,10 +1227,11 @@ function App(){
   return h("div",{style:S.wrap},
     // üst sekme
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
-      [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]].map(([k,ad])=>
+      [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"],["oyun","🎮 Oyunlaştırma"]].map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
     sekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
     sekme==="pazarlama" && h(PazarlamaTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket}),
+    sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist}),
     sekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
