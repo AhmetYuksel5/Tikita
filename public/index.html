@@ -1410,11 +1410,16 @@ function FetihHarita({ kaleler }){
 }
 
 function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, seferler }){
-  const [alt,setAlt]=useState("seviye");
+  const [alt,setAlt]=useState("komuta");
   const [yeniBolge,setYeniBolge]=useState("");
   const [cantaDoldur,setCantaDoldur]=useState(false);
   const [musteriBag,setMusteriBag]=useState(null);
   const [rapor,setRapor]=useState(null);
+  const [islem,setIslem]=useState(null);     // {u,mod,musteri}
+  const [duzen,setDuzen]=useState(null);      // ürün görsel/bilgi
+  const [musEdit,setMusEdit]=useState(null);  // müşteri (kale) ekle/düzenle
+  const urunListe=(urunler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const konsKalan={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye" && num(x.kalan)>0) konsKalan[x.urunId]=num(konsKalan[x.urunId])+num(x.kalan); });
   const now=Date.now(), gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
   // ÜRETİM metrikleri
   const biten=(plan||[]).filter(p=>p.basladi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=now);
@@ -1498,7 +1503,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
       if(sid) await save("pazarlama_hareket",{tip:"iade",urunId:u.id,urunAd:u.ad,adet:num(u.pazStok),seferId:sid,tarih:iso}); }
     if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
 
-  const altlar=[["seviye","⭐ Seviye"],["gorev","🎯 Görev"],["lig","🏆 Liderlik"],["seri","🔥 Seri & Hedef"],["fetih","🗺️ Fetih"],["odul","🎁 Ödül"]];
+  const altlar=[["komuta","🏰 Komuta"],["cephane","🎒 Cephane"],["kale","🛡️ Kaleler"]];
 
   // —— TASARIM 1: SEVİYE (RPG kahraman kartı) ——
   const heroKart=(renk,renk2,ikon,baslik,xp,statlar,rozetler)=>h("div",{style:{borderRadius:16,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
@@ -1691,15 +1696,70 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
             h("div",{style:{height:7,background:"#eef2f7",borderRadius:99,overflow:"hidden"}},
               h("div",{style:{height:"100%",width:Math.min(100,k.seviye/6*100)+"%",background:"linear-gradient(90deg,#f59e0b,#b45309)",borderRadius:99}})))))));
 
-  const viewMap={seviye:seviyeView,gorev:gorevView,lig:ligView,seri:seriView,fetih:fetihView,odul:odulView};
+  // —— 🎒 CEPHANE (ürün kartları) ——
+  const cephaneView=()=>h("div",null,
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"🎒 Cephane — ürünlerin. Atölyeden çantana al, sahada sat/konsinye yap."),
+    !urunListe.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Ürün yok. Stok sekmesinden ekle.")
+    : h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))"}},
+        urunListe.map(u=>{ const r=adRenk(u.ad); const foto=(u.foto||[])[0];
+          const pill=(bg,renk,et,deg)=>h("span",{style:{background:bg,color:renk,borderRadius:8,padding:"4px 9px",fontSize:12,fontWeight:700}}, et+" ",h("b",null,deg));
+          return h("div",{key:u.id,className:"tk-pcard",style:{background:"#fff",borderRadius:16,overflow:"hidden",border:"1px solid #e6ebf2",borderTop:"5px solid "+r.ana,boxShadow:"0 4px 14px rgba(15,23,42,.09)"}},
+            h("div",{style:{position:"relative",height:140,overflow:"hidden",background: foto?"#0b1220":"linear-gradient(135deg,"+r.ana+","+r.acik+")",display:"flex",alignItems:"center",justifyContent:"center"}},
+              foto? h("img",{src:foto,style:{width:"100%",height:"100%",objectFit:"cover"}})
+                  : h("div",{style:{fontSize:54,fontWeight:800,color:"rgba(255,255,255,.95)"}},(u.ad||"?").charAt(0).toLocaleUpperCase("tr")),
+              h("button",{onClick:()=>setDuzen(u),style:{position:"absolute",top:8,right:8,background:"rgba(255,255,255,.92)",border:"none",borderRadius:8,padding:"5px 9px",cursor:"pointer",fontWeight:700,fontSize:12}},"📷")),
+            h("div",{style:{padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}},
+              h("div",{style:{display:"flex",alignItems:"center",gap:8}},
+                h("span",{style:{width:12,height:12,borderRadius:"50%",background:r.ana,flexShrink:0,boxShadow:"0 0 0 3px "+r.yumusak}}),
+                h("div",{style:{fontWeight:800,fontSize:16,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+                h("button",{onClick:()=>paylasWhats(u),style:{flexShrink:0,background:"#16a34a",color:"#fff",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontWeight:700,fontSize:12}},"📲")),
+              h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+                pill(r.yumusak,r.ana,"🎒 Çantada",num(u.pazStok)),
+                pill("#f3f6fb",C.mut,"🏭 Stok",num(u.stokta)),
+                num(konsKalan[u.id])>0?pill("#efe7fe","#7c3aed","🏬 Konsinye",num(konsKalan[u.id])):null),
+              h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12.5,background:"#fafbfc",border:"1px solid #eef2f7",borderRadius:9,padding:"7px 10px"}},
+                h("span",null,h("span",{style:{color:C.mut}},"Alış "),h("b",null,num(u.pazFiyat)>0?tl(u.pazFiyat):"—")),
+                num(u.satisFiyat)>0?h("span",null,h("span",{style:{color:C.mut}},"Satış "),h("b",{style:{color:"#047857"}},tl(u.satisFiyat))):h("span",{style:{color:C.mut,fontSize:11}},"satış: 📷")),
+              h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
+                h("button",{style:{...S.ibtn,fontWeight:700},onClick:()=>setIslem({u,mod:"al"})},"📥 Al"),
+                h("button",{style:{...S.ibtn,fontWeight:700},onClick:()=>setIslem({u,mod:"iade"})},"↩ İade"),
+                h("button",{style:{...S.ibtn,color:"#fff",background:C.yesilB,borderColor:C.yesilB,fontWeight:700},onClick:()=>setIslem({u,mod:"sat"})},"💰 Sat"),
+                h("button",{style:{...S.ibtn,color:"#fff",background:"#7c3aed",borderColor:"#7c3aed",fontWeight:700},onClick:()=>setIslem({u,mod:"konsinye"})},"🏬 Konsinye")))); })));
+  // —— 🛡️ KALELER (müşteriler) ——
+  const kaleView=()=>h("div",null,
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🛡️ Kaleler — müşterilerin / mevkilerin. Karta dokun → çantadan akın (sat/konsinye)."),
+    h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Kale (müşteri) ekle"),
+    !(musteriler||[]).length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Kale yok. + ile müşteri/mevki ekle — konumunu, telefonunu kaydet.")
+    : h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))"}},
+        (musteriler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(m=>{ const r=adRenk(m.ad);
+          const fethedildi=kaleler.some(k=>k.musteriId===m.id||k.ad===m.ad); const tel=(m.telefon||"").replace(/\D/g,"");
+          return h("div",{key:m.id,className:"tk-pcard",style:{...S.card,borderTop:"5px solid "+(fethedildi?"#b45309":r.ana),boxShadow:"0 4px 14px rgba(15,23,42,.09)"}},
+            h("div",{style:{display:"flex",alignItems:"center",gap:10}},
+              h("div",{style:{width:40,height:40,borderRadius:10,flexShrink:0,background:"linear-gradient(135deg,"+r.ana+","+r.acik+")",color:"#fff",fontWeight:800,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}, fethedildi?"🏰":(m.ad||"?").charAt(0).toLocaleUpperCase("tr")),
+              h("div",{style:{minWidth:0,flex:1}},
+                h("div",{style:{fontWeight:800,fontSize:15.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad),
+                m.bolge && h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700}},"📍 "+m.bolge)),
+              h("button",{style:{...S.ibtn,flexShrink:0},onClick:()=>setMusEdit(m)},"✎")),
+            m.telefon && h("div",{style:{fontSize:13,marginTop:8}},"📞 ",
+              h("a",{href:"tel:"+m.telefon,style:{fontWeight:700,color:"#0369a1",textDecoration:"none"}},m.telefon),
+              h("a",{href:"https://wa.me/9"+tel,target:"_blank",style:{marginLeft:8,color:"#16a34a",fontWeight:700,textDecoration:"none",fontSize:12}},"WhatsApp")),
+            m.not && h("div",{style:{fontSize:12,color:C.txt,marginTop:6,background:"#faf7ff",borderRadius:8,padding:"6px 9px"}},"📝 "+m.not),
+            h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,gap:8}},
+              (m.lat&&m.lng)?h("a",{href:"https://www.google.com/maps/search/?api=1&query="+m.lat+","+m.lng,target:"_blank",style:{fontSize:12.5,fontWeight:700,color:"#0369a1",textDecoration:"none"}},"🗺️ Harita"):h("span",{style:{fontSize:11.5,color:C.mut}},"konum yok"),
+              h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:700},onClick:()=>setMusteriBag(m)},"⚔️ Akın"))); })));
+
+  const viewMap={komuta:fetihView,cephane:cephaneView,kale:kaleView};
   return h("div",null,
-    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}},
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
       altlar.map(([k,ad])=>h("button",{key:k,onClick:()=>setAlt(k),
-        style:{...S.btn(alt===k?"p":""),padding:"9px 14px",fontWeight:700,fontSize:13}},ad))),
-    h("div",{style:{fontSize:12,color:C.mut,marginBottom:14}},"💡 6 tasarım konsepti — beğendiğin yön(ler)i seç, derinleştirelim. 🗺️ Fetih: sefere çık, kale fethet, unvan kazan."),
-    (viewMap[alt]||seviyeView)(),
+        style:{...S.btn(alt===k?"p":""),padding:"10px 18px",fontWeight:700,fontSize:14}},ad))),
+    (viewMap[alt]||fetihView)(),
     cantaDoldur && h(CantaDoldurModal,{urunler,seferIdAl,onKapat:()=>setCantaDoldur(false)}),
     musteriBag && h(MusteriBagModal,{musteri:musteriBag,bagItems:cephane,aktifSeferId:aktifSefer?aktifSefer.id:null,onKapat:()=>setMusteriBag(null)}),
+    islem && (()=>{ const u=urunListe.find(x=>x.id===islem.u.id)||islem.u;
+      return h(PazIslemModal,{u,mod:islem.mod,alisVar:num(u.pazFiyat)||null,bolgeler,musteriler,secMusteri:islem.musteri||null,aktifSeferId:aktifSefer?aktifSefer.id:null,seferIdAl,onKapat:()=>setIslem(null)}); })(),
+    duzen && h(PazUrunModal,{kayit:urunListe.find(x=>x.id===duzen.id)||duzen,onKapat:()=>setDuzen(null)}),
+    musEdit && h(MusteriModal,{kayit:musEdit,bolgeler,onKapat:()=>setMusEdit(null)}),
     rapor && (()=>{ const sf=(seferler||[]).find(s=>s.id===rapor); return sf? h(SeferRaporModal,{sefer:sf,hareketler,onKapat:()=>setRapor(null)}):null; })());
 }
 
@@ -1807,7 +1867,7 @@ function App(){
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
     sekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
     sekme==="pazarlama" && h(PazarlamaTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket,bolgeler,musteriler,seferler}),
-    sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler,musteriler}),
+    sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler,musteriler,seferler}),
     sekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
