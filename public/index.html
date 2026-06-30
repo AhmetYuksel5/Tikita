@@ -1518,11 +1518,12 @@ function FetihHarita({ kaleler, hedefler, onSec }){
   useEffect(()=>{ const map=mapRef.current, lg=lgRef.current, L=window.L; if(!map||!lg||!L) return;
     lg.clearLayers(); const pts=[];
     const kl=(kaleler||[]).filter(k=>k.lat&&k.lng), hd=(hedefler||[]).filter(m=>m.lat&&m.lng);
-    const klPts=kl.map(k=>[+k.lat,+k.lng]);
-    // HAKİMİYET ALANI — kaleler arası dolgu (convex hull) + nüfuz çemberleri
-    if(klPts.length>=3){ try{ L.polygon(convexHull(klPts),{color:"#b45309",weight:1.5,opacity:.7,dashArray:"6,6",fillColor:"#f59e0b",fillOpacity:.10}).addTo(lg); }catch(e){} }
-    else if(klPts.length===2){ L.polyline(klPts,{color:"#b45309",weight:2,opacity:.6,dashArray:"6,6"}).addTo(lg); }
-    kl.forEach(k=>{ L.circle([+k.lat,+k.lng],{radius:450+k.seviye*280,stroke:false,fillColor:"#f59e0b",fillOpacity:.10}).addTo(lg); });
+    // HAKİMİYET ALANI — BÖLGEYE GÖRE ayrı renkli zonlar (Üsküdar, Ümraniye…)
+    const byB={}; kl.forEach(k=>{ const b=k.bolge||"Bölgesiz"; (byB[b]=byB[b]||[]).push(k); });
+    Object.keys(byB).forEach(b=>{ const ks=byB[b]; const col=adRenk(b).ana; const pts=ks.map(k=>[+k.lat,+k.lng]);
+      if(pts.length>=3){ try{ L.polygon(convexHull(pts),{color:col,weight:1.5,opacity:.75,dashArray:"6,6",fillColor:col,fillOpacity:.14}).addTo(lg); }catch(e){} }
+      else if(pts.length===2){ L.polyline(pts,{color:col,weight:2,opacity:.65,dashArray:"6,6"}).addTo(lg); }
+      ks.forEach(k=>L.circle([+k.lat,+k.lng],{radius:420+k.seviye*260,stroke:false,fillColor:col,fillOpacity:.13}).addTo(lg)); });
     // KALE işaretleri
     kl.forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll); const sz=20+k.seviye*4;
       const icon=L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
@@ -1802,9 +1803,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
     h("div",{style:{...S.label,marginBottom:6}},"🏳️ Bölge hakimiyeti"),
     !bolgeList.length ? h("div",{style:{...S.card,padding:20,textAlign:"center",color:C.mut,marginBottom:14}},"Bölge yok — satış/konsinyede bölge gir, kaleler kurulsun ⚔️")
     : h("div",{style:{display:"grid",gap:10,gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",marginBottom:16}},
-        bolgeList.map((b,i)=>{ const fet=!!b.unvan; const u=b.unvan; const nx=b.sayi? (BOLGE_UNVAN.find(x=>x[0]>b.sayi)||null):BOLGE_UNVAN[0];
-          return h("div",{key:i,style:{...S.card,padding:0,overflow:"hidden",borderColor:fet?"#b45309":C.line,borderStyle:fet?"solid":"dashed"}},
-            h("div",{style:{padding:"9px 12px",color:"#fff",background:fet?"linear-gradient(135deg,#7f1d1d,#b45309)":"#9aa6b4"}},
+        bolgeList.map((b,i)=>{ const fet=!!b.unvan; const u=b.unvan; const nx=b.sayi? (BOLGE_UNVAN.find(x=>x[0]>b.sayi)||null):BOLGE_UNVAN[0]; const rr=adRenk(b.ad);
+          return h("div",{key:i,style:{...S.card,padding:0,overflow:"hidden",borderColor:fet?rr.ana:C.line,borderStyle:fet?"solid":"dashed"}},
+            h("div",{style:{padding:"9px 12px",color:"#fff",background:fet?"linear-gradient(135deg,"+rr.ana+","+rr.acik+")":"#9aa6b4"}},
               h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,fontWeight:800}},
                 h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"📍 "+b.ad), h("span",{style:{fontSize:18}},fet?u[2]:"🎯")),
               h("div",{style:{fontSize:13,fontWeight:800,marginTop:2}}, fet? (genitive(b.ad)+" "+u[1]) : "Hedef — fethet!")),
