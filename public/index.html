@@ -1409,9 +1409,12 @@ function FetihHarita({ kaleler }){
   return h("div",{ref,style:{height:300,borderRadius:12,overflow:"hidden",border:"1px solid "+C.line,zIndex:0}});
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler }){
+function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, seferler }){
   const [alt,setAlt]=useState("seviye");
   const [yeniBolge,setYeniBolge]=useState("");
+  const [cantaDoldur,setCantaDoldur]=useState(false);
+  const [musteriBag,setMusteriBag]=useState(null);
+  const [rapor,setRapor]=useState(null);
   const now=Date.now(), gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
   // ÜRETİM metrikleri
   const biten=(plan||[]).filter(p=>p.basladi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=now);
@@ -1477,6 +1480,23 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler })
   const toplamAsker=kaleler.reduce((s,k)=>s+k.asker,0);
   const toplamSilah=kaleler.reduce((s,k)=>s+k.silah,0);
   const komutan=katOf(KOMUTAN,toplamGuc), komutanNext=KOMUTAN.find(x=>x[0]>toplamGuc)||null;
+  // SEFER / AKIN (çanta = taşınan cephane/ordu)
+  const cephane=(urunler||[]).slice().filter(u=>num(u.pazStok)>0).sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const cephaneAdet=cephane.reduce((s,u)=>s+num(u.pazStok),0);
+  const aktifSefer=(seferler||[]).find(s=>s.durum==="acik")||null;
+  const sefSatis=aktifSefer?(hareketler||[]).filter(x=>x.tip==="satis"&&x.seferId===aktifSefer.id):[];
+  const sefKons=aktifSefer?(hareketler||[]).filter(x=>x.tip==="konsinye"&&x.seferId===aktifSefer.id):[];
+  const sefSatA=sefSatis.reduce((s,x)=>s+num(x.adet),0), sefCiro=sefSatis.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0), sefKonA=sefKons.reduce((s,x)=>s+num(x.adet),0);
+  const kaleKey=x=> x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"").toLocaleLowerCase("tr")));
+  const oncekiKeys=new Set(aktifSefer?(hareketler||[]).filter(x=>x.tip==="satis"&&new Date(x.tarih)<new Date(aktifSefer.baslangic)).map(kaleKey):[]);
+  const yeniKaleSayi=new Set(sefSatis.map(kaleKey).filter(k=>!oncekiKeys.has(k))).size;
+  async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik"}); }
+  async function seferiBitir(){ if(!aktifSefer && !cephane.length) return alert("Aktif sefer yok.");
+    if(!confirm("Seferi bitir — kalan cephaneyi atölyeye geri çek?")) return;
+    const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
+    for(const u of cephane){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)+num(u.pazStok),pazStok:0});
+      if(sid) await save("pazarlama_hareket",{tip:"iade",urunId:u.id,urunAd:u.ad,adet:num(u.pazStok),seferId:sid,tarih:iso}); }
+    if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
 
   const altlar=[["seviye","⭐ Seviye"],["gorev","🎯 Görev"],["lig","🏆 Liderlik"],["seri","🔥 Seri & Hedef"],["fetih","🗺️ Fetih"],["odul","🎁 Ödül"]];
 
@@ -1572,6 +1592,38 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler })
   async function bolgeEkle(){ const ad=yeniBolge.trim(); if(!ad) return; await save("bolge",{ad}); setYeniBolge(""); }
   const haritaliKale=kaleler.filter(k=>k.lat&&k.lng);
   const fetihView=()=>h("div",null,
+    // —— SEFER / AKIN (çanta) ——
+    h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:14,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
+      h("div",{style:{background: aktifSefer?"linear-gradient(135deg,#7c2d12,#b45309)":"linear-gradient(135deg,#334155,#0e7490)",color:"#fff",padding:"16px 18px"}},
+        h("div",{style:{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}},
+          h("div",{className:"tk-float",style:{fontSize:42}}, aktifSefer?"🐎":"⚔️"),
+          h("div",{style:{flex:1,minWidth:160}},
+            h("div",{style:{fontSize:12,opacity:.85,fontWeight:700,letterSpacing:.5}}, aktifSefer?"AKINDASIN":"SEFER HAZIRLIĞI"),
+            h("div",{style:{fontSize:21,fontWeight:800}}, aktifSefer? ("🎒 "+cephaneAdet+" cephane taşıyorsun") : "Orduyu hazırla, sefere çık"),
+            aktifSefer && h("div",{style:{fontSize:12.5,opacity:.92,marginTop:2}},
+              "⚔️ "+sefSatA+" fetih · 🏬 "+sefKonA+" kuşatma · 💰 "+tl(sefCiro)+" ganimet"))),
+        aktifSefer && yeniKaleSayi>0 && h("div",{style:{marginTop:12,background:"rgba(255,255,255,.18)",borderRadius:10,padding:"7px 11px",fontWeight:800,fontSize:13}},
+          "🏰 Bu seferde "+yeniKaleSayi+" yeni kale fethettin! 🎉")),
+      h("div",{style:{background:"#fff",padding:"10px 14px",display:"flex",gap:8,flexWrap:"wrap"}},
+        h("button",{style:{...S.btn("p"),flex:"1 1 170px"},onClick:()=>setCantaDoldur(true)}, aktifSefer?"➕ Cephane ekle":"⚔️ Orduyu hazırla (cephane al)"),
+        aktifSefer && h("button",{style:{...S.btn(),flex:"1 1 170px",borderColor:"#b45309",color:"#b45309",fontWeight:800},onClick:seferiBitir},"🏭 Seferi bitir — atölyeye dön"))),
+    // taşınan cephane + hedef mevkiler
+    aktifSefer && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
+      cephane.length>0 && h(React.Fragment,null,
+        h("div",{style:{...S.label,marginBottom:6}},"🎒 Taşıdığın cephane (ordu)"),
+        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}},
+          cephane.map(u=>h("span",{key:u.id,style:{background:"#fef3c7",color:"#92400e",borderRadius:8,padding:"4px 9px",fontSize:12,fontWeight:700}}, u.ad+" ×"+num(u.pazStok))))),
+      (musteriler||[]).length>0 && h(React.Fragment,null,
+        h("div",{style:{...S.label,marginBottom:6}},"🎯 Hedef mevkiler — kaleye akın (dokun)"),
+        h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
+          (musteriler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(m=>{ const rr=adRenk(m.ad);
+            const fethedildi=kaleler.some(k=>k.musteriId===m.id||k.ad===m.ad);
+            return h("button",{key:m.id,onClick:()=>setMusteriBag(m),
+              style:{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",gap:4,width:82,padding:"8px 4px",
+                background:"#fff",border:"1px solid "+(fethedildi?"#b45309":C.line),borderRadius:12,cursor:"pointer"}},
+              h("div",{style:{fontSize:24}}, fethedildi?"🏰":"🎯"),
+              h("div",{style:{fontSize:11,fontWeight:700,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:76}},m.ad),
+              m.bolge && h("div",{style:{fontSize:9.5,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:76}},m.bolge)); })))),
     // komuta merkezi
     h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:14,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
       h("div",{style:{background:"linear-gradient(135deg,#7f1d1d,#b45309)",color:"#fff",padding:"18px"}},
@@ -1644,8 +1696,11 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler })
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}},
       altlar.map(([k,ad])=>h("button",{key:k,onClick:()=>setAlt(k),
         style:{...S.btn(alt===k?"p":""),padding:"9px 14px",fontWeight:700,fontSize:13}},ad))),
-    h("div",{style:{fontSize:12,color:C.mut,marginBottom:14}},"💡 6 tasarım konsepti — beğendiğin yön(ler)i seç, derinleştirelim. 🗺️ Fetih: satışları bölgeye (ilçe) göre işle, bölgeyi fethet, unvan kazan."),
-    (viewMap[alt]||seviyeView)());
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:14}},"💡 6 tasarım konsepti — beğendiğin yön(ler)i seç, derinleştirelim. 🗺️ Fetih: sefere çık, kale fethet, unvan kazan."),
+    (viewMap[alt]||seviyeView)(),
+    cantaDoldur && h(CantaDoldurModal,{urunler,seferIdAl,onKapat:()=>setCantaDoldur(false)}),
+    musteriBag && h(MusteriBagModal,{musteri:musteriBag,bagItems:cephane,aktifSeferId:aktifSefer?aktifSefer.id:null,onKapat:()=>setMusteriBag(null)}),
+    rapor && (()=>{ const sf=(seferler||[]).find(s=>s.id===rapor); return sf? h(SeferRaporModal,{sefer:sf,hareketler,onKapat:()=>setRapor(null)}):null; })());
 }
 
 /* ============================================================
