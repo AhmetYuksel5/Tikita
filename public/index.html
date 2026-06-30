@@ -1510,20 +1510,32 @@ function convexHull(pts){
 function FetihHarita({ kaleler, hedefler, onSec }){
   const ref=useRef(null), mapRef=useRef(null), lgRef=useRef(null);
   useEffect(()=>{ if(!window.L || !ref.current || mapRef.current) return;
-    const map=window.L.map(ref.current,{scrollWheelZoom:false}).setView([41.02,29.06],11);
-    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
-    lgRef.current=window.L.layerGroup().addTo(map); mapRef.current=map;
+    const L=window.L;
+    const map=L.map(ref.current,{scrollWheelZoom:false,attributionControl:false}).setView([41.02,29.06],11);
+    // sade, açık taban (etiketsiz) — oyun haritası hissi
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
+    // hakimiyet alanları bu pane'e (etiketlerin ALTINDA kalır)
+    map.createPane("zones"); map.getPane("zones").style.zIndex=350;
+    // sokak/semt etiketleri EN ÜSTTE → hiçbir renk yazıların üzerini kapatmaz
+    map.createPane("etiket"); const ep=map.getPane("etiket"); ep.style.zIndex=450; ep.style.pointerEvents="none";
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd",pane:"etiket"}).addTo(map);
+    lgRef.current=L.layerGroup().addTo(map); mapRef.current=map;
     setTimeout(()=>map.invalidateSize(),120);
   },[]);
   useEffect(()=>{ const map=mapRef.current, lg=lgRef.current, L=window.L; if(!map||!lg||!L) return;
     lg.clearLayers(); const pts=[];
     const kl=(kaleler||[]).filter(k=>k.lat&&k.lng), hd=(hedefler||[]).filter(m=>m.lat&&m.lng);
-    // HAKİMİYET ALANI — BÖLGEYE GÖRE ayrı renkli zonlar (Üsküdar, Ümraniye…)
+    // HAKİMİYET ALANI — bölge başına TEK yumuşak alan (etiketlerin altında, üst üste binmez)
     const byB={}; kl.forEach(k=>{ const b=k.bolge||"Bölgesiz"; (byB[b]=byB[b]||[]).push(k); });
-    Object.keys(byB).forEach(b=>{ const ks=byB[b]; const col=adRenk(b).ana; const pts=ks.map(k=>[+k.lat,+k.lng]);
-      if(pts.length>=3){ try{ L.polygon(convexHull(pts),{color:col,weight:1.5,opacity:.75,dashArray:"6,6",fillColor:col,fillOpacity:.14}).addTo(lg); }catch(e){} }
-      else if(pts.length===2){ L.polyline(pts,{color:col,weight:2,opacity:.65,dashArray:"6,6"}).addTo(lg); }
-      ks.forEach(k=>L.circle([+k.lat,+k.lng],{radius:420+k.seviye*260,stroke:false,fillColor:col,fillOpacity:.13}).addTo(lg)); });
+    Object.keys(byB).forEach(b=>{ const ks=byB[b]; const col=adRenk(b).ana; const zp=ks.map(k=>[+k.lat,+k.lng]);
+      const c=zp.reduce((s,p)=>[s[0]+p[0],s[1]+p[1]],[0,0]).map(v=>v/zp.length);
+      if(zp.length>=3){ try{ L.polygon(convexHull(zp),{pane:"zones",color:col,weight:2,opacity:.55,fillColor:col,fillOpacity:.1,lineJoin:"round"}).addTo(lg); }catch(e){} }
+      else if(zp.length===2){ L.polyline(zp,{pane:"zones",color:col,weight:3,opacity:.5,dashArray:"1,8",lineCap:"round"}).addTo(lg);
+        zp.forEach(p=>L.circle(p,{pane:"zones",radius:300,stroke:false,fillColor:col,fillOpacity:.1}).addTo(lg)); }
+      else { L.circle(c,{pane:"zones",radius:480,color:col,weight:2,opacity:.5,fillColor:col,fillOpacity:.1}).addTo(lg); }
+      // bölge adı — fetih bayrağı (etiket pane'inde, yazının üstünü kapatmaz)
+      const lbl=L.divIcon({className:"",iconSize:[0,0],html:"<div style=\"transform:translate(-50%,-50%);white-space:nowrap;font:800 10px system-ui;letter-spacing:.5px;color:"+col+";text-shadow:0 0 3px #fff,0 1px 2px #fff\">⚔ "+b.toLocaleUpperCase("tr")+"</div>"});
+      L.marker(c,{icon:lbl,interactive:false,pane:"etiket",zIndexOffset:-50}).addTo(lg); });
     // KALE işaretleri
     kl.forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll); const sz=20+k.seviye*4;
       const icon=L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
