@@ -1432,7 +1432,7 @@ function convexHull(pts){
   return lo.concat(up).map(p=>[p[1],p[0]]);
 }
 // İstanbul haritası (Leaflet, anahtarsız) — kaleler + hedef mevkiler + hakimiyet alanı
-function FetihHarita({ kaleler, hedefler }){
+function FetihHarita({ kaleler, hedefler, onSec }){
   const ref=useRef(null), mapRef=useRef(null), lgRef=useRef(null);
   useEffect(()=>{ if(!window.L || !ref.current || mapRef.current) return;
     const map=window.L.map(ref.current,{scrollWheelZoom:false}).setView([41.02,29.06],11);
@@ -1452,13 +1452,17 @@ function FetihHarita({ kaleler, hedefler }){
     kl.forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll); const sz=20+k.seviye*4;
       const icon=L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
         html:"<div style=\"font-size:"+sz+"px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))\">🏰</div>"});
-      L.marker(ll,{icon,zIndexOffset:200}).addTo(lg).bindPopup("<b>"+(k.ad||"Kale")+"</b><br>⭐ Seviye "+k.seviye+" · 💪 "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" asker · "+k.silahTier[2]+" "+k.silah+" silah");
+      L.marker(ll,{icon,zIndexOffset:200}).addTo(lg)
+        .bindTooltip("<b>"+(k.ad||"Kale")+"</b> · Sv."+k.seviye+" · 💪 "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" · "+k.silahTier[2]+" "+k.silah+"<br><i>dokun → ⚔️ akın</i>",{direction:"top"})
+        .on("click",()=>onSec&&onSec(k));
     });
     // HEDEF mevkiler (henüz fethedilmemiş müşteriler)
     hd.forEach(m=>{ const ll=[+m.lat,+m.lng]; pts.push(ll);
       const icon=L.divIcon({className:"",iconSize:[20,20],iconAnchor:[10,20],
         html:"<div style=\"font-size:18px;line-height:1;opacity:.85;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))\">🚩</div>"});
-      L.marker(ll,{icon,zIndexOffset:100}).addTo(lg).bindPopup("<b>"+(m.ad||"Mevki")+"</b><br>🎯 Hedef — henüz fethedilmedi");
+      L.marker(ll,{icon,zIndexOffset:100}).addTo(lg)
+        .bindTooltip("<b>"+(m.ad||"Mevki")+"</b> · 🎯 hedef<br><i>dokun → ⚔️ akın</i>",{direction:"top"})
+        .on("click",()=>onSec&&onSec(m));
     });
     if(pts.length){ try{ map.fitBounds(pts,{padding:[40,40],maxZoom:13}); }catch(e){} }
   });
@@ -1711,7 +1715,8 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
     // İSTANBUL HARİTASI
     (haritaliKale.length>0 || haritaHedef.length>0) && h("div",{style:{marginBottom:14}},
       h("div",{style:{...S.label,marginBottom:6}},"🗺️ İstanbul fetih haritası — 🏰 kaleler · 🚩 hedefler · hakimiyet alanı"),
-      h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef})),
+      h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,
+        onSec:(item)=>{ const mus = item.id ? item : ((item.musteriId&&musById[item.musteriId]) || {ad:item.ad,bolge:item.bolge,lat:item.lat,lng:item.lng}); setMusteriBag(mus); }})),
     // asker / silah merdiveni
     h("div",{style:{...S.card,padding:"10px 14px",marginBottom:14}},
       h("div",{style:{fontSize:12,marginBottom:5}}, h("b",null,"⚔️ Asker (satış adedi): "),
