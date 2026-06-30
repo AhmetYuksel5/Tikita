@@ -1147,6 +1147,16 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   const [tab,setTab]=useState("akin");
   const [sec,setSec]=useState({});  // iletişim: seçili ürünler
   const [tahsil,setTahsil]=useState({});  // konsinye satıldı: alınan tutar (urunId->₺)
+  // GEÇMİŞ İŞLEM GİRİŞİ (geçici yetki) — eski satış/konsinyeleri tarihiyle ekle
+  const gecmisYetki = !!(AKTIF_KUL && AKTIF_KUL.gecmisEkle);
+  const [gec,setGec]=useState({tip:"satis",urunId:"",adet:"",satis:"",alis:"",tarih:""});
+  function gecUrun(id){ const u=(urunler||[]).find(x=>x.id===id); setGec(s=>({...s,urunId:id,satis:u?(u.satisFiyat||s.satis):s.satis,alis:u?(u.pazFiyat||s.alis):s.alis})); }
+  async function gecmisOnayla(){ const u=(urunler||[]).find(x=>x.id===gec.urunId); if(!u) return alert("Ürün seç.");
+    const ad=Math.floor(num(gec.adet)); if(ad<1) return alert("Adet gir."); if(!gec.tarih) return alert("Tarih seç.");
+    const iso=new Date(gec.tarih+"T12:00:00").toISOString();
+    const base={urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(gec.alis),satisFiyat:num(gec.satis),yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"gecmis",tarih:iso};
+    if(gec.tip==="konsinye") await harKaydet({tip:"konsinye",kalan:ad,...base}); else await harKaydet({tip:"satis",...base});
+    setGec(s=>({...s,adet:""})); alert("📅 Geçmiş işlem eklendi · "+gec.tarih); }
   // bu kalenin tüm hareketleri (tarihli)
   const har=(hareketler||[]).filter(x=>buradaMi(x)&&["satis","konsinye","iade","diplomasi","al"].includes(x.tip)).slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
   const satToplam=har.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
@@ -1185,7 +1195,8 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
       musteri.telefon && h("a",{href:"https://wa.me/9"+tel,target:"_blank",style:{color:"#16a34a",fontWeight:700,textDecoration:"none"}},"WhatsApp"),
       (musteri.lat&&musteri.lng) && h("a",{href:"https://www.google.com/maps/search/?api=1&query="+musteri.lat+","+musteri.lng,target:"_blank",style:{color:"#0369a1",fontWeight:700,textDecoration:"none"}},"🗺️ Harita")),
     h("div",{style:{display:"flex",gap:6,marginBottom:12}},
-      sekmeBtn("akin","⚔️ Akın"), sekmeBtn("hareketler","📜 Hareketler"), sekmeBtn("iletisim","🤝 İletişim")),
+      sekmeBtn("akin","⚔️ Akın"), sekmeBtn("hareketler","📜 Hareketler"), sekmeBtn("iletisim","🤝 İletişim"),
+      gecmisYetki && sekmeBtn("gecmis","📅 Geçmiş")),
     // ——— SEKME: AKIN ———
     tab==="akin" && h(React.Fragment,null,
       h("div",{style:{...S.card,padding:"10px 12px",marginBottom:12,background:"#faf7ff"}},
@@ -1270,7 +1281,22 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
                 h("div",{style:{fontSize:11,color:C.mut}}, num(u.satisFiyat)>0?tl(u.satisFiyat):"—")),
               h("div",{style:{fontSize:17,flexShrink:0}}, on?"✅":"⬜")); })),
       h("button",{style:{...S.btn("p"),width:"100%",marginTop:12},onClick:iletisimGonder},
-        "📲 WhatsApp'tan gönder"+(seciliUrun.length?(" · "+seciliUrun.length+" ürün"):""))));
+        "📲 WhatsApp'tan gönder"+(seciliUrun.length?(" · "+seciliUrun.length+" ürün"):""))),
+    // ——— SEKME: GEÇMİŞ (geçici yetki) ———
+    tab==="gecmis" && gecmisYetki && h("div",null,
+      h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10,lineHeight:1.5}},"📅 Eski işlemlerini ",h("b",null,"tarihiyle")," ekle. Stok/çantayı etkilemez; sadece bu kalenin geçmişine ve güç hesabına işler."),
+      h("div",{style:{display:"flex",gap:6,marginBottom:8}},
+        h("button",{type:"button",onClick:()=>setGec(s=>({...s,tip:"satis"})),style:{flex:1,padding:"8px",borderRadius:8,border:"1px solid "+(gec.tip==="satis"?C.yesilB:C.line),background:gec.tip==="satis"?C.yesilB:"#fff",color:gec.tip==="satis"?"#fff":C.txt,fontWeight:800,cursor:"pointer"}},"💰 Satış"),
+        h("button",{type:"button",onClick:()=>setGec(s=>({...s,tip:"konsinye"})),style:{flex:1,padding:"8px",borderRadius:8,border:"1px solid "+(gec.tip==="konsinye"?"#7c3aed":C.line),background:gec.tip==="konsinye"?"#7c3aed":"#fff",color:gec.tip==="konsinye"?"#fff":C.txt,fontWeight:800,cursor:"pointer"}},"🏬 Konsinye")),
+      h(Field,{label:"Ürün"}, h("select",{style:S.input,value:gec.urunId,onChange:e=>gecUrun(e.target.value)},
+        h("option",{value:""},"— seç —"),
+        (urunler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>h("option",{key:u.id,value:u.id},u.ad)))),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+        h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:gec.adet,onChange:e=>setGec(s=>({...s,adet:e.target.value}))})),
+        h(Field,{label:"Satış ₺"}, h("input",{type:"number",min:0,style:S.input,value:gec.satis,onChange:e=>setGec(s=>({...s,satis:e.target.value}))})),
+        h(Field,{label:"Alış ₺"}, h("input",{type:"number",min:0,style:S.input,value:gec.alis,onChange:e=>setGec(s=>({...s,alis:e.target.value}))}))),
+      h(Field,{label:"Tarih"}, h("input",{type:"date",style:S.input,value:gec.tarih,onChange:e=>setGec(s=>({...s,tarih:e.target.value}))})),
+      h("button",{style:{...S.btn("p"),width:"100%",marginTop:6},onClick:gecmisOnayla},"📅 Geçmiş işlemi ekle")));
 }
 
 // stoktan al / iade / satış / konsinye işlemleri
