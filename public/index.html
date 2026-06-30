@@ -1521,8 +1521,8 @@ function FetihHarita({ kaleler, hedefler, onSec }){
     const map=L.map(ref.current,{scrollWheelZoom:false,attributionControl:false}).setView([41.02,29.06],11);
     // yıpranmış parşömen taban (etiketsiz) — harita-i kadim hissi (multiply + sepia parşömene oturur)
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd",className:"tk-aged"}).addTo(map);
-    // hakimiyet alanları bu pane'e (etiketlerin ALTINDA kalır)
-    map.createPane("zones"); map.getPane("zones").style.zIndex=350;
+    // hakimiyet alanları bu pane'e (etiketlerin ALTINDA kalır) — blur ile kenarları fululaşan, çizgisiz renk
+    map.createPane("zones"); const zpane=map.getPane("zones"); zpane.style.zIndex=350; zpane.style.filter="blur(16px)"; zpane.style.opacity=".85";
     // sokak/semt etiketleri EN ÜSTTE → hiçbir renk yazıların üzerini kapatmaz
     map.createPane("etiket"); const ep=map.getPane("etiket"); ep.style.zIndex=450; ep.style.pointerEvents="none";
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd",pane:"etiket",className:"tk-aged"}).addTo(map);
@@ -1536,17 +1536,14 @@ function FetihHarita({ kaleler, hedefler, onSec }){
     const byB={}; kl.forEach(k=>{ const b=k.bolge||"Bölgesiz"; (byB[b]=byB[b]||[]).push(k); });
     Object.keys(byB).forEach(b=>{ const ks=byB[b]; const H=adRenk(b).H;
       // soluk mürekkep tonu — parşömene oturan, kısık doygunluk
-      const ink="hsl("+H+",42%,34%)", dolgu="hsl("+H+",45%,46%)";
+      const dolgu="hsl("+H+",48%,48%)";
       const zp=ks.map(k=>[+k.lat,+k.lng]);
       const c=zp.reduce((s,p)=>[s[0]+p[0],s[1]+p[1]],[0,0]).map(v=>v/zp.length);
-      // çift hatlı, el çizimi hissi veren mürekkep sınır
-      if(zp.length>=3){ const hull=convexHull(zp); try{
-          L.polygon(hull,{pane:"zones",color:ink,weight:2.5,opacity:.5,fillColor:dolgu,fillOpacity:.16,lineJoin:"round"}).addTo(lg);
-          L.polygon(hull,{pane:"zones",color:ink,weight:1,opacity:.55,fill:false,dashArray:"2,5",lineJoin:"round"}).addTo(lg);
-        }catch(e){} }
-      else if(zp.length===2){ L.polyline(zp,{pane:"zones",color:ink,weight:3,opacity:.45,dashArray:"1,9",lineCap:"round"}).addTo(lg);
-        zp.forEach(p=>L.circle(p,{pane:"zones",radius:320,stroke:false,fillColor:dolgu,fillOpacity:.15}).addTo(lg)); }
-      else { L.circle(c,{pane:"zones",radius:500,color:ink,weight:2,opacity:.45,fillColor:dolgu,fillOpacity:.15,dashArray:"3,5"}).addTo(lg); }
+      // ÇİZGİSİZ, kenarlara doğru fululaşan renk: her kalede yumuşak dolgu, pane blur'u ile dağılır
+      ks.forEach(k=>{ const r=380+(k.seviye||1)*180;
+        L.circle([+k.lat,+k.lng],{pane:"zones",radius:r,stroke:false,fillColor:dolgu,fillOpacity:.16}).addTo(lg); });
+      // tek kaleli bölgede de yumuşak bir hale kalsın
+      if(zp.length===1){ L.circle(c,{pane:"zones",radius:560,stroke:false,fillColor:dolgu,fillOpacity:.12}).addTo(lg); }
       // bölge adı — eski harita yazısı (serif, mürekkep)
       const lbl=L.divIcon({className:"",iconSize:[0,0],html:"<div style=\"transform:translate(-50%,-50%);white-space:nowrap;font:italic 700 13px Georgia,'Times New Roman',serif;letter-spacing:1.5px;color:#4a3115;text-shadow:0 1px 0 rgba(247,238,214,.95),0 0 4px rgba(247,238,214,.9)\">"+b.toLocaleUpperCase("tr")+"</div>"});
       L.marker(c,{icon:lbl,interactive:false,pane:"etiket",zIndexOffset:-50}).addTo(lg); });
