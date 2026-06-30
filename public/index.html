@@ -29,13 +29,11 @@
   .tk-shine{background-size:200% auto;animation:tkshine 2.5s linear infinite}
   .tk-pcard{transition:transform .15s ease, box-shadow .15s ease}
   .tk-pcard:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(15,23,42,.18)}
-  /* —— FETİH: eski parşömen / harita-i kadim estetiği —— */
-  .tk-aged{filter:sepia(.62) saturate(1.05) contrast(.92) brightness(1.06) hue-rotate(-12deg)}
-  .tk-fetih-map{position:relative;background:#e7d8b6;box-shadow:inset 0 0 70px rgba(110,76,38,.45),inset 0 0 14px rgba(80,52,22,.35);border:1px solid #b79b66}
+  /* —— FETİH: modern + fantastik strateji oyunu haritası (RISK tahtası tarzı) —— */
+  .tk-fetih-map{position:relative;box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 6px 18px rgba(15,23,42,.18)}
   .tk-fetih-map::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:500;
-    box-shadow:inset 0 0 40px rgba(92,62,28,.55);
-    background:radial-gradient(120% 120% at 50% 30%,transparent 55%,rgba(86,58,26,.18) 100%)}
-  .tk-fetih-map .leaflet-tile{mix-blend-mode:multiply}
+    box-shadow:inset 0 0 46px rgba(20,40,70,.20)}
+  .tk-fetih-map .leaflet-pane>svg{filter:drop-shadow(0 1px 2px rgba(15,23,42,.35))}
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -1519,13 +1517,13 @@ function FetihHarita({ kaleler, hedefler, onSec }){
   useEffect(()=>{ if(!window.L || !ref.current || mapRef.current) return;
     const L=window.L;
     const map=L.map(ref.current,{scrollWheelZoom:false,attributionControl:false}).setView([41.02,29.06],11);
-    // yıpranmış parşömen taban (etiketsiz) — harita-i kadim hissi (multiply + sepia parşömene oturur)
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd",className:"tk-aged"}).addTo(map);
-    // hakimiyet alanları bu pane'e (etiketlerin ALTINDA kalır) — blur ile kenarları fululaşan, çizgisiz renk
-    map.createPane("zones"); const zpane=map.getPane("zones"); zpane.style.zIndex=350; zpane.style.filter="blur(16px)"; zpane.style.opacity=".85";
+    // renkli modern taban (etiketsiz) — strateji oyunu tahtası hissi
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
+    // hakimiyet alanları bu pane'e (etiketlerin ALTINDA kalır)
+    map.createPane("zones"); map.getPane("zones").style.zIndex=350;
     // sokak/semt etiketleri EN ÜSTTE → hiçbir renk yazıların üzerini kapatmaz
     map.createPane("etiket"); const ep=map.getPane("etiket"); ep.style.zIndex=450; ep.style.pointerEvents="none";
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd",pane:"etiket",className:"tk-aged"}).addTo(map);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd",pane:"etiket"}).addTo(map);
     lgRef.current=L.layerGroup().addTo(map); mapRef.current=map;
     setTimeout(()=>map.invalidateSize(),120);
   },[]);
@@ -1535,17 +1533,20 @@ function FetihHarita({ kaleler, hedefler, onSec }){
     // HAKİMİYET ALANI — bölge başına TEK yumuşak alan (etiketlerin altında, üst üste binmez)
     const byB={}; kl.forEach(k=>{ const b=k.bolge||"Bölgesiz"; (byB[b]=byB[b]||[]).push(k); });
     Object.keys(byB).forEach(b=>{ const ks=byB[b]; const H=adRenk(b).H;
-      // soluk mürekkep tonu — parşömene oturan, kısık doygunluk
-      const dolgu="hsl("+H+",48%,48%)";
+      // canlı territory rengi (RISK tahtası) — sınır koyu, dolgu canlı, hafif glow
+      const cizgi="hsl("+H+",65%,38%)", dolgu="hsl("+H+",70%,55%)";
       const zp=ks.map(k=>[+k.lat,+k.lng]);
       const c=zp.reduce((s,p)=>[s[0]+p[0],s[1]+p[1]],[0,0]).map(v=>v/zp.length);
-      // ÇİZGİSİZ, kenarlara doğru fululaşan renk: her kalede yumuşak dolgu, pane blur'u ile dağılır
-      ks.forEach(k=>{ const r=380+(k.seviye||1)*180;
-        L.circle([+k.lat,+k.lng],{pane:"zones",radius:r,stroke:false,fillColor:dolgu,fillOpacity:.16}).addTo(lg); });
-      // tek kaleli bölgede de yumuşak bir hale kalsın
-      if(zp.length===1){ L.circle(c,{pane:"zones",radius:560,stroke:false,fillColor:dolgu,fillOpacity:.12}).addTo(lg); }
-      // bölge adı — eski harita yazısı (serif, mürekkep)
-      const lbl=L.divIcon({className:"",iconSize:[0,0],html:"<div style=\"transform:translate(-50%,-50%);white-space:nowrap;font:italic 700 13px Georgia,'Times New Roman',serif;letter-spacing:1.5px;color:#4a3115;text-shadow:0 1px 0 rgba(247,238,214,.95),0 0 4px rgba(247,238,214,.9)\">"+b.toLocaleUpperCase("tr")+"</div>"});
+      if(zp.length>=3){ const hull=convexHull(zp); try{
+          L.polygon(hull,{pane:"zones",color:dolgu,weight:10,opacity:.18,fill:false,lineJoin:"round"}).addTo(lg);          // renkli hale (glow)
+          L.polygon(hull,{pane:"zones",color:cizgi,weight:2.5,opacity:.92,fillColor:dolgu,fillOpacity:.26,lineJoin:"round"}).addTo(lg); // territory
+        }catch(e){} }
+      else if(zp.length===2){ L.polyline(zp,{pane:"zones",color:dolgu,weight:11,opacity:.16,lineCap:"round"}).addTo(lg);
+        L.polyline(zp,{pane:"zones",color:cizgi,weight:3,opacity:.85,lineCap:"round"}).addTo(lg);
+        zp.forEach(p=>L.circle(p,{pane:"zones",radius:300,color:cizgi,weight:2,opacity:.85,fillColor:dolgu,fillOpacity:.26}).addTo(lg)); }
+      else { L.circle(c,{pane:"zones",radius:480,color:cizgi,weight:2.5,opacity:.9,fillColor:dolgu,fillOpacity:.24}).addTo(lg); }
+      // bölge adı — RISK territory etiketi (renkli rozet)
+      const lbl=L.divIcon({className:"",iconSize:[0,0],html:"<div style=\"transform:translate(-50%,-50%);white-space:nowrap;font:800 10.5px system-ui;letter-spacing:.4px;color:#fff;background:"+cizgi+";padding:2px 9px;border-radius:99px;border:1.5px solid rgba(255,255,255,.85);box-shadow:0 2px 6px rgba(15,23,42,.4)\">"+b.toLocaleUpperCase("tr")+"</div>"});
       L.marker(c,{icon:lbl,interactive:false,pane:"etiket",zIndexOffset:-50}).addTo(lg); });
     // KALE işaretleri
     kl.forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll); const sz=20+k.seviye*4;
