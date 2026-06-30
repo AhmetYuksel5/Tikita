@@ -962,7 +962,7 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
     h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:6}},
       stat("🎒 Çıkış",alA,"#0e7490"), stat("💰 Satış",satA,C.yesilB), stat("🏬 Konsinye",konA,"#7c3aed")),
     h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}},
-      stat("↩ Dönen",iadeA,"#b45309"), stat("Ciro",tl(ciro),"#047857"), stat("Kâr",tl(kar),"#047857")),
+      stat("↩ Dönen",iadeA,"#b45309"), stat("Ciro",tl(ciro),"#047857"), stat("Marj",tl(kar),"#047857")),
     liste("💰 Satışlar",sat,"#047857",x=>tl(num(x.adet)*num(x.satisFiyat))),
     liste("🏬 Konsinye bırakılanlar",kon,"#7c3aed",x=>(x.bolge||"")),
     (satA===0&&konA===0) && h("div",{style:{fontSize:12.5,color:C.mut,marginTop:10,textAlign:"center"}},"Bu seferde satış/konsinye yapılmadı."));
@@ -1282,7 +1282,7 @@ function PazIslemModal({ u, mod, alisVar, bolgeler, musteriler, secMusteri, akti
       h(Field,{label:"Alış (₺/adet)"}, h("input",{type:"number",min:0,step:"0.01",style:S.input,value:alis,onChange:e=>setAlis(e.target.value)})),
       h(Field,{label:"Satış (₺/adet)"}, h("input",{type:"number",min:0,step:"0.01",style:S.input,value:satis,onChange:e=>setSatis(e.target.value)}))),
     (mod==="sat") && num(satis)>0 && h("div",{style:{fontSize:12.5,fontWeight:700,color:"#047857",marginTop:4}},
-      "Kâr: "+tl((num(satis)-num(alis))*Math.max(0,Math.floor(num(n))))+"  ("+tl(num(satis)-num(alis))+"/adet)"),
+      "Marj: "+tl((num(satis)-num(alis))*Math.max(0,Math.floor(num(n))))+"  ("+tl(num(satis)-num(alis))+"/adet)"),
     // —— Konsinye: müşteri bilgileri ——
     mod==="konsinye" && h("div",{style:{marginTop:6,paddingTop:12,borderTop:"1px solid "+C.line}},
       h("div",{style:{...S.label,marginBottom:8}},"📋 Müşteri bilgileri (konsinye)"),
@@ -1726,7 +1726,7 @@ function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, onSec }){
       tamEkran?"✕":"⛶"));
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, seferler, kullanicilar, aktif }){
+function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif }){
   const [alt,setAlt]=useState("komuta");
   const [yeniBolge,setYeniBolge]=useState("");
   const [cantaDoldur,setCantaDoldur]=useState(false);
@@ -1764,6 +1764,15 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
   const konsAdet=(hareketler||[]).filter(h2=>h2.tip==="konsinye").reduce((s,x)=>s+num(x.adet),0);
   // toplam alacak — satıldı ama parası tam alınmamış
   const alacakGenel=satis.reduce((s,x)=>{ const bek=num(x.adet)*num(x.satisFiyat); const t=x.tahsil==null?bek:num(x.tahsil); return s+Math.max(0,bek-t); },0);
+  // ŞİRKET EKONOMİSİ (yönetici) — gerçek üretim maliyetine göre uçtan uca kâr
+  const urunById={}; (urunler||[]).forEach(u=>urunById[u.id]=u);
+  const filById={}; (filamentler||[]).forEach(f=>filById[f.id]=f);
+  const baskiByUrun={}; (plan||[]).forEach(p=>{ if(p.urunId)(baskiByUrun[p.urunId]=baskiByUrun[p.urunId]||[]).push(p); });
+  const gercekMaliyet=uid=>{ const u=urunById[uid]; if(!u) return null; const m=urunMaliyet(u,baskiByUrun[uid]||[],filById); return (m==null||isNaN(m))?null:m; };
+  let uretimMaliyet=0, ciroBilinen=0, sirketKar=0, bilinmeyenAdet=0;
+  satis.forEach(x=>{ const a=num(x.adet); const m=gercekMaliyet(x.urunId);
+    if(m==null){ bilinmeyenAdet+=a; return; }
+    uretimMaliyet+=a*m; ciroBilinen+=a*num(x.satisFiyat); sirketKar+=a*(num(x.satisFiyat)-m); });
   const pXp=sAdet*8 + Math.floor(kar/5) + konsAdet*3;
   const satisSet=new Set(satis.map(x=>gunBasi(new Date(x.tarih).getTime()).getTime()));
   const pSeri=seriHesap(satisSet);
@@ -2030,6 +2039,22 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
             h("div",{style:{textAlign:"right",flexShrink:0}},
               h("div",{style:{fontWeight:800,fontSize:13.5}},"🏰 "+c.kale+" · 💪 "+c.guc),
               h("div",{style:{fontSize:11,color:"#047857",fontWeight:700}},tl(c.ciro)+" ciro"))); }))),
+    // —— 🏭 ŞİRKET EKONOMİSİ (yalnız yönetici) ——
+    adminGor && ciro>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14,border:"1px solid #c7d2fe"}},
+      h("div",{style:{...S.label,marginBottom:8}},"🏭 Şirket ekonomisi (yönetici) — gerçek üretim maliyetine göre"),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+        h("div",{style:{flex:"1 1 120px",background:"#ecfdf5",borderRadius:10,padding:"9px 11px"}},
+          h("div",{style:{fontSize:10.5,color:"#047857",fontWeight:700}},"💰 Ciro (toplam satış)"),
+          h("div",{style:{fontSize:17,fontWeight:800,color:"#047857"}},tl(ciro))),
+        h("div",{style:{flex:"1 1 120px",background:"#fef2f2",borderRadius:10,padding:"9px 11px"}},
+          h("div",{style:{fontSize:10.5,color:"#b91c1c",fontWeight:700}},"🧱 Üretim maliyeti"),
+          h("div",{style:{fontSize:17,fontWeight:800,color:"#b91c1c"}},tl(uretimMaliyet))),
+        h("div",{style:{flex:"1 1 120px",background:"#eef2ff",borderRadius:10,padding:"9px 11px"}},
+          h("div",{style:{fontSize:10.5,color:"#3730a3",fontWeight:700}},"🏭 Şirket kârı (uçtan uca)"),
+          h("div",{style:{fontSize:17,fontWeight:800,color:"#3730a3"}},tl(sirketKar)))),
+      h("div",{style:{fontSize:11.5,color:C.mut,marginTop:8,lineHeight:1.5}},
+        "Şirket kârı = satış − üretim maliyeti (filament + makine). Bunun ",h("b",null,tl(kar))," kadarı pazarlamacı marjı (satış − pazarlamacı alış), kalanı atölye payı.",
+        bilinmeyenAdet>0?h("span",{style:{color:"#b45309",fontWeight:700}}," · ⚠ "+bilinmeyenAdet+" adet ürünün maliyeti hesaplanamadı (baskı/filament verisi eksik) — şirket kârına dahil değil."):null)),
     // asker / silah merdiveni
     h("div",{style:{...S.card,padding:"10px 14px",marginBottom:14}},
       h("div",{style:{fontSize:12,marginBottom:5}}, h("b",null,"⚔️ Asker (satış adedi): "),
@@ -2370,7 +2395,7 @@ function App(){
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(gorSekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
     ekipAcik && h(EkipModal,{kullanicilar,aktif,onKapat:()=>setEkipAcik(false)}),
     gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
-    gorSekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler,musteriler,seferler,kullanicilar,aktif}),
+    gorSekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif}),
     gorSekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
