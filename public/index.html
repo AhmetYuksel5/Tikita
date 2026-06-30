@@ -970,7 +970,8 @@ function MusteriModal({ kayit, bolgeler, onKapat }){
   const [f,setF]=useState(()=>({ ad:kayit.ad||"",telefon:kayit.telefon||"",bolge:kayit.bolge||"",adres:kayit.adres||"",
     lat:kayit.lat||"",lng:kayit.lng||"",not:kayit.not||"" }));
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
-  async function kaydet(){ if(!f.ad.trim()) return alert("Müşteri / mekan adı gir."); await save("musteri",{id:kayit.id,...f,ad:f.ad.trim()}); onKapat(); }
+  async function kaydet(){ if(!f.ad.trim()) return alert("Müşteri / mekan adı gir.");
+    const yeni=!kayit.id; await save("musteri",{id:kayit.id,...f,ad:f.ad.trim(),...(yeni&&AKTIF_KUL?{kullaniciId:AKTIF_KUL.id}:{})}); onKapat(); }
   return h(Modal,{ baslik:yeni?"Yeni Müşteri":"Müşteri Düzenle", onKapat,
     alt:h(React.Fragment,null,
       h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet},"Kaydet"),
@@ -1329,7 +1330,7 @@ function PazarlamaTab({ urunler, plan, filamentler, hareketler, bolgeler, muster
   const seferOzet=(()=>{ let satA=0,ciro=0,kar=0,konA=0,alA=0; seferHar.forEach(x=>{ const a=num(x.adet);
     if(x.tip==="satis"){satA+=a;ciro+=a*num(x.satisFiyat);kar+=a*(num(x.satisFiyat)-num(x.alisFiyat));}
     else if(x.tip==="konsinye")konA+=a; else if(x.tip==="al")alA+=a; }); return {satA,ciro,kar,konA,alA}; })();
-  async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik"}); }
+  async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik",kullaniciId:AKTIF_KUL?AKTIF_KUL.id:""}); }
   async function gunSonu(){ if(!cantaItems.length) return alert("Çanta zaten boş.");
     if(!confirm("Gün sonu: "+cantaItems.length+" çeşit · "+cantaAdet+" adet ürün atölyeye bırakılsın mı?")) return;
     const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
@@ -1593,7 +1594,7 @@ function convexHull(pts){
   return lo.concat(up).map(p=>[p[1],p[0]]);
 }
 // İstanbul haritası (Leaflet, anahtarsız) — kaleler + hedef mevkiler + hakimiyet alanı
-function FetihHarita({ kaleler, hedefler, gozculer, onSec }){
+function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, onSec }){
   const ref=useRef(null), mapRef=useRef(null), lgRef=useRef(null), fitRef=useRef(false);
   const [tamEkran,setTamEkran]=useState(false);
   const [zoom,setZoom]=useState(12);
@@ -1642,6 +1643,15 @@ function FetihHarita({ kaleler, hedefler, gozculer, onSec }){
         .bindTooltip("<b>"+(k.ad||"Kale")+"</b> · Sv."+k.seviye+" · 💪 "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" · "+k.silahTier[2]+" "+k.silah+(k.sahip?("<br>"+k.simge+" "+k.sahip.ad+"'in kalesi"):"")+"<br><i>dokun → ⚔️ akın</i>",{direction:"top"})
         .on("click",()=>onSec&&onSec(k));
     });
+    // DİĞER EKİP — başka pazarlamacının kaleleri: salt-okunur, soluk, sadece isim + genel bilgi
+    (digerKaleler||[]).filter(k=>k.lat&&k.lng).forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll); const sz=Math.round((12+(k.seviye||1)*2.2)*zf);
+      const rozet = k.simge ? "<span style=\"position:absolute;top:-"+Math.round(sz*.28)+"px;right:-"+Math.round(sz*.34)+"px;font-size:"+Math.round(sz*.55)+"px;filter:drop-shadow(0 0 2px #fff)\">"+k.simge+"</span>" : "";
+      const icon=L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
+        html:"<div style=\"position:relative;font-size:"+sz+"px;line-height:1;opacity:.5;filter:grayscale(.6) drop-shadow(0 1px 2px rgba(0,0,0,.4))\">🏰"+rozet+"</div>"});
+      L.marker(ll,{icon,zIndexOffset:140}).addTo(lg)
+        .bindTooltip("<b>"+(k.ad||"Kale")+"</b>"+(k.bolge?(" · "+k.bolge):"")+(k.sahip?("<br>"+k.simge+" "+k.sahip.ad+"'in kalesi"):"")+"<br><i>başka ekip — sadece görüntüleme</i>",{direction:"top"})
+        .bindPopup("<b>"+(k.ad||"Kale")+"</b><br>"+(k.bolge?("📍 "+k.bolge+"<br>"):"")+"Sahip: "+(k.sahip?(k.simge+" "+k.sahip.ad):"—")+"<br>Seviye "+k.seviye);
+    });
     // GÖZCÜ — ürün bırakılmamış ama telefonu alınmış müşteri adayları (dürbün)
     (gozculer||[]).filter(m=>m.lat&&m.lng).forEach(m=>{ const ll=[+m.lat,+m.lng]; pts.push(ll); const sz=Math.round(16*zf);
       const icon=L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
@@ -1681,6 +1691,12 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
   const [islem,setIslem]=useState(null);     // {u,mod,musteri}
   const [duzen,setDuzen]=useState(null);      // ürün görsel/bilgi
   const [musEdit,setMusEdit]=useState(null);  // müşteri (kale) ekle/düzenle
+  // —— KAPSAM: admin her şeyi görür; pazarlamacı yalnız kendi verisini (harita hariç) ——
+  const adminGor = !!(aktif && aktif.rol==="admin");
+  const _tumHar=hareketler||[], _tumMus=musteriler||[], _tumSef=seferler||[];
+  hareketler = adminGor ? _tumHar : _tumHar.filter(x=>x.kullaniciId===aktif.id);
+  musteriler = adminGor ? _tumMus : _tumMus.filter(m=>m.kullaniciId===aktif.id);
+  seferler   = adminGor ? _tumSef : _tumSef.filter(s=>s.kullaniciId===aktif.id);
   const urunListe=(urunler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   const konsKalan={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye" && num(x.kalan)>0) konsKalan[x.urunId]=num(konsKalan[x.urunId])+num(x.kalan); });
   const now=Date.now(), gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
@@ -1749,6 +1765,18 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
     return { u, kale:ks.length, guc, ciro, rutbe:katOf(KOMUTAN,guc) }; })
     .filter(x=>x.kale>0 || (aktif&&x.u.id===aktif.id))
     .sort((a,b)=>b.guc-a.guc);
+  // DİĞER pazarlamacıların kaleleri — haritada salt-okunur (sadece isim + genel bilgi)
+  const digerKaleler = adminGor ? [] : (()=>{ const mp={};
+    _tumHar.forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId||x.kullaniciId===aktif.id) return;
+      const key=x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
+      const k=mp[key]||(mp[key]={key,musteriId:x.musteriId||"",ad:x.yer||"",bolge:x.bolge||"",lat:x.lat||"",lng:x.lng||"",satisAdet:0,konsinyeAdet:0,satisCiro:0,sahipId:x.kullaniciId});
+      if(x.tip==="satis"){k.satisAdet+=num(x.adet);k.satisCiro+=num(x.adet)*num(x.satisFiyat);} else k.konsinyeAdet+=num(x.adet);
+      if(!k.ad&&x.yer)k.ad=x.yer; if(!k.bolge&&x.bolge)k.bolge=x.bolge; if(!k.lat&&x.lat){k.lat=x.lat;k.lng=x.lng;} });
+    return Object.values(mp).map(k=>{ const m=k.musteriId&&_tumMus.find(z=>z.id===k.musteriId);
+      if(m){k.ad=m.ad||k.ad;k.bolge=m.bolge||k.bolge;if(!k.lat&&m.lat){k.lat=m.lat;k.lng=m.lng;}}
+      k.guc=Math.round(k.satisAdet*2+k.konsinyeAdet+k.satisCiro/250); k.seviye=kaleSeviye(k.guc);
+      k.sahip=kulById[k.sahipId]||null; k.simge=k.sahip?(k.sahip.simge||"🏰"):"🏰"; return k; })
+      .filter(k=>k.lat&&k.lng); })();
   // bölge hakimiyeti — kale sayısına göre unvan
   const bolgeAdlari=Array.from(new Set([...(bolgeler||[]).map(b=>b.ad), ...kaleler.map(k=>k.bolge).filter(Boolean)]));
   const bolgeList=bolgeAdlari.map(ad=>{ const ks=kaleler.filter(k=>k.bolge===ad);
@@ -1768,7 +1796,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
   const kaleKey=x=> x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"").toLocaleLowerCase("tr")));
   const oncekiKeys=new Set(aktifSefer?(hareketler||[]).filter(x=>x.tip==="satis"&&new Date(x.tarih)<new Date(aktifSefer.baslangic)).map(kaleKey):[]);
   const yeniKaleSayi=new Set(sefSatis.map(kaleKey).filter(k=>!oncekiKeys.has(k))).size;
-  async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik"}); }
+  async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik",kullaniciId:AKTIF_KUL?AKTIF_KUL.id:""}); }
   async function seferiBitir(){ if(!aktifSefer && !cephane.length) return alert("Aktif sefer yok.");
     if(!confirm("Seferi bitir — kalan cephaneyi atölyeye geri çek?")) return;
     const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
@@ -1934,9 +1962,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
           onKeyDown:e=>{ if(e.key==="Enter") bolgeEkle(); },placeholder:"Hedef bölge ekle (örn. Üsküdar)"}),
         h("button",{style:S.btn("p"),onClick:bolgeEkle},"⚑ Bölge ekle"))),
     // İSTANBUL HARİTASI
-    (haritaliKale.length>0 || haritaHedef.length>0 || gozculer.length>0) && h("div",{style:{marginBottom:14}},
-      h("div",{style:{...S.label,marginBottom:6}},"🗺️ İstanbul fetih haritası — 🏰 kale · 🔭 gözcü · 🚩 hedef · hakimiyet alanı"),
-      h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,
+    (haritaliKale.length>0 || haritaHedef.length>0 || gozculer.length>0 || digerKaleler.length>0) && h("div",{style:{marginBottom:14}},
+      h("div",{style:{...S.label,marginBottom:6}},"🗺️ İstanbul fetih haritası — 🏰 kale · 🔭 gözcü · 🚩 hedef"+(digerKaleler.length?" · 🏚️ diğer ekip":"")),
+      h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,digerKaleler,
         onSec:(item)=>{ const mus = item.id ? item : ((item.musteriId&&musById[item.musteriId]) || {ad:item.ad,bolge:item.bolge,lat:item.lat,lng:item.lng}); setMusteriBag(mus); }})),
     // —— KOMUTANLAR (pazarlamacı sıralaması) ——
     komutanlar.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
