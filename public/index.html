@@ -1052,18 +1052,27 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   async function coz(p,mod){   // mod: "satildi" | "iade"
     const istek=s1[p.urunId]!=null?Math.floor(num(s1[p.urunId])):p.kalan; let n=Math.min(istek,p.kalan); if(n<1) return alert("Adet gir.");
     const iso=new Date().toISOString();
+    // satıldı: alınan tutar boşsa tam ödeme; eksikse kalan = ALACAK
+    let alinanKalan=null;
+    if(mod==="satildi"){ const beklenen=n*num(p.satisFiyat); const g=tahsil[p.urunId];
+      alinanKalan=(g===""||g==null)?beklenen:Math.max(0,Math.min(beklenen,num(g))); }
     const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===p.urunId&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
     for(const r of recs){ if(n<=0)break; const d=Math.min(n,num(r.kalan));
       await save("pazarlama_hareket",{id:r.id,kalan:num(r.kalan)-d});
-      if(mod==="satildi") await harKaydet({tip:"satis",urunId:r.urunId,urunAd:r.urunAd,adet:d,alisFiyat:num(r.alisFiyat),satisFiyat:num(r.satisFiyat),yer:r.yer||musteri.ad,bolge:r.bolge||musteri.bolge||"",musteriId:r.musteriId||musteri.id||"",kaynak:"konsinye",seferId:aktifSeferId||null,tarih:iso});
+      if(mod==="satildi"){ const recBek=d*num(r.satisFiyat); const recTah=Math.max(0,Math.min(recBek,alinanKalan)); alinanKalan-=recTah;
+        await harKaydet({tip:"satis",urunId:r.urunId,urunAd:r.urunAd,adet:d,alisFiyat:num(r.alisFiyat),satisFiyat:num(r.satisFiyat),tahsil:recTah,yer:r.yer||musteri.ad,bolge:r.bolge||musteri.bolge||"",musteriId:r.musteriId||musteri.id||"",kaynak:"konsinye",seferId:aktifSeferId||null,tarih:iso}); }
       else { const u=(urunler||[]).find(x=>x.id===p.urunId); if(u) await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)+d});
         // konsinyeden geri toplandı → fiziken çantaya girer + kayıt altına alınır (atölyeye iade ayrı adım)
         // seferId yok: bu müşteri olayı; atölyeye dönüş seferi bitirince ayrıca "Dönen" sayılır (çift saymayı önler)
         await harKaydet({tip:"iade",urunId:p.urunId,urunAd:p.urunAd,adet:d,yer:r.yer||musteri.ad,bolge:r.bolge||musteri.bolge||"",musteriId:r.musteriId||musteri.id||"",kaynak:"konsinye",tarih:iso}); }
       n-=d;
     }
-    setS1(s=>({...s,[p.urunId]:""}));
+    setS1(s=>({...s,[p.urunId]:""})); setTahsil(s=>({...s,[p.urunId]:""}));
   }
+  // alacağı tahsil et — kalanı tahsil edilmiş işaretle (kısmi de girilebilir)
+  async function tahsilEt(x, miktar){ const bek=num(x.adet)*num(x.satisFiyat); const onceki=x.tahsil==null?bek:num(x.tahsil);
+    const yeni = miktar==null ? bek : Math.max(0,Math.min(bek,onceki+num(miktar)));
+    await save("pazarlama_hareket",{id:x.id,tahsil:yeni}); }
   // yeni — çantadan toplu
   const setAdet=(id,v)=>setLines(s=>({...s,[id]:{mod:(s[id]&&s[id].mod)||"konsinye",adet:v}}));
   const setMod=(id,m)=>setLines(s=>({...s,[id]:{adet:(s[id]&&s[id].adet)||"",mod:m}}));
@@ -1084,11 +1093,16 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   // —— sekmeler ——
   const [tab,setTab]=useState("akin");
   const [sec,setSec]=useState({});  // iletişim: seçili ürünler
+  const [tahsil,setTahsil]=useState({});  // konsinye satıldı: alınan tutar (urunId->₺)
   // bu kalenin tüm hareketleri (tarihli)
   const har=(hareketler||[]).filter(x=>buradaMi(x)&&["satis","konsinye","iade","diplomasi","al"].includes(x.tip)).slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
   const satToplam=har.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
   const acikKonsAdet=burada.reduce((s,p)=>s+p.kalan,0);
   const bakiye=burada.reduce((s,p)=>s+p.kalan*(p.satisFiyat||0),0);
+  // ALACAK — satıldı ama parası tam alınmamış (tahsil < beklenen)
+  const harAlacak=x=>{ if(x.tip!=="satis")return 0; const bek=num(x.adet)*num(x.satisFiyat); const t=x.tahsil==null?bek:num(x.tahsil); return Math.max(0,bek-t); };
+  const acikAlacaklar=har.filter(x=>harAlacak(x)>0).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+  const alacakTop=acikAlacaklar.reduce((s,x)=>s+harAlacak(x),0);
   const tipBilgi={satis:{i:"💰",ad:"Satış",renk:"#047857"},konsinye:{i:"🏬",ad:"Konsinye",renk:"#7c3aed"},iade:{i:"↩",ad:"İade",renk:"#b45309"},diplomasi:{i:"🤝",ad:"İletişim",renk:"#0369a1"},al:{i:"🎒",ad:"Çantaya al",renk:"#64748b"}};
   // iletişim: fotoğraflı ürünler önce
   const urunSirali=(urunler||[]).slice().sort((a,b)=>((b.foto||[]).length>0)-((a.foto||[]).length>0)||(a.ad||"").localeCompare(b.ad||"","tr"));
@@ -1124,14 +1138,19 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
       h("div",{style:{...S.card,padding:"10px 12px",marginBottom:12,background:"#faf7ff"}},
         h("div",{style:{...S.label,marginBottom:6}},"📦 Burada bıraktıkların (konsinye)"),
         !burada.length ? h("div",{style:{fontSize:12.5,color:C.mut}},"Bu mevkide açık konsinye yok.")
-        : burada.map(p=>h("div",{key:p.urunId,style:{padding:"8px 0",borderTop:"1px solid "+C.line}},
+        : burada.map(p=>{ const adetSel=s1[p.urunId]!=null?Math.floor(num(s1[p.urunId])):p.kalan; const bekTutar=adetSel*num(p.satisFiyat);
+          const alinanV=tahsil[p.urunId]; const eksik = p.satisFiyat>0 && alinanV!==""&&alinanV!=null && num(alinanV)<bekTutar;
+          return h("div",{key:p.urunId,style:{padding:"8px 0",borderTop:"1px solid "+C.line}},
             h("div",{style:{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p.urunAd),
-            h("div",{style:{fontSize:11,color:C.mut,marginBottom:6}}, p.kalan+" adet burada"+(p.satisFiyat>0?(" · "+tl(p.satisFiyat)):"")),
+            h("div",{style:{fontSize:11,color:C.mut,marginBottom:6}}, p.kalan+" adet burada"+(p.satisFiyat>0?(" · "+tl(p.satisFiyat)+"/adet · beklenen "+tl(bekTutar)):"")),
             h("div",{style:{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}},
-              h("input",{type:"number",min:1,max:p.kalan,style:{width:56,...S.input,padding:"5px",textAlign:"center",fontWeight:700},
+              h("input",{type:"number",min:1,max:p.kalan,title:"adet",style:{width:52,...S.input,padding:"5px",textAlign:"center",fontWeight:700},
                 value:s1[p.urunId]!=null?s1[p.urunId]:p.kalan,onChange:e=>setS1(s=>({...s,[p.urunId]:e.target.value}))}),
+              p.satisFiyat>0 && h("input",{type:"number",min:0,title:"alınan tutar (boş = tam ödeme)",placeholder:"alınan ₺",style:{width:88,...S.input,padding:"5px",textAlign:"center",fontWeight:700,borderColor:eksik?"#f59e0b":undefined},
+                value:alinanV!=null?alinanV:"",onChange:e=>setTahsil(s=>({...s,[p.urunId]:e.target.value}))}),
               h("button",{type:"button",style:{...S.ibtn,color:"#fff",background:C.yesilB,borderColor:C.yesilB,fontWeight:700,padding:"6px 10px"},onClick:()=>coz(p,"satildi")},"💰 Satıldı"),
-              h("button",{type:"button",style:{...S.ibtn,fontWeight:700,padding:"6px 10px"},onClick:()=>coz(p,"iade")},"↩ İade"))))),
+              h("button",{type:"button",style:{...S.ibtn,fontWeight:700,padding:"6px 10px"},onClick:()=>coz(p,"iade")},"↩ İade")),
+            eksik && h("div",{style:{fontSize:11,color:"#b45309",fontWeight:700,marginTop:4}},"⚠ "+tl(bekTutar-num(alinanV))+" alacak kaydedilecek")); })),
       h("div",{style:{...S.card,padding:"10px 12px"}},
         h("div",{style:{...S.label,marginBottom:6}},"➕ Yeni — çantadan bırak / sat"),
         !(bagItems||[]).length ? h("div",{style:{fontSize:12.5,color:C.mut}},"Çantan boş — sefer panelinden cephane al.")
@@ -1159,7 +1178,20 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
           h("div",{style:{fontSize:16,fontWeight:800,color:"#7c3aed"}},acikKonsAdet+" adet")),
         h("div",{style:{flex:"1 1 110px",background:"#fff7ed",borderRadius:10,padding:"8px 10px"}},
           h("div",{style:{fontSize:10.5,color:"#b45309",fontWeight:700}},"💳 Bakiye (konsinye)"),
-          h("div",{style:{fontSize:16,fontWeight:800,color:"#b45309"}},tl(bakiye)))),
+          h("div",{style:{fontSize:16,fontWeight:800,color:"#b45309"}},tl(bakiye))),
+        h("div",{style:{flex:"1 1 110px",background:alacakTop>0?"#fef2f2":"#f8fafc",borderRadius:10,padding:"8px 10px"}},
+          h("div",{style:{fontSize:10.5,color:alacakTop>0?"#b91c1c":C.mut,fontWeight:700}},"🧾 Alacak (satıldı)"),
+          h("div",{style:{fontSize:16,fontWeight:800,color:alacakTop>0?"#b91c1c":C.mut}},tl(alacakTop)))),
+      // açık alacaklar — kısmi ödeme kalanları
+      acikAlacaklar.length>0 && h("div",{style:{...S.card,padding:"8px 12px",marginBottom:10,border:"1px solid #fecaca",background:"#fff7f7"}},
+        h("div",{style:{...S.label,marginBottom:4,color:"#b91c1c"}},"🧾 Açık alacaklar — tahsil edilecek"),
+        acikAlacaklar.map((x,i)=>{ const bek=num(x.adet)*num(x.satisFiyat); const alindi=x.tahsil==null?0:num(x.tahsil);
+          return h("div",{key:x.id||i,style:{display:"flex",gap:8,alignItems:"center",padding:"7px 0",borderTop:i?"1px solid "+C.line:"none"}},
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontWeight:700,fontSize:12.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (x.urunAd||"")+" ×"+num(x.adet)),
+              h("div",{style:{fontSize:11,color:C.mut}}, fmtTarihSaat(new Date(x.tarih).getTime())+" · "+tl(alindi)+" / "+tl(bek)+" alındı")),
+            h("div",{style:{fontWeight:800,fontSize:13,color:"#b91c1c",flexShrink:0}}, tl(harAlacak(x))),
+            h("button",{type:"button",style:{...S.ibtn,fontSize:11,padding:"5px 9px",fontWeight:700,flexShrink:0,color:"#fff",background:C.yesilB,borderColor:C.yesilB},onClick:()=>tahsilEt(x)},"✓ Tahsil"))})),
       !har.length ? h("div",{style:{...S.card,padding:18,color:C.mut,textAlign:"center",fontSize:13}},"Bu kale ile henüz hareket yok.")
       : h("div",{style:{...S.card,padding:"4px 12px"}}, har.map((x,i)=>{ const t=tipBilgi[x.tip]||{i:"•",ad:x.tip,renk:C.mut};
           const para = x.tip==="satis" ? "+"+tl(num(x.adet)*num(x.satisFiyat)) : (x.tip==="konsinye"&&num(x.kalan)>0 ? ("kalan "+num(x.kalan)) : "");
@@ -1721,6 +1753,8 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
   const ciro=satis.reduce((s,x)=>s+num(x.satisFiyat)*num(x.adet),0);
   const kar=satis.reduce((s,x)=>s+(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet),0);
   const konsAdet=(hareketler||[]).filter(h2=>h2.tip==="konsinye").reduce((s,x)=>s+num(x.adet),0);
+  // toplam alacak — satıldı ama parası tam alınmamış
+  const alacakGenel=satis.reduce((s,x)=>{ const bek=num(x.adet)*num(x.satisFiyat); const t=x.tahsil==null?bek:num(x.tahsil); return s+Math.max(0,bek-t); },0);
   const pXp=sAdet*8 + Math.floor(kar/5) + konsAdet*3;
   const satisSet=new Set(satis.map(x=>gunBasi(new Date(x.tarih).getTime()).getTime()));
   const pSeri=seriHesap(satisSet);
@@ -1950,8 +1984,11 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
             h("div",{style:{fontSize:12,opacity:.85,fontWeight:700,letterSpacing:.5}},"FETİH KOMUTANLIĞI"),
             h("div",{style:{fontSize:23,fontWeight:800}},komutan[1]),
             h("div",{style:{fontSize:12.5,opacity:.9,marginTop:2}}, "🏰 "+kaleler.length+" kale · ⚔️ "+toplamAsker+" asker · 🗡️ "+toplamSilah+" silah · 💪 "+toplamGuc+" güç"),
-            h("div",{style:{fontSize:12,opacity:.92,marginTop:5,display:"inline-flex",alignItems:"center",gap:6,background:"rgba(255,255,255,.16)",borderRadius:99,padding:"2px 10px"}},
-              diplo[2]+" "+diplo[1]+" · 🤝 "+diploSay+" diplomasi"+(diploNext?(" · "+(diploNext[0]-diploSay)+" → "+diploNext[2]+" "+diploNext[1]):""))),
+            h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginTop:5}},
+              h("div",{style:{fontSize:12,opacity:.92,display:"inline-flex",alignItems:"center",gap:6,background:"rgba(255,255,255,.16)",borderRadius:99,padding:"2px 10px"}},
+                diplo[2]+" "+diplo[1]+" · 🤝 "+diploSay+" diplomasi"+(diploNext?(" · "+(diploNext[0]-diploSay)+" → "+diploNext[2]+" "+diploNext[1]):"")),
+              alacakGenel>0 && h("div",{style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:"rgba(254,202,202,.95)",color:"#991b1b",borderRadius:99,padding:"2px 10px"}},
+                "🧾 "+tl(alacakGenel)+" alacak"))),
           h("div",{style:{textAlign:"center"}},
             h("div",{style:{fontSize:30,fontWeight:800,lineHeight:1}},kaleler.length),
             h("div",{style:{fontSize:11,opacity:.85}},"kale"))),
