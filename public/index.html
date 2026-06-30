@@ -30,8 +30,10 @@
   .tk-pcard{transition:transform .15s ease, box-shadow .15s ease}
   .tk-pcard:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(15,23,42,.18)}
 </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -1377,7 +1379,37 @@ function Madalya({ sira, ad, deg, renk, max }){
         h("div",{style:{height:"100%",width:p+"%",background:renk,borderRadius:99}}))));
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler, bolgeler }){
+// FETİH — kale / asker / silah sistemi
+const ASKER_TIER=[[0,"Acemi","👤",1],[50,"Piyade","🪖",2],[100,"Okçu","🏹",3],[250,"Süvari","🐎",5],[1000,"Yeniçeri","🛡️",9]];
+const SILAH_TIER=[[0,"Sopa","🪵",1],[500,"Kılıç","🗡️",2],[1000,"Mızrak","🔱",3],[2500,"Top","💣",5],[5000,"Ateşli Silah","🔫",9]];
+const BOLGE_UNVAN=[[1,"Sınır Beyi","🚩"],[2,"Sancak Beyi","🏳️"],[4,"Beylerbeyi","🛡️"],[7,"Paşa","⚔️"],[12,"Hükümdar","👑"]];
+const KOMUTAN=[[0,"Acemi Er","🌱"],[50,"Onbaşı","🎖️"],[150,"Çavuş","🏅"],[400,"Teğmen","⭐"],[900,"Yüzbaşı","🔥"],[2000,"Binbaşı","⚔️"],[4500,"Paşa","🏰"],[9000,"Serdar-ı Ekrem","👑"]];
+function katOf(table,v){ let r=table[0]; for(const x of table) if(v>=x[0]) r=x; return r; }
+function kaleSeviye(guc){ const t=[0,25,80,200,500,1200]; let lv=1; for(let i=1;i<t.length;i++) if(guc>=t[i]) lv=i+1; return lv; }
+
+// İstanbul haritası (Leaflet, anahtarsız) — kaleler işaretlenir
+function FetihHarita({ kaleler }){
+  const ref=useRef(null), mapRef=useRef(null), lgRef=useRef(null);
+  useEffect(()=>{ if(!window.L || !ref.current || mapRef.current) return;
+    const map=window.L.map(ref.current,{scrollWheelZoom:false}).setView([41.02,29.06],11);
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+    lgRef.current=window.L.layerGroup().addTo(map); mapRef.current=map;
+    setTimeout(()=>map.invalidateSize(),120);
+  },[]);
+  useEffect(()=>{ const map=mapRef.current, lg=lgRef.current; if(!map||!lg||!window.L) return;
+    lg.clearLayers(); const pts=[];
+    (kaleler||[]).filter(k=>k.lat&&k.lng).forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll);
+      const sz=18+k.seviye*4;
+      const icon=window.L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
+        html:"<div style='font-size:"+sz+"px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))'>🏰</div>"});
+      window.L.marker(ll,{icon}).addTo(lg).bindPopup("<b>"+(k.ad||"Kale")+"</b><br>⭐ Seviye "+k.seviye+" · Güç "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" asker · "+k.silahTier[2]+" "+k.silah+" silah");
+    });
+    if(pts.length){ try{ map.fitBounds(pts,{padding:[34,34],maxZoom:13}); }catch(e){} }
+  });
+  return h("div",{ref,style:{height:300,borderRadius:12,overflow:"hidden",border:"1px solid "+C.line,zIndex:0}});
+}
+
+function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler }){
   const [alt,setAlt]=useState("seviye");
   const [yeniBolge,setYeniBolge]=useState("");
   const now=Date.now(), gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
@@ -1419,19 +1451,32 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler }){
     {ikon:"💎",ad:"Ciro 10K",ac:ciro>=10000},{ikon:"🏬",ad:"Konsinyeci",ac:konsAdet>=20},
     {ikon:"📈",ad:"Kâr 5K",ac:kar>=5000},{ikon:"🔥",ad:"7 Gün Seri",ac:pSeri>=7}];
 
-  // FETİH (Risk) — bölgelere göre nüfuz/asker
-  const konsList=(hareketler||[]).filter(h2=>h2.tip==="konsinye");
-  const bolgeAdlari=Array.from(new Set([...(bolgeler||[]).map(b=>b.ad),
-    ...satis.map(s=>s.bolge).filter(Boolean), ...konsList.map(s=>s.bolge).filter(Boolean)]));
-  const bolgeStat=bolgeAdlari.map(ad=>{
-    const ss=satis.filter(s=>s.bolge===ad);
-    const asker=ss.reduce((a,s)=>a+num(s.adet),0);
-    const nufuz=ss.reduce((a,s)=>a+num(s.satisFiyat)*num(s.adet),0);
-    const kusatma=konsList.filter(s=>s.bolge===ad).reduce((a,s)=>a+num(s.kalan),0);
-    return { ad, asker, nufuz, kusatma, unvan:unvanOf(nufuz), next:unvanNext(nufuz) };
-  }).sort((a,b)=>b.nufuz-a.nufuz);
-  const fethedilen=bolgeStat.filter(b=>b.unvan).length;
-  const hakimiyet=bolgeAdlari.length?Math.round(fethedilen/bolgeAdlari.length*100):0;
+  // FETİH — her mekan/müşteri bir KALE; satış=kaliteli asker, konsinye=hafif asker, ciro=silah
+  const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
+  const kaleMap={};
+  (hareketler||[]).forEach(x=>{ if(x.tip!=="satis"&&x.tip!=="konsinye") return;
+    const key = x.musteriId ? ("m:"+x.musteriId) : ("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
+    const k = kaleMap[key] || (kaleMap[key]={ key, musteriId:x.musteriId||"", ad:x.yer||"", bolge:x.bolge||"", lat:x.lat||"", lng:x.lng||"", satisAdet:0, satisCiro:0, konsinyeAdet:0 });
+    if(x.tip==="satis"){ k.satisAdet+=num(x.adet); k.satisCiro+=num(x.adet)*num(x.satisFiyat); } else k.konsinyeAdet+=num(x.adet);
+    if(!k.ad && x.yer) k.ad=x.yer; if(!k.bolge && x.bolge) k.bolge=x.bolge; if(!k.lat && x.lat){ k.lat=x.lat; k.lng=x.lng; }
+  });
+  const kaleler=Object.values(kaleMap).map(k=>{ const m=k.musteriId&&musById[k.musteriId];
+    if(m){ k.ad=m.ad||k.ad; k.bolge=m.bolge||k.bolge; if(!k.lat&&m.lat){ k.lat=m.lat; k.lng=m.lng; } }
+    k.askerTier=katOf(ASKER_TIER,k.satisAdet); k.silahTier=katOf(SILAH_TIER,k.satisCiro);
+    k.silah=Math.floor(k.satisCiro/250); k.asker=k.satisAdet+k.konsinyeAdet;
+    k.guc=Math.round(k.satisAdet*k.askerTier[3] + k.konsinyeAdet*1 + k.silah*k.silahTier[3]);
+    k.seviye=kaleSeviye(k.guc);
+    return k;
+  }).sort((a,b)=>b.guc-a.guc);
+  // bölge hakimiyeti — kale sayısına göre unvan
+  const bolgeAdlari=Array.from(new Set([...(bolgeler||[]).map(b=>b.ad), ...kaleler.map(k=>k.bolge).filter(Boolean)]));
+  const bolgeList=bolgeAdlari.map(ad=>{ const ks=kaleler.filter(k=>k.bolge===ad);
+    const guc=ks.reduce((s,k)=>s+k.guc,0); return { ad, kaleler:ks, sayi:ks.length, guc, unvan: ks.length? katOf(BOLGE_UNVAN,ks.length) : null }; })
+    .sort((a,b)=>b.guc-a.guc);
+  const toplamGuc=kaleler.reduce((s,k)=>s+k.guc,0);
+  const toplamAsker=kaleler.reduce((s,k)=>s+k.asker,0);
+  const toplamSilah=kaleler.reduce((s,k)=>s+k.silah,0);
+  const komutan=katOf(KOMUTAN,toplamGuc), komutanNext=KOMUTAN.find(x=>x[0]>toplamGuc)||null;
 
   const altlar=[["seviye","⭐ Seviye"],["gorev","🎯 Görev"],["lig","🏆 Liderlik"],["seri","🔥 Seri & Hedef"],["fetih","🗺️ Fetih"],["odul","🎁 Ödül"]];
 
@@ -1523,57 +1568,76 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler }){
             cursor:alinabilir?"pointer":"not-allowed"},onClick:()=>alinabilir&&alert("🎉 "+d[1]+" — bu bir konsept. Gerçek ödül akışını birlikte tanımlayalım!")},
             alinabilir?"Al":"Kilitli")); })));
 
-  // —— TASARIM 6: FETİH (Risk teması — bölge fethi) ——
+  // —— TASARIM 6: FETİH (kale / asker / silah) ——
   async function bolgeEkle(){ const ad=yeniBolge.trim(); if(!ad) return; await save("bolge",{ad}); setYeniBolge(""); }
+  const haritaliKale=kaleler.filter(k=>k.lat&&k.lng);
   const fetihView=()=>h("div",null,
     // komuta merkezi
-    h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:16,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
+    h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:14,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
       h("div",{style:{background:"linear-gradient(135deg,#7f1d1d,#b45309)",color:"#fff",padding:"18px"}},
         h("div",{style:{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}},
-          h("div",{className:"tk-float",style:{fontSize:44}},"🗺️"),
+          h("div",{className:"tk-float",style:{fontSize:46}},komutan[2]),
           h("div",{style:{flex:1,minWidth:160}},
-            h("div",{style:{fontSize:12,opacity:.85,fontWeight:700,letterSpacing:.5}},"CEPHE KOMUTANLIĞI"),
-            h("div",{style:{fontSize:22,fontWeight:800}},"Hakimiyet: %"+hakimiyet),
-            h("div",{style:{fontSize:12.5,opacity:.9,marginTop:2}}, fethedilen+" / "+bolgeAdlari.length+" bölge fethedildi · "+sAdet+" asker · "+tl(ciro)+" nüfuz")),
+            h("div",{style:{fontSize:12,opacity:.85,fontWeight:700,letterSpacing:.5}},"FETİH KOMUTANLIĞI"),
+            h("div",{style:{fontSize:23,fontWeight:800}},komutan[1]),
+            h("div",{style:{fontSize:12.5,opacity:.9,marginTop:2}}, "🏰 "+kaleler.length+" kale · ⚔️ "+toplamAsker+" asker · 🗡️ "+toplamSilah+" silah · 💪 "+toplamGuc+" güç")),
           h("div",{style:{textAlign:"center"}},
-            h("div",{style:{fontSize:34,fontWeight:800,lineHeight:1}},"%"+hakimiyet),
-            h("div",{style:{fontSize:11,opacity:.85}},"dünya hakimiyeti"))),
-        h("div",{style:{height:12,marginTop:14,background:"rgba(255,255,255,.25)",borderRadius:99,overflow:"hidden"}},
-          h("div",{className:"tk-shine",style:{height:"100%",width:Math.max(4,hakimiyet)+"%",borderRadius:99,background:"linear-gradient(90deg,#fbbf24,#fff,#fbbf24)"}}))),
+            h("div",{style:{fontSize:30,fontWeight:800,lineHeight:1}},kaleler.length),
+            h("div",{style:{fontSize:11,opacity:.85}},"kale"))),
+        komutanNext && h(React.Fragment,null,
+          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11.5,marginTop:12,marginBottom:4,opacity:.9}},
+            h("span",null,komutan[2]+" "+komutan[1]), h("span",null,(komutanNext[0]-toplamGuc)+" güç → "+komutanNext[2]+" "+komutanNext[1])),
+          h("div",{style:{height:11,background:"rgba(255,255,255,.25)",borderRadius:99,overflow:"hidden"}},
+            h("div",{className:"tk-shine",style:{height:"100%",width:Math.max(4,Math.round((toplamGuc-komutan[0])/(komutanNext[0]-komutan[0])*100))+"%",borderRadius:99,background:"linear-gradient(90deg,#fbbf24,#fff,#fbbf24)"}})))),
       h("div",{style:{background:"#fff",padding:"10px 14px",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}},
         h("input",{style:{...S.input,flex:1,minWidth:140},value:yeniBolge,onChange:e=>setYeniBolge(e.target.value),
-          onKeyDown:e=>{ if(e.key==="Enter") bolgeEkle(); },placeholder:"Yeni bölge / hedef (örn. Üsküdar)"}),
+          onKeyDown:e=>{ if(e.key==="Enter") bolgeEkle(); },placeholder:"Hedef bölge ekle (örn. Üsküdar)"}),
         h("button",{style:S.btn("p"),onClick:bolgeEkle},"⚑ Bölge ekle"))),
-    // unvan merdiveni
-    h("div",{style:{...S.card,padding:"10px 14px",marginBottom:14,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",fontSize:12}},
-      h("b",null,"Rütbe merdiveni:"),
-      FETIH_UNVAN.map((x,i)=>h("span",{key:i,style:{color:x[3],fontWeight:700}}, x[2]+" "+x[1]+(i<FETIH_UNVAN.length-1?"  ›":""))) ),
-    !bolgeAdlari.length
-      ? h("div",{style:{...S.card,padding:24,textAlign:"center",color:C.mut}},"Henüz bölge yok. Yukarıdan bölge ekle ya da satış yaparken bölge gir — fetih başlasın! ⚔️")
-      : h("div",{style:{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}},
-          bolgeStat.map((b,i)=>{ const fethedildi=!!b.unvan; const u=b.unvan;
-            const ilerleme = b.next ? Math.round((b.nufuz-(u?u[0]:0))/(b.next[0]-(u?u[0]:0))*100) : 100;
-            return h("div",{key:i,style:{...S.card,padding:0,overflow:"hidden",borderColor:fethedildi?u[3]:C.line,
-              borderStyle:fethedildi?"solid":"dashed",borderWidth:fethedildi?2:1.5}},
-              h("div",{style:{padding:"10px 12px",color:"#fff",
-                background: fethedildi?"linear-gradient(135deg,"+u[3]+","+u[3]+"cc)":"#9aa6b4"}},
-                h("div",{style:{fontSize:13,fontWeight:800,display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                  h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, "📍 "+b.ad),
-                  h("span",{style:{fontSize:20}}, fethedildi?u[2]:"🎯")),
-                h("div",{style:{fontSize:13.5,fontWeight:800,marginTop:3}},
-                  fethedildi ? (genitive(b.ad)+" "+u[1]) : "Hedef bölge — fethet!")),
-              h("div",{style:{padding:"10px 12px"}},
-                h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12.5,marginBottom:4}},
-                  h("span",null,"⚔️ ",h("b",null,b.asker)," asker"),
-                  h("span",null,"💰 ",h("b",null,tl(b.nufuz)))),
-                b.kusatma>0 && h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700,marginBottom:4}},"🏰 "+b.kusatma+" adet kuşatmada (konsinye)"),
-                b.next ? h(React.Fragment,null,
-                  h("div",{style:{height:8,background:"#eef2f7",borderRadius:99,overflow:"hidden",marginTop:6}},
-                    h("div",{style:{height:"100%",width:Math.max(3,ilerleme)+"%",background:(u?u[3]:"#9aa6b4"),borderRadius:99}})),
-                  h("div",{style:{fontSize:11,color:C.mut,marginTop:4}},
-                    tl(b.next[0]-b.nufuz)+" → "+b.next[2]+" "+genitive(b.ad)+" "+b.next[1]))
-                  : h("div",{style:{fontSize:11.5,color:u[3],fontWeight:800,marginTop:6}},"⭐ En üst rütbe — tam hakimiyet!")));
-          })));
+    // İSTANBUL HARİTASI
+    haritaliKale.length>0 && h("div",{style:{marginBottom:14}},
+      h("div",{style:{...S.label,marginBottom:6}},"🗺️ İstanbul fetih haritası — kalelerin"),
+      h(FetihHarita,{kaleler:haritaliKale})),
+    // asker / silah merdiveni
+    h("div",{style:{...S.card,padding:"10px 14px",marginBottom:14}},
+      h("div",{style:{fontSize:12,marginBottom:5}}, h("b",null,"⚔️ Asker (satış adedi): "),
+        ASKER_TIER.map((x,i)=>h("span",{key:i,style:{marginRight:8}}, x[2]+" "+x[1]+" ("+x[0]+"+)"))),
+      h("div",{style:{fontSize:12}}, h("b",null,"🗡️ Silah (ciro): "),
+        SILAH_TIER.map((x,i)=>h("span",{key:i,style:{marginRight:8}}, x[2]+" "+x[1]+" ("+x[0]+"₺+)")))),
+    // BÖLGE HAKİMİYETİ
+    h("div",{style:{...S.label,marginBottom:6}},"🏳️ Bölge hakimiyeti"),
+    !bolgeList.length ? h("div",{style:{...S.card,padding:20,textAlign:"center",color:C.mut,marginBottom:14}},"Bölge yok — satış/konsinyede bölge gir, kaleler kurulsun ⚔️")
+    : h("div",{style:{display:"grid",gap:10,gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",marginBottom:16}},
+        bolgeList.map((b,i)=>{ const fet=!!b.unvan; const u=b.unvan; const nx=b.sayi? (BOLGE_UNVAN.find(x=>x[0]>b.sayi)||null):BOLGE_UNVAN[0];
+          return h("div",{key:i,style:{...S.card,padding:0,overflow:"hidden",borderColor:fet?"#b45309":C.line,borderStyle:fet?"solid":"dashed"}},
+            h("div",{style:{padding:"9px 12px",color:"#fff",background:fet?"linear-gradient(135deg,#7f1d1d,#b45309)":"#9aa6b4"}},
+              h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,fontWeight:800}},
+                h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"📍 "+b.ad), h("span",{style:{fontSize:18}},fet?u[2]:"🎯")),
+              h("div",{style:{fontSize:13,fontWeight:800,marginTop:2}}, fet? (genitive(b.ad)+" "+u[1]) : "Hedef — fethet!")),
+            h("div",{style:{padding:"9px 12px",fontSize:12.5}},
+              h("div",{style:{display:"flex",justifyContent:"space-between"}}, h("span",null,"🏰 ",h("b",null,b.sayi)," kale"), h("span",null,"💪 ",h("b",null,b.guc))),
+              nx && h("div",{style:{fontSize:11,color:C.mut,marginTop:4}}, (nx[0]-b.sayi)+" kale → "+nx[2]+" "+nx[1]))); })),
+    // KALELER
+    h("div",{style:{...S.label,marginBottom:6}},"🏰 Kalelerim"),
+    !kaleler.length ? h("div",{style:{...S.card,padding:24,textAlign:"center",color:C.mut}},"Henüz kale yok. Bir mekana satış / konsinye yap — orası kalen olsun! 🏰")
+    : h("div",{style:{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))"}},
+        kaleler.map((k,i)=>h("div",{key:i,className:"tk-pcard",style:{...S.card,padding:0,overflow:"hidden",borderTop:"4px solid #b45309",boxShadow:"0 4px 14px rgba(15,23,42,.1)"}},
+          h("div",{style:{padding:"10px 12px",background:"linear-gradient(135deg,#92400e,#b45309)",color:"#fff"}},
+            h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}},
+              h("span",{style:{fontWeight:800,fontSize:14.5,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🏰 "+(k.ad||"Kale")),
+              h("span",{style:{flexShrink:0,fontSize:12,fontWeight:800,background:"rgba(255,255,255,.2)",borderRadius:8,padding:"2px 7px"}}, "Sv."+k.seviye)),
+            h("div",{style:{fontSize:11.5,opacity:.9,marginTop:2}}, (k.bolge||"—")+" · 💪 "+k.guc+" güç")),
+          h("div",{style:{padding:"10px 12px",display:"grid",gap:7}},
+            h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13}},
+              h("span",null,k.askerTier[2]+" "+k.askerTier[1]), h("b",null,k.asker+" asker")),
+            h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13}},
+              h("span",null,k.silahTier[2]+" "+k.silahTier[1]), h("b",null,k.silah+" silah")),
+            h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",fontSize:11}},
+              h("span",{style:{background:"#ecfdf5",color:"#047857",borderRadius:6,padding:"2px 7px",fontWeight:700}},"💰 "+k.satisAdet+" satış"),
+              k.konsinyeAdet>0 && h("span",{style:{background:"#efe7fe",color:"#7c3aed",borderRadius:6,padding:"2px 7px",fontWeight:700}},"🏬 "+k.konsinyeAdet+" konsinye"),
+              h("span",{style:{background:"#fef3c7",color:"#92400e",borderRadius:6,padding:"2px 7px",fontWeight:700}},tl(k.satisCiro)+" ciro")),
+            // güç barı (seviye 6 üzerinden)
+            h("div",{style:{height:7,background:"#eef2f7",borderRadius:99,overflow:"hidden"}},
+              h("div",{style:{height:"100%",width:Math.min(100,k.seviye/6*100)+"%",background:"linear-gradient(90deg,#f59e0b,#b45309)",borderRadius:99}})))))));
 
   const viewMap={seviye:seviyeView,gorev:gorevView,lig:ligView,seri:seriView,fetih:fetihView,odul:odulView};
   return h("div",null,
@@ -1688,7 +1752,7 @@ function App(){
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
     sekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
     sekme==="pazarlama" && h(PazarlamaTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket,bolgeler,musteriler,seferler}),
-    sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler}),
+    sekme==="oyun" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler,musteriler}),
     sekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
