@@ -69,6 +69,10 @@ async function restoreDoc(coll,obj){ const {id,...data}=obj; await setDoc(doc(db
 let AKTIF_KUL=null;
 async function harKaydet(obj){ const o=AKTIF_KUL?{kullaniciId:AKTIF_KUL.id,kullaniciAd:AKTIF_KUL.ad,...obj}:obj; return save("pazarlama_hareket",o); }
 const SIMGELER=["🦅","🐺","🦁","🐉","🦊","🐯","🦈","🦂","🐻","🦉","🐗","🦏","⚔️","🛡️","👑","🔱"];
+// satış/konsinye fiyatı 0 ise uyar — sessiz 0-ciro kaydını önle
+function fiyatOnay(kalemler){ const s=kalemler.filter(x=>num(x.fiyat)<=0);
+  if(!s.length) return true;
+  return confirm("⚠ Satış fiyatı 0 ₺ olan ürün(ler):\n"+s.map(x=>"• "+x.ad).join("\n")+"\n\nBu haliyle 0 ciro yazılır. Yine de devam edeyim mi?\n(Fiyatı Cephane / Stok kısmından düzeltebilirsin.)"); }
 function useColl(name){
   const [rows,setRows]=useState([]);
   useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>console.error(name,e)),[name]);
@@ -1001,6 +1005,7 @@ function MusteriBagModal({ musteri, bagItems, aktifSeferId, onKapat }){
   async function onayla(){
     if(!secili.length) return alert("En az bir ürüne adet gir.");
     for(const x of secili) if(x.adet>num(x.u.pazStok)) return alert(x.u.ad+": çantanda sadece "+num(x.u.pazStok)+" var.");
+    if(!fiyatOnay(secili.map(x=>({ad:x.u.ad,fiyat:x.u.satisFiyat})))) return;
     const iso=new Date().toISOString();
     for(const {u,adet,mod} of secili){
       await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-adet});
@@ -1051,6 +1056,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   const burada=Object.values(buradaMap);
   async function coz(p,mod){   // mod: "satildi" | "iade"
     const istek=s1[p.urunId]!=null?Math.floor(num(s1[p.urunId])):p.kalan; let n=Math.min(istek,p.kalan); if(n<1) return alert("Adet gir.");
+    if(mod==="satildi" && !fiyatOnay([{ad:p.urunAd,fiyat:p.satisFiyat}])) return;
     const iso=new Date().toISOString();
     // satıldı: alınan tutar boşsa tam ödeme; eksikse kalan = ALACAK
     let alinanKalan=null;
@@ -1080,6 +1086,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   async function yeniOnayla(){
     if(!secili.length) return alert("Yeni için ürün adedi gir.");
     for(const x of secili) if(x.adet>num(x.u.pazStok)) return alert(x.u.ad+": çantanda "+num(x.u.pazStok)+" var.");
+    if(!fiyatOnay(secili.map(x=>({ad:x.u.ad,fiyat:x.u.satisFiyat})))) return;
     const iso=new Date().toISOString();
     for(const {u,adet,mod} of secili){ await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-adet});
       const base={urunId:u.id,urunAd:u.ad,adet,alisFiyat:num(u.pazFiyat),satisFiyat:num(u.satisFiyat),yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso};
@@ -1244,6 +1251,7 @@ function PazIslemModal({ u, mod, alisVar, bolgeler, musteriler, secMusteri, akti
   async function uygula(){
     const ad=Math.floor(num(n)); if(ad<1) return alert("Adet gir.");
     if(ad>cfg.max) return alert("En fazla "+cfg.max+" adet.");
+    if((mod==="sat"||mod==="konsinye") && !fiyatOnay([{ad:u.ad,fiyat:satis}])) return;
     const iso=new Date().toISOString();
     const sid = mod==="al" ? (seferIdAl?await seferIdAl():null) : (aktifSeferId||null);
     if(mod==="al"){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)-ad,pazStok:num(u.pazStok)+ad});
@@ -1302,6 +1310,7 @@ function KonsinyeCozModal({ k, u, onKapat }){
   const [n,setN]=useState(num(k.kalan));
   const [satis,setSatis]=useState(k.satisFiyat||u.satisFiyat||"");
   async function satildi(){ const ad=Math.floor(num(n)); if(ad<1||ad>num(k.kalan)) return alert("Geçersiz adet.");
+    if(!fiyatOnay([{ad:k.urunAd,fiyat:satis}])) return;
     await save("pazarlama_hareket",{id:k.id,kalan:num(k.kalan)-ad});
     await harKaydet({tip:"satis",urunId:k.urunId,urunAd:k.urunAd,adet:ad,alisFiyat:num(k.alisFiyat),satisFiyat:num(satis),yer:k.yer,kaynak:"konsinye",tarih:new Date().toISOString()});
     onKapat(); }
