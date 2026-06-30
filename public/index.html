@@ -65,10 +65,20 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8
 async function save(coll, obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,coll,id),d,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
 async function restoreDoc(coll,obj){ const {id,...data}=obj; await setDoc(doc(db,coll,id),data); } // merge yok → tam geri yükle
+// aktif kullanıcı (oturum) — hareketler kime ait damgalansın
+let AKTIF_KUL=null;
+async function harKaydet(obj){ const o=AKTIF_KUL?{kullaniciId:AKTIF_KUL.id,kullaniciAd:AKTIF_KUL.ad,...obj}:obj; return save("pazarlama_hareket",o); }
+const SIMGELER=["🦅","🐺","🦁","🐉","🦊","🐯","🦈","🦂","🐻","🦉","🐗","🦏","⚔️","🛡️","👑","🔱"];
 function useColl(name){
   const [rows,setRows]=useState([]);
   useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>console.error(name,e)),[name]);
   return rows;
+}
+// kullanıcılar — yüklendi bilgisiyle (ilk-açılış ekranı için)
+function useKullanici(){
+  const [st,setSt]=useState({rows:[],loaded:false});
+  useEffect(()=>onSnapshot(collection(db,"kullanici"),s=>setSt({rows:s.docs.map(d=>({id:d.id,...d.data()})),loaded:true}),e=>console.error("kullanici",e)),[]);
+  return st;
 }
 const num = v => { const n=parseFloat(v); return isNaN(n)?0:n; };
 const pad = n => String(n).padStart(2,"0");
@@ -905,7 +915,7 @@ function CantaDoldurModal({ urunler, seferIdAl, onKapat }){
     for(const {u,q} of alinacak){ if(q>num(u.stokta)) return alert(u.ad+": atölyede sadece "+num(u.stokta)+" var."); }
     const sid=await seferIdAl(); const iso=new Date().toISOString();
     for(const {u,q} of alinacak){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)-q,pazStok:num(u.pazStok)+q});
-      if(sid) await save("pazarlama_hareket",{tip:"al",urunId:u.id,urunAd:u.ad,adet:q,seferId:sid,tarih:iso}); }
+      if(sid) await harKaydet({tip:"al",urunId:u.id,urunAd:u.ad,adet:q,seferId:sid,tarih:iso}); }
     onKapat();
   }
   return h(Modal,{ baslik:"🎒 Çantaya ürün ekle (atölyeden)", onKapat,
@@ -995,8 +1005,8 @@ function MusteriBagModal({ musteri, bagItems, aktifSeferId, onKapat }){
       await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-adet});
       const base={urunId:u.id,urunAd:u.ad,adet,alisFiyat:num(u.pazFiyat),satisFiyat:num(u.satisFiyat),
         yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso};
-      if(mod==="konsinye") await save("pazarlama_hareket",{tip:"konsinye",kalan:adet,musteriNot:musteri.not||"",lat:musteri.lat||"",lng:musteri.lng||"",fotoK:[],...base});
-      else await save("pazarlama_hareket",{tip:"satis",...base});
+      if(mod==="konsinye") await harKaydet({tip:"konsinye",kalan:adet,musteriNot:musteri.not||"",lat:musteri.lat||"",lng:musteri.lng||"",fotoK:[],...base});
+      else await harKaydet({tip:"satis",...base});
     }
     onKapat();
   }
@@ -1044,7 +1054,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===p.urunId&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
     for(const r of recs){ if(n<=0)break; const d=Math.min(n,num(r.kalan));
       await save("pazarlama_hareket",{id:r.id,kalan:num(r.kalan)-d});
-      if(mod==="satildi") await save("pazarlama_hareket",{tip:"satis",urunId:r.urunId,urunAd:r.urunAd,adet:d,alisFiyat:num(r.alisFiyat),satisFiyat:num(r.satisFiyat),yer:r.yer||musteri.ad,bolge:r.bolge||musteri.bolge||"",musteriId:r.musteriId||musteri.id||"",kaynak:"konsinye",seferId:aktifSeferId||null,tarih:iso});
+      if(mod==="satildi") await harKaydet({tip:"satis",urunId:r.urunId,urunAd:r.urunAd,adet:d,alisFiyat:num(r.alisFiyat),satisFiyat:num(r.satisFiyat),yer:r.yer||musteri.ad,bolge:r.bolge||musteri.bolge||"",musteriId:r.musteriId||musteri.id||"",kaynak:"konsinye",seferId:aktifSeferId||null,tarih:iso});
       else { const u=(urunler||[]).find(x=>x.id===p.urunId); if(u) await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)+d}); }
       n-=d;
     }
@@ -1060,8 +1070,8 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     const iso=new Date().toISOString();
     for(const {u,adet,mod} of secili){ await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-adet});
       const base={urunId:u.id,urunAd:u.ad,adet,alisFiyat:num(u.pazFiyat),satisFiyat:num(u.satisFiyat),yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso};
-      if(mod==="konsinye") await save("pazarlama_hareket",{tip:"konsinye",kalan:adet,musteriNot:musteri.not||"",lat:musteri.lat||"",lng:musteri.lng||"",fotoK:[],...base});
-      else await save("pazarlama_hareket",{tip:"satis",...base}); }
+      if(mod==="konsinye") await harKaydet({tip:"konsinye",kalan:adet,musteriNot:musteri.not||"",lat:musteri.lat||"",lng:musteri.lng||"",fotoK:[],...base});
+      else await harKaydet({tip:"satis",...base}); }
     setLines({});
   }
   const tel=(musteri.telefon||"").replace(/\D/g,"");
@@ -1092,7 +1102,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
       }
     }catch(e){ if(e&&e.name==="AbortError") return; }
     if(!paylasildi) window.open("https://wa.me/"+(tel?("9"+tel):"")+"?text="+encodeURIComponent(msg),"_blank");
-    await save("pazarlama_hareket",{tip:"diplomasi",musteriId:musteri.id||"",yer:musteri.ad||"",bolge:musteri.bolge||"",adet:seciliUrun.length,urunAdlar:seciliUrun.map(u=>u.ad).join(", "),tarih:new Date().toISOString()});
+    await harKaydet({tip:"diplomasi",musteriId:musteri.id||"",yer:musteri.ad||"",bolge:musteri.bolge||"",adet:seciliUrun.length,urunAdlar:seciliUrun.map(u=>u.ad).join(", "),tarih:new Date().toISOString()});
     setSec({}); alert("📨 Gönderildi — diplomatik ilişki kaydedildi! 🤝");
   }
   const sekmeBtn=(k,et)=>h("button",{type:"button",onClick:()=>setTab(k),
@@ -1201,15 +1211,15 @@ function PazIslemModal({ u, mod, alisVar, bolgeler, musteriler, secMusteri, akti
     const iso=new Date().toISOString();
     const sid = mod==="al" ? (seferIdAl?await seferIdAl():null) : (aktifSeferId||null);
     if(mod==="al"){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)-ad,pazStok:num(u.pazStok)+ad});
-      if(sid) await save("pazarlama_hareket",{tip:"al",urunId:u.id,urunAd:u.ad,adet:ad,seferId:sid,tarih:iso}); }
+      if(sid) await harKaydet({tip:"al",urunId:u.id,urunAd:u.ad,adet:ad,seferId:sid,tarih:iso}); }
     else if(mod==="iade"){ await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-ad,stokta:num(u.stokta)+ad});
-      if(sid) await save("pazarlama_hareket",{tip:"iade",urunId:u.id,urunAd:u.ad,adet:ad,seferId:sid,tarih:iso}); }
+      if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:ad,seferId:sid,tarih:iso}); }
     else if(mod==="sat"){ if(!yer.trim()) return alert("Nereye sattığını yaz.");
       await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-ad});
-      await save("pazarlama_hareket",{tip:"satis",urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(alis),satisFiyat:num(satis),yer:yer.trim(),bolge:bolge.trim(),telefon:telefon.trim(),seferId:sid,tarih:iso}); }
+      await harKaydet({tip:"satis",urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(alis),satisFiyat:num(satis),yer:yer.trim(),bolge:bolge.trim(),telefon:telefon.trim(),seferId:sid,tarih:iso}); }
     else if(mod==="konsinye"){ if(!yer.trim()) return alert("Nereye bıraktığını yaz.");
       await save("stok_urun",{id:u.id,pazStok:num(u.pazStok)-ad});
-      await save("pazarlama_hareket",{tip:"konsinye",urunId:u.id,urunAd:u.ad,adet:ad,kalan:ad,alisFiyat:num(alis),satisFiyat:num(satis),
+      await harKaydet({tip:"konsinye",urunId:u.id,urunAd:u.ad,adet:ad,kalan:ad,alisFiyat:num(alis),satisFiyat:num(satis),
         yer:yer.trim(),bolge:bolge.trim(),telefon:telefon.trim(),musteriNot:musteriNot.trim(),musteriId,lat,lng,fotoK,seferId:sid,tarih:iso}); }
     onKapat();
   }
@@ -1257,7 +1267,7 @@ function KonsinyeCozModal({ k, u, onKapat }){
   const [satis,setSatis]=useState(k.satisFiyat||u.satisFiyat||"");
   async function satildi(){ const ad=Math.floor(num(n)); if(ad<1||ad>num(k.kalan)) return alert("Geçersiz adet.");
     await save("pazarlama_hareket",{id:k.id,kalan:num(k.kalan)-ad});
-    await save("pazarlama_hareket",{tip:"satis",urunId:k.urunId,urunAd:k.urunAd,adet:ad,alisFiyat:num(k.alisFiyat),satisFiyat:num(satis),yer:k.yer,kaynak:"konsinye",tarih:new Date().toISOString()});
+    await harKaydet({tip:"satis",urunId:k.urunId,urunAd:k.urunAd,adet:ad,alisFiyat:num(k.alisFiyat),satisFiyat:num(satis),yer:k.yer,kaynak:"konsinye",tarih:new Date().toISOString()});
     onKapat(); }
   async function iade(){ const ad=Math.floor(num(n)); if(ad<1||ad>num(k.kalan)) return alert("Geçersiz adet.");
     await save("pazarlama_hareket",{id:k.id,kalan:num(k.kalan)-ad});
@@ -1324,7 +1334,7 @@ function PazarlamaTab({ urunler, plan, filamentler, hareketler, bolgeler, muster
     if(!confirm("Gün sonu: "+cantaItems.length+" çeşit · "+cantaAdet+" adet ürün atölyeye bırakılsın mı?")) return;
     const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
     for(const u of cantaItems){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)+num(u.pazStok),pazStok:0});
-      if(sid) await save("pazarlama_hareket",{tip:"iade",urunId:u.id,urunAd:u.ad,adet:num(u.pazStok),seferId:sid,tarih:iso}); }
+      if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:num(u.pazStok),seferId:sid,tarih:iso}); }
     if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
   const simdi=Date.now();
   const pGun=perf(gunBasi(simdi).getTime()), pHaf=perf(haftaBasi(simdi).getTime()), pAy=perf(ayBasi(simdi));
@@ -1623,12 +1633,13 @@ function FetihHarita({ kaleler, hedefler, gozculer, onSec }){
       L.marker(c,{icon:lbl,interactive:false,pane:"etiket",zIndexOffset:-50}).addTo(lg); });
     // yakınlaşma çarpanı: genel görünümde küçük (üst üste binmesin), yakınlaştıkça büyür
     const zf = zoom<=11 ? .7 : zoom>=15 ? 1.45 : .7+(zoom-11)*.1875;
-    // KALE işaretleri
+    // KALE işaretleri (sahibinin sembolü rozet olarak)
     kl.forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll); const sz=Math.round((13+(k.seviye||1)*3)*zf);
+      const rozet = k.simge ? "<span style=\"position:absolute;top:-"+Math.round(sz*.28)+"px;right:-"+Math.round(sz*.34)+"px;font-size:"+Math.round(sz*.6)+"px;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 0 1px #fff)\">"+k.simge+"</span>" : "";
       const icon=L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
-        html:"<div style=\"font-size:"+sz+"px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))\">🏰</div>"});
+        html:"<div style=\"position:relative;font-size:"+sz+"px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))\">🏰"+rozet+"</div>"});
       L.marker(ll,{icon,zIndexOffset:200}).addTo(lg)
-        .bindTooltip("<b>"+(k.ad||"Kale")+"</b> · Sv."+k.seviye+" · 💪 "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" · "+k.silahTier[2]+" "+k.silah+"<br><i>dokun → ⚔️ akın</i>",{direction:"top"})
+        .bindTooltip("<b>"+(k.ad||"Kale")+"</b> · Sv."+k.seviye+" · 💪 "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" · "+k.silahTier[2]+" "+k.silah+(k.sahip?("<br>"+k.simge+" "+k.sahip.ad+"'in kalesi"):"")+"<br><i>dokun → ⚔️ akın</i>",{direction:"top"})
         .on("click",()=>onSec&&onSec(k));
     });
     // GÖZCÜ — ürün bırakılmamış ama telefonu alınmış müşteri adayları (dürbün)
@@ -1661,7 +1672,7 @@ function FetihHarita({ kaleler, hedefler, gozculer, onSec }){
       tamEkran?"✕":"⛶"));
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, seferler }){
+function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, seferler, kullanicilar, aktif }){
   const [alt,setAlt]=useState("komuta");
   const [yeniBolge,setYeniBolge]=useState("");
   const [cantaDoldur,setCantaDoldur]=useState(false);
@@ -1713,11 +1724,13 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
 
   // FETİH — her mekan/müşteri bir KALE; satış=kaliteli asker, konsinye=hafif asker, ciro=silah
   const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
+  const kulById={}; (kullanicilar||[]).forEach(u=>kulById[u.id]=u);
   const kaleMap={};
   (hareketler||[]).forEach(x=>{ if(x.tip!=="satis"&&x.tip!=="konsinye") return;
     const key = x.musteriId ? ("m:"+x.musteriId) : ("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
-    const k = kaleMap[key] || (kaleMap[key]={ key, musteriId:x.musteriId||"", ad:x.yer||"", bolge:x.bolge||"", lat:x.lat||"", lng:x.lng||"", satisAdet:0, satisCiro:0, konsinyeAdet:0 });
+    const k = kaleMap[key] || (kaleMap[key]={ key, musteriId:x.musteriId||"", ad:x.yer||"", bolge:x.bolge||"", lat:x.lat||"", lng:x.lng||"", satisAdet:0, satisCiro:0, konsinyeAdet:0, sahipPuan:{} });
     if(x.tip==="satis"){ k.satisAdet+=num(x.adet); k.satisCiro+=num(x.adet)*num(x.satisFiyat); } else k.konsinyeAdet+=num(x.adet);
+    if(x.kullaniciId) k.sahipPuan[x.kullaniciId]=num(k.sahipPuan[x.kullaniciId])+num(x.adet);   // kale sahipliği: en çok işlem yapan
     if(!k.ad && x.yer) k.ad=x.yer; if(!k.bolge && x.bolge) k.bolge=x.bolge; if(!k.lat && x.lat){ k.lat=x.lat; k.lng=x.lng; }
   });
   const kaleler=Object.values(kaleMap).map(k=>{ const m=k.musteriId&&musById[k.musteriId];
@@ -1726,8 +1739,16 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
     k.silah=Math.floor(k.satisCiro/250); k.asker=k.satisAdet+k.konsinyeAdet;
     k.guc=Math.round(k.satisAdet*k.askerTier[3] + k.konsinyeAdet*1 + k.silah*k.silahTier[3]);
     k.seviye=kaleSeviye(k.guc);
+    k.sahipId=Object.keys(k.sahipPuan).sort((a,b)=>k.sahipPuan[b]-k.sahipPuan[a])[0]||"";  // sahibi
+    k.sahip=kulById[k.sahipId]||null; k.simge=k.sahip?(k.sahip.simge||"🚩"):"";
     return k;
   }).sort((a,b)=>b.guc-a.guc);
+  // KOMUTANLAR — her pazarlamacının kendi gücü/payesi
+  const komutanlar=(kullanicilar||[]).map(u=>{ const ks=kaleler.filter(k=>k.sahipId===u.id);
+    const guc=ks.reduce((s,k)=>s+k.guc,0), ciro=ks.reduce((s,k)=>s+k.satisCiro,0);
+    return { u, kale:ks.length, guc, ciro, rutbe:katOf(KOMUTAN,guc) }; })
+    .filter(x=>x.kale>0 || (aktif&&x.u.id===aktif.id))
+    .sort((a,b)=>b.guc-a.guc);
   // bölge hakimiyeti — kale sayısına göre unvan
   const bolgeAdlari=Array.from(new Set([...(bolgeler||[]).map(b=>b.ad), ...kaleler.map(k=>k.bolge).filter(Boolean)]));
   const bolgeList=bolgeAdlari.map(ad=>{ const ks=kaleler.filter(k=>k.bolge===ad);
@@ -1752,7 +1773,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
     if(!confirm("Seferi bitir — kalan cephaneyi atölyeye geri çek?")) return;
     const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
     for(const u of cephane){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)+num(u.pazStok),pazStok:0});
-      if(sid) await save("pazarlama_hareket",{tip:"iade",urunId:u.id,urunAd:u.ad,adet:num(u.pazStok),seferId:sid,tarih:iso}); }
+      if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:num(u.pazStok),seferId:sid,tarih:iso}); }
     if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
 
   const altlar=[["komuta","🏰 Komuta"],["cephane","🎒 Cephane"],["kale","🛡️ Kaleler"]];
@@ -1917,6 +1938,21 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
       h("div",{style:{...S.label,marginBottom:6}},"🗺️ İstanbul fetih haritası — 🏰 kale · 🔭 gözcü · 🚩 hedef · hakimiyet alanı"),
       h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,
         onSec:(item)=>{ const mus = item.id ? item : ((item.musteriId&&musById[item.musteriId]) || {ad:item.ad,bolge:item.bolge,lat:item.lat,lng:item.lng}); setMusteriBag(mus); }})),
+    // —— KOMUTANLAR (pazarlamacı sıralaması) ——
+    komutanlar.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
+      h("div",{style:{...S.label,marginBottom:8}},"🏅 Komutanlar — pazarlamacı sıralaması"),
+      h("div",{style:{display:"grid",gap:7}},
+        komutanlar.map((c,i)=>{ const ben=aktif&&c.u.id===aktif.id;
+          return h("div",{key:c.u.id,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:10,
+            background:ben?"#fff7ed":"#f8fafc",border:"1px solid "+(ben?"#fdba74":C.line)}},
+            h("div",{style:{fontSize:13,fontWeight:800,color:C.mut,width:20,textAlign:"center"}},"#"+(i+1)),
+            h("div",{style:{fontSize:24}},c.u.simge||"🙂"),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontWeight:800,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, c.u.ad+(ben?" (sen)":"")),
+              h("div",{style:{fontSize:11.5,color:C.mut}}, c.rutbe[2]+" "+c.rutbe[1])),
+            h("div",{style:{textAlign:"right",flexShrink:0}},
+              h("div",{style:{fontWeight:800,fontSize:13.5}},"🏰 "+c.kale+" · 💪 "+c.guc),
+              h("div",{style:{fontSize:11,color:"#047857",fontWeight:700}},tl(c.ciro)+" ciro"))); }))),
     // asker / silah merdiveni
     h("div",{style:{...S.card,padding:"10px 14px",marginBottom:14}},
       h("div",{style:{fontSize:12,marginBottom:5}}, h("b",null,"⚔️ Asker (satış adedi): "),
@@ -1996,12 +2032,14 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
     : h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))"}},
         (musteriler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(m=>{ const r=adRenk(m.ad);
           const fethedildi=kaleler.some(k=>k.musteriId===m.id||k.ad===m.ad); const tel=(m.telefon||"").replace(/\D/g,"");
+          const kale=kaleler.find(k=>k.musteriId===m.id||k.ad===m.ad); const sahip=kale&&kale.sahip;
           return h("div",{key:m.id,className:"tk-pcard",style:{...S.card,borderTop:"5px solid "+(fethedildi?"#b45309":r.ana),boxShadow:"0 4px 14px rgba(15,23,42,.09)"}},
             h("div",{style:{display:"flex",alignItems:"center",gap:10}},
-              h("div",{style:{width:40,height:40,borderRadius:10,flexShrink:0,background:"linear-gradient(135deg,"+r.ana+","+r.acik+")",color:"#fff",fontWeight:800,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}, fethedildi?"🏰":(m.ad||"?").charAt(0).toLocaleUpperCase("tr")),
+              h("div",{style:{position:"relative",width:40,height:40,borderRadius:10,flexShrink:0,background:"linear-gradient(135deg,"+r.ana+","+r.acik+")",color:"#fff",fontWeight:800,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}, fethedildi?"🏰":(m.ad||"?").charAt(0).toLocaleUpperCase("tr"),
+                sahip && h("span",{title:sahip.ad+"'in kalesi",style:{position:"absolute",top:-6,right:-6,fontSize:15,filter:"drop-shadow(0 0 2px #fff)"}},sahip.simge)),
               h("div",{style:{minWidth:0,flex:1}},
                 h("div",{style:{fontWeight:800,fontSize:15.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad),
-                m.bolge && h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700}},"📍 "+m.bolge)),
+                h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700}}, (m.bolge?("📍 "+m.bolge):"")+(sahip?((m.bolge?" · ":"")+sahip.simge+" "+sahip.ad):""))),
               h("button",{style:{...S.ibtn,flexShrink:0},onClick:()=>setMusEdit(m)},"✎")),
             m.telefon && h("div",{style:{fontSize:13,marginTop:8}},"📞 ",
               h("a",{href:"tel:"+m.telefon,style:{fontWeight:700,color:"#0369a1",textDecoration:"none"}},m.telefon),
@@ -2027,6 +2065,83 @@ function OyunTab({ plan, urunler, hareketler, makineler, bolgeler, musteriler, s
 }
 
 /* ============================================================
+   GİRİŞ / KULLANICI YÖNETİMİ
+   ============================================================ */
+function GirisEkran({ kullanicilar, onGiris }){
+  const yok=!kullanicilar.length;
+  const [secId,setSecId]=useState(null);
+  const [pin,setPin]=useState("");
+  const [ad,setAd]=useState(""); const [yeniPin,setYeniPin]=useState("");
+  const sec=kullanicilar.find(u=>u.id===secId)||null;
+  async function ilkAdmin(){
+    if(!ad.trim()) return alert("İsim gir.");
+    if(yeniPin.length<4) return alert("4+ haneli bir PIN belirle.");
+    const obj={ad:ad.trim(),rol:"admin",pin:yeniPin,simge:"👑",renkH:adRenk(ad).H};
+    const id=await save("kullanici",obj); onGiris({id,...obj});
+  }
+  function girisYap(){ if(!sec) return; if(pin!==(sec.pin||"")){ setPin(""); return alert("PIN hatalı."); } onGiris(sec); }
+  return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:18,background:"linear-gradient(135deg,#0b1220,#1e293b)"}},
+    h("div",{style:{width:"100%",maxWidth:420,background:"#fff",borderRadius:18,padding:24,boxShadow:"0 20px 60px rgba(0,0,0,.45)"}},
+      h("div",{style:{textAlign:"center",marginBottom:18}},
+        h("div",{style:{fontSize:42}},"🧊"),
+        h("div",{style:{fontSize:23,fontWeight:800}},"Tikita"),
+        h("div",{style:{fontSize:13,color:C.mut,marginTop:2}}, yok?"İlk yönetici hesabını oluştur":"Hesabını seç ve giriş yap")),
+      yok ? h("div",null,
+          h(Field,{label:"Yönetici adı"}, h("input",{style:S.input,value:ad,onChange:e=>setAd(e.target.value)})),
+          h(Field,{label:"PIN (4+ hane)"}, h("input",{type:"password",inputMode:"numeric",style:S.input,value:yeniPin,onChange:e=>setYeniPin(e.target.value.replace(/\D/g,"")),onKeyDown:e=>{if(e.key==="Enter")ilkAdmin();}})),
+          h("button",{style:{...S.btn("p"),width:"100%",marginTop:8},onClick:ilkAdmin},"👑 Yönetici oluştur ve gir"))
+      : !sec ? h("div",{style:{display:"grid",gap:10}},
+          kullanicilar.slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>
+            h("button",{key:u.id,onClick:()=>{setSecId(u.id);setPin("");},
+              style:{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",border:"1px solid "+C.line,borderRadius:12,background:"#fff",cursor:"pointer",textAlign:"left"}},
+              h("div",{style:{fontSize:26}},u.simge||"🙂"),
+              h("div",{style:{flex:1}},
+                h("div",{style:{fontWeight:800,fontSize:15}},u.ad),
+                h("div",{style:{fontSize:12,color:C.mut}}, u.rol==="admin"?"Yönetici":"Pazarlamacı")),
+              h("div",{style:{fontSize:18,color:C.mut}},"›")))
+        )
+      : h("div",null,
+          h("button",{onClick:()=>setSecId(null),style:{...S.ibtn,marginBottom:10}},"‹ Geri"),
+          h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:12}},
+            h("div",{style:{fontSize:30}},sec.simge||"🙂"),
+            h("div",null,h("div",{style:{fontWeight:800,fontSize:16}},sec.ad),h("div",{style:{fontSize:12,color:C.mut}}, sec.rol==="admin"?"Yönetici":"Pazarlamacı"))),
+          h(Field,{label:"PIN"}, h("input",{type:"password",inputMode:"numeric",autoFocus:true,style:S.input,value:pin,
+            onChange:e=>setPin(e.target.value.replace(/\D/g,"")),onKeyDown:e=>{if(e.key==="Enter")girisYap();}})),
+          h("button",{style:{...S.btn("p"),width:"100%",marginTop:8},onClick:girisYap},"Giriş yap"))
+    ));
+}
+function EkipModal({ kullanicilar, aktif, onKapat }){
+  const [ad,setAd]=useState(""); const [pin,setPin]=useState(""); const [simge,setSimge]=useState(SIMGELER[0]); const [rol,setRol]=useState("pazarlamaci");
+  async function ekle(){ if(!ad.trim()) return alert("İsim gir."); if(pin.length<4) return alert("4+ haneli PIN belirle.");
+    await save("kullanici",{ad:ad.trim(),pin,rol,simge,renkH:adRenk(ad).H});
+    setAd(""); setPin(""); setSimge(SIMGELER[(SIMGELER.indexOf(simge)+1)%SIMGELER.length]); }
+  async function sil(u){ const adminSay=kullanicilar.filter(x=>x.rol==="admin").length;
+    if(u.rol==="admin"&&adminSay<=1) return alert("Son yönetici silinemez.");
+    if(u.id===aktif.id) return alert("Kendini silemezsin.");
+    if(!confirm(u.ad+" silinsin mi? (Kalan oyun verileri durur.)")) return; await remove("kullanici",u.id); }
+  return h(Modal,{baslik:"👥 Ekip — pazarlamacılar", onKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:onKapat},"Kapat")},
+    h("div",{style:{display:"grid",gap:8,marginBottom:14}},
+      kullanicilar.slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>
+        h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:10,border:"1px solid "+C.line,borderRadius:10,padding:"8px 10px"}},
+          h("div",{style:{fontSize:24}},u.simge||"🙂"),
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, u.ad+(u.id===aktif.id?" (sen)":"")),
+            h("div",{style:{fontSize:12,color:C.mut}}, u.rol==="admin"?"Yönetici":"Pazarlamacı")),
+          (u.id!==aktif.id) && h("button",{style:{...S.ibtn,color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>sil(u)},"Sil")))),
+    h("div",{style:{...S.card,padding:"12px 14px"}},
+      h("div",{style:{...S.label,marginBottom:8}},"+ Yeni kişi ekle"),
+      h(Field,{label:"İsim"}, h("input",{style:S.input,value:ad,onChange:e=>setAd(e.target.value)})),
+      h(Field,{label:"PIN (4+ hane)"}, h("input",{type:"password",inputMode:"numeric",style:S.input,value:pin,onChange:e=>setPin(e.target.value.replace(/\D/g,""))})),
+      h(Field,{label:"Sembol"}, h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+        SIMGELER.map(s=>h("button",{key:s,type:"button",onClick:()=>setSimge(s),
+          style:{fontSize:20,padding:"4px 7px",borderRadius:8,border:"2px solid "+(simge===s?"#b45309":C.line),background:simge===s?"#fff7ed":"#fff",cursor:"pointer"}},s)))),
+      h(Field,{label:"Rol"}, h("div",{style:{display:"flex",gap:8}},
+        [["pazarlamaci","🛒 Pazarlamacı"],["admin","👑 Yönetici"]].map(([rr,et])=>h("button",{key:rr,type:"button",onClick:()=>setRol(rr),
+          style:{flex:1,padding:"8px",borderRadius:8,border:"1px solid "+(rol===rr?"#b45309":C.line),background:rol===rr?"#b45309":"#fff",color:rol===rr?"#fff":C.txt,fontWeight:700,cursor:"pointer"}},et)))),
+      h("button",{style:{...S.btn("p"),width:"100%",marginTop:10},onClick:ekle},"+ Ekle")));
+}
+
+/* ============================================================
    APP
    ============================================================ */
 function App(){
@@ -2040,6 +2155,13 @@ function App(){
   const bolgeler = useColl("bolge");
   const musteriler = useColl("musteri");
   const seferler = useColl("sefer");
+  const {rows:kullanicilar,loaded:kulYuklendi}=useKullanici();
+  const [aktifId,setAktifId]=useState(()=>{ try{ return localStorage.getItem("tk_uid"); }catch(e){ return null; } });
+  const [ekipAcik,setEkipAcik]=useState(false);
+  const aktif=kullanicilar.find(u=>u.id===aktifId)||null;
+  AKTIF_KUL=aktif;
+  function giris(u){ setAktifId(u.id); try{ localStorage.setItem("tk_uid",u.id); }catch(e){} }
+  function cikis(){ setAktifId(null); try{ localStorage.removeItem("tk_uid"); }catch(e){} }
   const [bas, setBas] = useState(()=>haftaBasi(Date.now()).getTime());
   const [gunSayisi, setGunSayisi] = useState(7);
   const [isModal, setIsModal] = useState(null);
@@ -2123,14 +2245,30 @@ function App(){
   const gunler = Array.from({length:gunSayisi},(_,i)=>new Date(baslaMs + i*24*3600*1000));
   const tarihAralik = fmtTarih(baslaMs)+" – "+fmtTarih(bitMs-1)+" "+new Date(baslaMs).getFullYear();
 
+  // —— OTURUM KONTROLÜ ——
+  if(!kulYuklendi) return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"#64748b"}},"⏳ Yükleniyor…");
+  if(!aktif) return h(GirisEkran,{kullanicilar,onGiris:giris});
+  const isAdmin=aktif.rol==="admin";
+  const gorSekme = isAdmin ? sekme : "pazarlama";        // pazarlamacı sadece pazarlamayı görür
+  const navListe = isAdmin ? [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]] : [["pazarlama","🛒 Pazarlama"]];
+
   return h("div",{style:S.wrap},
+    // kullanıcı çubuğu
+    h("div",{style:{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:12,padding:"8px 12px",background:"#0f172a",borderRadius:12,color:"#fff"}},
+      h("div",{style:{fontSize:22}},aktif.simge||"🙂"),
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontWeight:800,fontSize:14}},aktif.ad),
+        h("div",{style:{fontSize:11,opacity:.75}}, isAdmin?"Yönetici — tüm yetkiler":"Pazarlamacı")),
+      isAdmin && h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:()=>setEkipAcik(true)},"👥 Ekip"),
+      h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:cikis},"Çıkış")),
     // üst sekme
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
-      [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]].map(([k,ad])=>
-        h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(sekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
-    sekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
-    sekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler,musteriler,seferler}),
-    sekme==="plan" && h("div",null,
+      navListe.map(([k,ad])=>
+        h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(gorSekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
+    ekipAcik && h(EkipModal,{kullanicilar,aktif,onKapat:()=>setEkipAcik(false)}),
+    gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
+    gorSekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,bolgeler,musteriler,seferler,kullanicilar,aktif}),
+    gorSekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
       h("div",null,
