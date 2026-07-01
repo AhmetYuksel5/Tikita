@@ -2303,13 +2303,13 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   // —— 🎒 CEPHANE (ürün kartları) ——
   // 🧹 toplanacak tablalar — bitmiş ama toplanmamış baskılar (görev + ücret)
   const nowT=Date.now();
-  // her makine için SADECE güncel (en son biten, toplanmamış) tabla
-  const toplanacak=[]; (makineler||[]).forEach(mk=>{ const mjobs=(plan||[]).filter(p=>p.makineId===mk.id);
-    const calisan=mjobs.some(p=>p.basladi && new Date(p.baslangic).getTime()<=nowT && new Date(p.baslangic).getTime()+num(p.sureDk)*60000>nowT);
-    if(calisan) return;
-    const son=mjobs.filter(p=>p.basladi && !p.tablaAlindi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=nowT)
-      .sort((a,b)=>(new Date(b.baslangic).getTime()+num(b.sureDk)*60000)-(new Date(a.baslangic).getTime()+num(a.sureDk)*60000))[0];
-    if(son) toplanacak.push({makine:mk,is:son}); });
+  // her makine için SADECE güncel tabla: en son BAŞLAYAN baskı bitmiş ve toplanmamışsa.
+  // (Sadece en son baskıya bakılır → toplanınca eski/bayat baskılar tekrar listelenmez, makine çalışıyorsa gizli.)
+  const toplanacak=[]; (makineler||[]).forEach(mk=>{ const mjobs=(plan||[]).filter(p=>p.makineId===mk.id && p.basladi);
+    if(!mjobs.length) return;
+    const son=mjobs.slice().sort((a,b)=>(new Date(b.baslangic).getTime()+num(b.sureDk)*60000)-(new Date(a.baslangic).getTime()+num(a.sureDk)*60000))[0];
+    const bitti=new Date(son.baslangic).getTime()+num(son.sureDk)*60000<=nowT;
+    if(bitti && !son.tablaAlindi) toplanacak.push({makine:mk,is:son}); });
   const tablaUc=tablaUcret!=null?num(tablaUcret):5;
   const tablaKazanc=(hareketler||[]).filter(x=>x.tip==="tabla").reduce((s,x)=>s+num(x.tutar),0);
   // rezervasyon (30 dk) — üstlenen kişiye kilitlenir, başkasına verilmez
@@ -2824,12 +2824,11 @@ function App(){
           mlist.length===0 ? h("div",{style:{padding:20,color:C.mut,textAlign:"center"}},"Makine yok. ⚙ Makineler'den ekle.")
           : mlist.map(mk=>{
               const tl = timelines[mk.id] || { js:[], bos:[] };
-              // tabla uyarısı: bir baskı bitmiş ama makinede çalışan/başlamış sonraki iş yok → tablayı topla
-              const mjobs = plan.filter(p=>p.makineId===mk.id);
-              const calisan = mjobs.some(p=>p.basladi && new Date(p.baslangic).getTime()<=now && new Date(p.baslangic).getTime()+num(p.sureDk)*60000>now);
-              const tablaIs = calisan ? null : mjobs
-                .filter(p=>p.basladi && !p.tablaAlindi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=now)
-                .sort((a,b)=>(new Date(b.baslangic).getTime()+num(b.sureDk)*60000)-(new Date(a.baslangic).getTime()+num(a.sureDk)*60000))[0] || null;
+              // tabla uyarısı: makinenin EN SON başlayan baskısı bitmiş ve toplanmamışsa → tablayı topla.
+              // (Sadece en son baskıya bakılır; toplanınca eski/bayat baskılar tekrar ortaya çıkmaz.)
+              const mjobs = plan.filter(p=>p.makineId===mk.id && p.basladi);
+              const sonBaski = mjobs.slice().sort((a,b)=>(new Date(b.baslangic).getTime()+num(b.sureDk)*60000)-(new Date(a.baslangic).getTime()+num(a.sureDk)*60000))[0] || null;
+              const tablaIs = (sonBaski && !sonBaski.tablaAlindi && new Date(sonBaski.baslangic).getTime()+num(sonBaski.sureDk)*60000<=now) ? sonBaski : null;
               return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+C.line,minHeight:ROW_H}},
                 h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 10px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+C.line,display:"flex",flexDirection:"column",justifyContent:"center"}},
                   h("div",{style:{fontWeight:800,fontSize:14}},mk.ad),
