@@ -1916,7 +1916,8 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [duzen,setDuzen]=useState(null);      // ürün görsel/bilgi
   const [musEdit,setMusEdit]=useState(null);  // müşteri (kale) ekle/düzenle
   const [arsivAcik,setArsivAcik]=useState(false);
-  const [rapMod,setRapMod]=useState("hafta"); const [rapBas,setRapBas]=useState(""); const [rapBit,setRapBit]=useState("");
+  const [rapMod,setRapMod]=useState("gun"); const [rapBas,setRapBas]=useState(""); const [rapBit,setRapBit]=useState("");
+  const [rapTarih,setRapTarih]=useState(()=>{ const d=new Date(); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); });
   // —— KAPSAM: admin her şeyi görür; pazarlamacı yalnız kendi verisini (harita hariç) ——
   const adminGor = !!(aktif && aktif.rol==="admin");
   const _tumHar=hareketler||[], _tumMus=musteriler||[], _tumSef=seferler||[];
@@ -2389,66 +2390,74 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
 
   // —— 📊 RAPORLAR ——
   const kaleKeyR=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"").toLocaleLowerCase("tr")));
-  const raporVeri=()=>{ const now=Date.now(); let rb,re,baslik;
-    if(rapMod==="gun"){ rb=gunBasi(now).getTime(); re=now; baslik="Bugün ("+fmtTarih(now)+")"; }
-    else if(rapMod==="hafta"){ rb=haftaBasi(now).getTime(); re=now; baslik="Bu hafta"; }
-    else if(rapMod==="ay"){ rb=ayBasi(now); re=now; baslik="Bu ay"; }
-    else { rb=rapBas?new Date(rapBas+"T00:00:00").getTime():0; re=rapBit?new Date(rapBit+"T23:59:59").getTime():now; baslik=(rapBas||"…")+" – "+(rapBit||"bugün"); }
+  const raporVeri=()=>{ const bd=rapTarih?new Date(rapTarih+"T00:00:00"):new Date(); const g0=gunBasi(bd).getTime(); const G=864e5; let rb,re,baslik;
+    if(rapMod==="gun"){ rb=g0; re=g0+G-1; baslik=fmtTarih(rb)+"."+bd.getFullYear()+" — Günlük"; }
+    else if(rapMod==="hafta"){ rb=g0; re=g0+7*G-1; baslik=fmtTarih(rb)+" – "+fmtTarih(re)+" — 7 günlük"; }
+    else if(rapMod==="ay"){ rb=g0; re=g0+30*G-1; baslik=fmtTarih(rb)+" – "+fmtTarih(re)+" — 30 günlük"; }
+    else { rb=rapBas?new Date(rapBas+"T00:00:00").getTime():0; re=rapBit?new Date(rapBit+"T23:59:59").getTime():Date.now(); baslik=(rapBas||"…")+" – "+(rapBit||"bugün")+" — Özel"; }
     const rHar=(hareketler||[]).filter(x=>{ const t=new Date(x.tarih).getTime(); return t>=rb&&t<=re; });
-    const rSatis=rHar.filter(x=>x.tip==="satis");
-    const satUrun={}; rSatis.forEach(x=>{ const k=x.urunAd||"?"; const o=satUrun[k]||(satUrun[k]={adet:0,ciro:0}); o.adet+=num(x.adet); o.ciro+=num(x.adet)*num(x.satisFiyat); });
-    const acikKons=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0);
-    const akU={}; acikKons.forEach(x=>{ const k=x.urunAd||"?"; const o=akU[k]||(akU[k]={kalan:0,yer:new Set()}); o.kalan+=num(x.kalan); o.yer.add(kaleKeyR(x)); });
-    const rStS=rHar.filter(x=>x.tip==="stant"&&x.mod==="satis");
-    return { baslik,
-      rSatAdet:rSatis.reduce((s,x)=>s+num(x.adet),0),
-      rCiro:rSatis.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0),
-      rMarj:rSatis.reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0),
-      rKonsAdet:rHar.filter(x=>x.tip==="konsinye").reduce((s,x)=>s+num(x.adet),0),
-      rIadeAdet:rHar.filter(x=>x.tip==="iade").reduce((s,x)=>s+num(x.adet),0),
-      rStH:rHar.filter(x=>x.tip==="stant"&&x.mod!=="satis").length, rStS:rStS.length, rStSGelir:rStS.reduce((s,x)=>s+num(x.fiyat),0),
-      rTahsil:rHar.filter(x=>x.tip==="tahsilat").reduce((s,x)=>s+num(x.tutar),0),
-      rAvans:rHar.filter(x=>x.tip==="avans").reduce((s,x)=>s+num(x.tutar),0),
-      rMekan:new Set(rHar.filter(x=>["satis","konsinye","stant","iade","tahsilat","avans"].includes(x.tip)).map(kaleKeyR)).size,
-      satUrunL:Object.entries(satUrun).map(([ad,o])=>({ad,adet:o.adet,ciro:o.ciro})).sort((a,b)=>b.ciro-a.ciro),
-      acikKonsYer:new Set(acikKons.map(kaleKeyR)).size, acikKonsAdetT:acikKons.reduce((s,x)=>s+num(x.kalan),0),
-      acikKonsUrunL:Object.entries(akU).map(([ad,o])=>({ad,kalan:o.kalan,yer:o.yer.size})).sort((a,b)=>b.kalan-a.kalan),
-      netAlacak:alacakGenel, kisi:(aktif?aktif.ad:"") }; };
+    const mk=x=>x.yer||"?";
+    const konsList=rHar.filter(x=>x.tip==="konsinye").map(x=>({mekan:mk(x),urun:x.urunAd||"?",adet:num(x.adet),fiyat:num(x.satisFiyat),tutar:num(x.adet)*num(x.satisFiyat)})).sort((a,b)=>a.mekan.localeCompare(b.mekan,"tr"));
+    const satList=rHar.filter(x=>x.tip==="satis").map(x=>({mekan:mk(x),urun:x.urunAd||"?",adet:num(x.adet),fiyat:num(x.satisFiyat),tutar:num(x.adet)*num(x.satisFiyat),alis:num(x.alisFiyat)})).sort((a,b)=>a.mekan.localeCompare(b.mekan,"tr"));
+    const tahList=rHar.filter(x=>x.tip==="tahsilat").map(x=>({mekan:mk(x),tutar:num(x.tutar)}));
+    const avansList=rHar.filter(x=>x.tip==="avans").map(x=>({mekan:mk(x),tutar:num(x.tutar)}));
+    const mekMap={}; rHar.filter(x=>["satis","konsinye","tahsilat","avans","stant"].includes(x.tip)).forEach(x=>{ const k=mk(x); const o=mekMap[k]||(mekMap[k]={mekan:k,kons:0,sat:0,satT:0,tah:0});
+      if(x.tip==="konsinye")o.kons+=num(x.adet); else if(x.tip==="satis"){o.sat+=num(x.adet);o.satT+=num(x.adet)*num(x.satisFiyat);} else if(x.tip==="tahsilat")o.tah+=num(x.tutar); });
+    const mekanlar=Object.values(mekMap).sort((a,b)=>b.satT-a.satT);
+    const konsAdet=konsList.reduce((s,r)=>s+r.adet,0), konsTutar=konsList.reduce((s,r)=>s+r.tutar,0);
+    const satAdet=satList.reduce((s,r)=>s+r.adet,0), satTutar=satList.reduce((s,r)=>s+r.tutar,0);
+    const tahToplam=tahList.reduce((s,r)=>s+r.tutar,0), avansT=avansList.reduce((s,r)=>s+r.tutar,0);
+    const ureticiBorc=satList.reduce((s,r)=>s+r.adet*r.alis,0);   // pazarlamacının üreticiye ödeyeceği (satılan malın alış bedeli)
+    const marj=satTutar-ureticiBorc;
+    return { baslik,konsList,satList,tahList,avansList,mekanlar, konsAdet,konsTutar,satAdet,satTutar,tahToplam,avansT,ureticiBorc,marj, mekanSayi:mekanlar.length, netAlacak:alacakGenel, kisi:(aktif?aktif.ad:"") }; };
   const raporMetin=v=>{ const L=[];
-    L.push("📊 PAZARLAMA RAPORU — "+v.baslik); if(v.kisi) L.push("👤 "+v.kisi); L.push("");
-    L.push("💰 Satış: "+v.rSatAdet+" adet · ciro "+tl(v.rCiro)+" · marj "+tl(v.rMarj));
-    L.push("🏬 Konsinye bırakılan: "+v.rKonsAdet+" adet");
-    if(v.rIadeAdet) L.push("↩ İade: "+v.rIadeAdet+" adet");
-    if(v.rStH||v.rStS) L.push("🎪 Stant: "+v.rStH+" hediye · "+v.rStS+" satış ("+tl(v.rStSGelir)+")");
-    if(v.rTahsil) L.push("🧾 Tahsilat: "+tl(v.rTahsil));
-    if(v.rAvans) L.push("💳 Avans (önden): "+tl(v.rAvans));
-    L.push("📍 İşlem yapılan mekan: "+v.rMekan);
-    L.push((v.netAlacak>=0?"💵 Net alacak: ":"💳 Net avans/kredi: ")+tl(Math.abs(v.netAlacak)));
-    L.push(""); L.push("🛒 Satılan ürünler:");
-    v.satUrunL.forEach(u=>L.push("  • "+u.ad+": "+u.adet+" adet · "+tl(u.ciro))); if(!v.satUrunL.length) L.push("  (yok)");
-    L.push(""); L.push("🏬 Güncel açık konsinye: "+v.acikKonsYer+" mekan · "+v.acikKonsAdetT+" adet");
-    v.acikKonsUrunL.forEach(u=>L.push("  • "+u.ad+": "+u.kalan+" adet ("+u.yer+" mekan)"));
+    L.push("📊 PAZARLAMA RAPORU"); L.push(v.baslik); if(v.kisi) L.push("👤 "+v.kisi); L.push("");
+    L.push("📈 ÖZET");
+    L.push("• Uğranılan mekan: "+v.mekanSayi);
+    L.push("• Konsinye bırakılan: "+v.konsAdet+" adet · "+tl(v.konsTutar));
+    L.push("• Satış: "+v.satAdet+" adet · "+tl(v.satTutar));
+    L.push("• Tahsilat: "+tl(v.tahToplam)+(v.avansT?(" · avans "+tl(v.avansT)):""));
+    L.push("• Üreticiye ödenecek: "+tl(v.ureticiBorc));
+    L.push("• Marj (kâr): "+tl(v.marj));
+    L.push("• Net alacak (güncel): "+tl(v.netAlacak));
+    L.push(""); L.push("🏬 KONSİNYE BIRAKILANLAR");
+    if(!v.konsList.length) L.push("  (yok)"); else v.konsList.forEach(r=>L.push("• "+r.mekan+" — "+r.urun+" ×"+r.adet+" @"+tl(r.fiyat)+" = "+tl(r.tutar)));
+    L.push(""); L.push("💰 SATIŞLAR");
+    if(!v.satList.length) L.push("  (yok)"); else v.satList.forEach(r=>L.push("• "+r.mekan+" — "+r.urun+" ×"+r.adet+" @"+tl(r.fiyat)+" = "+tl(r.tutar)));
+    if(v.tahList.length){ L.push(""); L.push("🧾 TAHSİLATLAR"); v.tahList.forEach(r=>L.push("• "+r.mekan+" — "+tl(r.tutar))); }
     return L.join("\n"); };
-  const raporHTML=v=>{ const row=(a,b)=>"<tr><td>"+a+"</td><td style='text-align:right;font-weight:700'>"+b+"</td></tr>";
-    return "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Pazarlama Raporu</title><style>body{font-family:system-ui,Arial;padding:22px;color:#0f172a}h1{font-size:20px;margin:0}h2{font-size:14px;margin:18px 0 6px;border-bottom:2px solid #eee;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-size:13px}td{padding:5px 6px;border-bottom:1px solid #f1f5f9}.sub{color:#64748b;font-size:12px;margin-top:4px}</style></head><body>"
+  const raporHTML=v=>{
+    const th=cols=>"<tr>"+cols.map((c,i)=>"<th style='text-align:"+(i?"right":"left")+";padding:5px 7px;border-bottom:2px solid #e5e7eb;font-size:11px;color:#64748b'>"+c+"</th>").join("")+"</tr>";
+    const tr=cells=>"<tr>"+cells.map((c,i)=>"<td style='text-align:"+(i?"right":"left")+";padding:5px 7px;border-bottom:1px solid #f1f5f9'>"+c+"</td>").join("")+"</tr>";
+    const tbl=(cols,rows,foot)=>"<table style='width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px'>"+th(cols)+(rows.length?rows.join(""):tr(["(yok)"]))+(foot||"")+"</table>";
+    const ozet="<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+      +tr(["Uğranılan mekan",v.mekanSayi])+tr(["Konsinye bırakılan",v.konsAdet+" adet · "+tl(v.konsTutar)])
+      +tr(["Satış",v.satAdet+" adet · "+tl(v.satTutar)])+tr(["Tahsilat",tl(v.tahToplam)+(v.avansT?(" · avans "+tl(v.avansT)):"")])
+      +tr(["<b>Üreticiye ödenecek</b>","<b>"+tl(v.ureticiBorc)+"</b>"])+tr(["Marj (kâr)",tl(v.marj)])
+      +tr([v.netAlacak>=0?"Net alacak (güncel)":"Net avans (güncel)",tl(Math.abs(v.netAlacak))])+"</table>";
+    return "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Pazarlama Raporu</title><style>body{font-family:system-ui,Arial;padding:20px;color:#0f172a}h1{font-size:19px;margin:0}h2{font-size:14px;margin:16px 0 6px}.sub{color:#64748b;font-size:12px;margin:3px 0 10px}</style></head><body>"
       +"<h1>📊 Pazarlama Raporu</h1><div class=sub>"+v.baslik+(v.kisi?(" · "+v.kisi):"")+"</div>"
-      +"<h2>Özet</h2><table>"+row("💰 Satış",v.rSatAdet+" adet")+row("Ciro",tl(v.rCiro))+row("Marj",tl(v.rMarj))
-      +row("🏬 Konsinye bırakılan",v.rKonsAdet+" adet")+(v.rIadeAdet?row("↩ İade",v.rIadeAdet+" adet"):"")
-      +row("🎪 Stant",v.rStH+" hediye · "+v.rStS+" satış ("+tl(v.rStSGelir)+")")
-      +(v.rTahsil?row("🧾 Tahsilat",tl(v.rTahsil)):"")+(v.rAvans?row("💳 Avans",tl(v.rAvans)):"")
-      +row("📍 İşlem yapılan mekan",v.rMekan)+row(v.netAlacak>=0?"💵 Net alacak":"💳 Net avans/kredi",tl(Math.abs(v.netAlacak)))+"</table>"
-      +"<h2>Satılan ürünler</h2><table>"+(v.satUrunL.map(u=>row(u.ad,u.adet+" adet · "+tl(u.ciro))).join("")||"<tr><td>(yok)</td></tr>")+"</table>"
-      +"<h2>Güncel açık konsinye — "+v.acikKonsYer+" mekan · "+v.acikKonsAdetT+" adet</h2><table>"+(v.acikKonsUrunL.map(u=>row(u.ad,u.kalan+" adet · "+u.yer+" mekan")).join("")||"<tr><td>(yok)</td></tr>")+"</table>"
-      +"<div class=sub style='margin-top:22px'>Tikita · rapor</div></body></html>"; };
+      +"<h2>Özet</h2>"+ozet
+      +"<h2>Konsinye bırakılanlar</h2>"+tbl(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.konsList.map(r=>tr([r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)])), v.konsList.length?tr(["<b>Toplam</b>","","<b>"+v.konsAdet+"</b>","","<b>"+tl(v.konsTutar)+"</b>"]):"")
+      +"<h2>Satışlar</h2>"+tbl(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.satList.map(r=>tr([r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)])), v.satList.length?tr(["<b>Toplam</b>","","<b>"+v.satAdet+"</b>","","<b>"+tl(v.satTutar)+"</b>"]):"")
+      +"<h2>Tahsilatlar</h2>"+tbl(["Mekan","Tutar"], v.tahList.map(r=>tr([r.mekan,tl(r.tutar)])), v.tahList.length?tr(["<b>Toplam</b>","<b>"+tl(v.tahToplam)+"</b>"]):"")
+      +"<div class=sub style='margin-top:18px'>Tikita · rapor</div></body></html>"; };
   const raporPDF=v=>{ const w=window.open("","_blank"); if(!w) return alert("Açılır pencere engellendi — tarayıcı izni ver."); w.document.write(raporHTML(v)); w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },500); };
   const raporWA=v=>{ const t=raporMetin(v); if(navigator.share){ navigator.share({text:t}).catch(()=>{}); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
   const rIstat=(ad,deg,renk)=>h("div",{style:{background:"#f8fafc",borderRadius:9,padding:"8px 10px"}},
     h("div",{style:{fontSize:10.5,color:C.mut,fontWeight:700}},ad), h("div",{style:{fontSize:15,fontWeight:800,color:renk}},deg));
+  const rTablo=(cols,rows)=>h("div",{style:{overflowX:"auto"}}, h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12.5,minWidth:280}},
+    h("thead",null,h("tr",null,cols.map((c,i)=>h("th",{key:i,style:{textAlign:i?"right":"left",padding:"5px 7px",borderBottom:"2px solid "+C.line,color:C.mut,fontSize:11,whiteSpace:"nowrap"}},c)))),
+    h("tbody",null, rows.length ? rows.map((r,ri)=>h("tr",{key:ri}, r.map((cell,ci)=>h("td",{key:ci,style:{textAlign:ci?"right":"left",padding:"5px 7px",borderBottom:"1px solid #f1f5f9",whiteSpace:"nowrap"}},cell))))
+      : h("tr",null,h("td",{style:{padding:"8px",color:C.mut}},"(yok)")))));
   const raporView=()=>{ const v=raporVeri();
     return h("div",null,
-      h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"📊 Raporlar — dönem seç, istatistikleri gör, PDF indir veya WhatsApp'tan paylaş."),
+      h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"📊 Raporlar — tarih + dönem seç, PDF indir ya da WhatsApp'tan gönder. (Çantaya al/iade dahil değildir.)"),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8,alignItems:"center"}},
+        h("span",{style:{fontSize:12.5,fontWeight:700}},"Tarih:"),
+        h("input",{type:"date",style:{...S.input,width:160},value:rapTarih,onChange:e=>setRapTarih(e.target.value)})),
       h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}},
-        [["gun","Günlük"],["hafta","Haftalık"],["ay","Aylık"],["ozel","Özel tarih"]].map(([k,ad])=>
+        [["gun","Günlük"],["hafta","7 Günlük"],["ay","30 Günlük"],["ozel","Özel aralık"]].map(([k,ad])=>
           h("button",{key:k,type:"button",onClick:()=>setRapMod(k),style:{...S.btn(rapMod===k?"p":""),padding:"8px 14px",fontWeight:700}},ad))),
       rapMod==="ozel" && h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,alignItems:"center"}},
         h("input",{type:"date",style:{...S.input,width:150},value:rapBas,onChange:e=>setRapBas(e.target.value)}),
@@ -2458,23 +2467,24 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         h("button",{style:{...S.btn("p"),flex:"1 1 150px"},onClick:()=>raporPDF(v)},"📄 PDF indir"),
         h("button",{style:{...S.btn(),flex:"1 1 150px",borderColor:"#16a34a",color:"#16a34a",fontWeight:800},onClick:()=>raporWA(v)},"📲 WhatsApp'tan gönder")),
       h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12}},
-        h("div",{style:{...S.label,marginBottom:8}},"📅 "+v.baslik+" — özet"),
-        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}},
-          rIstat("💰 Satış",v.rSatAdet+" adet","#047857"), rIstat("Ciro",tl(v.rCiro),"#047857"), rIstat("Marj",tl(v.rMarj),"#047857"),
-          rIstat("🏬 Konsinye",v.rKonsAdet+" adet","#7c3aed"), rIstat("↩ İade",v.rIadeAdet+" adet","#b45309"),
-          rIstat("🎪 Stant",(v.rStH+v.rStS)+" ("+tl(v.rStSGelir)+")","#9333ea"),
-          rIstat("🧾 Tahsilat",tl(v.rTahsil),"#b91c1c"), rIstat("💳 Avans",tl(v.rAvans),"#0369a1"),
-          rIstat("📍 Mekan",v.rMekan+"","#0369a1"), rIstat(v.netAlacak>=0?"💵 Net alacak":"💳 Net avans",tl(Math.abs(v.netAlacak)),v.netAlacak>=0?"#b91c1c":"#0369a1"))),
+        h("div",{style:{...S.label,marginBottom:8}},"📅 "+v.baslik),
+        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:8}},
+          rIstat("📍 Uğranılan mekan",v.mekanSayi+"","#0369a1"),
+          rIstat("🏬 Konsinye",v.konsAdet+" ad · "+tl(v.konsTutar),"#7c3aed"),
+          rIstat("💰 Satış",v.satAdet+" ad · "+tl(v.satTutar),"#047857"),
+          rIstat("🧾 Tahsilat",tl(v.tahToplam),"#b91c1c"),
+          rIstat("🏭 Üreticiye ödenecek",tl(v.ureticiBorc),"#b45309"),
+          rIstat("📈 Marj (kârın)",tl(v.marj),"#047857"),
+          rIstat(v.netAlacak>=0?"💵 Net alacak":"💳 Net avans",tl(Math.abs(v.netAlacak)),v.netAlacak>=0?"#b91c1c":"#0369a1"))),
       h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12}},
-        h("div",{style:{...S.label,marginBottom:6}},"🛒 Satılan ürünler ("+v.baslik+")"),
-        !v.satUrunL.length ? h("div",{style:{fontSize:12.5,color:C.mut}},"Bu dönemde satış yok.")
-        : v.satUrunL.map((u,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:13}},
-            h("span",{style:{fontWeight:700}},u.ad), h("span",null,u.adet+" adet · "+tl(u.ciro))))),
+        h("div",{style:{...S.label,marginBottom:6}},"🏬 Konsinye bırakılanlar"),
+        rTablo(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.konsList.map(r=>[r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)]))),
+      h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12}},
+        h("div",{style:{...S.label,marginBottom:6}},"💰 Satışlar"),
+        rTablo(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.satList.map(r=>[r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)]))),
       h("div",{style:{...S.card,padding:"12px 14px"}},
-        h("div",{style:{...S.label,marginBottom:6}},"🏬 Güncel açık konsinye — "+v.acikKonsYer+" mekan · "+v.acikKonsAdetT+" adet"),
-        !v.acikKonsUrunL.length ? h("div",{style:{fontSize:12.5,color:C.mut}},"Açık konsinye yok.")
-        : v.acikKonsUrunL.map((u,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:13}},
-            h("span",{style:{fontWeight:700}},u.ad), h("span",null,u.kalan+" adet · "+u.yer+" mekan"))))); };
+        h("div",{style:{...S.label,marginBottom:6}},"🧾 Tahsilatlar"),
+        rTablo(["Mekan","Tutar"], v.tahList.map(r=>[r.mekan,tl(r.tutar)])))); };
 
   const viewMap={komuta:fetihView,rapor:raporView,cephane:cephaneView,kale:kaleView,gozcu:gozcuView};
   return h("div",null,
