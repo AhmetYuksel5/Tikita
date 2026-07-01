@@ -44,7 +44,7 @@
 <div id="root"></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, increment, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const cfg = {
   apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",
@@ -2302,15 +2302,25 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   // —— 🎒 CEPHANE (ürün kartları) ——
   // 🧹 toplanacak tablalar — bitmiş ama toplanmamış baskılar (görev + ücret)
   const nowT=Date.now();
+  // her makine için SADECE güncel (en son biten, toplanmamış) tabla
   const toplanacak=[]; (makineler||[]).forEach(mk=>{ const mjobs=(plan||[]).filter(p=>p.makineId===mk.id);
     const calisan=mjobs.some(p=>p.basladi && new Date(p.baslangic).getTime()<=nowT && new Date(p.baslangic).getTime()+num(p.sureDk)*60000>nowT);
     if(calisan) return;
-    mjobs.filter(p=>p.basladi && !p.tablaAlindi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=nowT).forEach(p=>toplanacak.push({makine:mk,is:p})); });
+    const son=mjobs.filter(p=>p.basladi && !p.tablaAlindi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=nowT)
+      .sort((a,b)=>(new Date(b.baslangic).getTime()+num(b.sureDk)*60000)-(new Date(a.baslangic).getTime()+num(a.sureDk)*60000))[0];
+    if(son) toplanacak.push({makine:mk,is:son}); });
   const tablaUc=tablaUcret!=null?num(tablaUcret):5;
   const tablaKazanc=(hareketler||[]).filter(x=>x.tip==="tabla").reduce((s,x)=>s+num(x.tutar),0);
-  async function tablaTopla(t){ if(!confirm(t.makine.ad+" — "+(t.is.ad||"baskı")+" tablası toplandı mı?\nUcret: "+tl(tablaUc))) return;
-    await save("plan",{id:t.is.id,tablaAlindi:true});
-    await harKaydet({tip:"tabla",tutar:tablaUc,urunAd:t.is.ad||"Tabla",tarih:new Date().toISOString()}); }
+  // çoklu kullanıcı çakışmasını önle: atomik topla — aynı tabla iki kez ücretlenmez
+  async function tablaTopla(t){ if(!confirm(t.makine.ad+" — "+(t.is.ad||"baskı")+" tablası toplandı mı?\nÜcret: "+tl(tablaUc))) return;
+    const ref=doc(db,"plan",t.is.id);
+    try{ await runTransaction(db, async(tx)=>{ const snap=await tx.get(ref);
+        if(!snap.exists()) throw new Error("yok");
+        if(snap.data().tablaAlindi) throw new Error("alindi");
+        tx.set(ref,{tablaAlindi:true,tablaAlanId:(AKTIF_KUL?AKTIF_KUL.id:""),tablaAlanAd:(AKTIF_KUL?AKTIF_KUL.ad:"")},{merge:true}); }); }
+    catch(e){ if(String(e.message||e)==="alindi") return alert("⚠ Bu tablayı az önce başka biri topladı."); return alert("Toplanamadı, tekrar dene."); }
+    await harKaydet({tip:"tabla",tutar:tablaUc,urunAd:t.is.ad||"Tabla",tarih:new Date().toISOString()});
+    alert("🧹 Toplandı · +"+tl(tablaUc)); }
   const cephaneView=()=>h("div",null,
     // toplanacak tablalar (görev)
     toplanacak.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12,border:"1px solid #fb8c00",background:"#fff8ef"}},
