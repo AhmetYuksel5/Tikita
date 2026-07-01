@@ -2639,6 +2639,187 @@ function EkipModal({ kullanicilar, aktif, tablaUcret, onKapat }){
 }
 
 /* ============================================================
+   📊 PAZARLAMA TAKİP — admin izleme paneli (pazarlamacı sayfasından bağımsız)
+   Pazarlamacıların hareketleri, satış/konsinye, ürün yerleri, müşteriler,
+   günlük/haftalık/aylık performans, alacak/verecek — tek yerde.
+   ============================================================ */
+function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferler }){
+  const [alt,setAlt]=useState("ozet");
+  const [rapMod,setRapMod]=useState("ay");
+  const [rapTarih,setRapTarih]=useState(()=>new Date().toISOString().slice(0,10));
+  const [rapBas,setRapBas]=useState("");
+  const [rapBit,setRapBit]=useState("");
+  const [seciliPaz,setSeciliPaz]=useState("");   // hareket dökümü filtresi
+  const [hTip,setHTip]=useState("");
+
+  const H=(hareketler||[]);
+  const G=864e5;
+  const pazarlamacilar=(kullanicilar||[]).filter(u=>u.rol!=="admin").slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const kulAd=id=>{ const u=(kullanicilar||[]).find(x=>x.id===id); return u?u.ad:(id?"?":"—"); };
+  const harAlacak=x=>{ if(x.tip!=="satis")return 0; const bek=num(x.adet)*num(x.satisFiyat); const t=x.tahsil==null?bek:num(x.tahsil); return Math.max(0,bek-t); };
+
+  // —— dönem aralığı ——
+  const bd=rapTarih?new Date(rapTarih+"T00:00:00"):new Date();
+  const g0=gunBasi(bd).getTime();
+  let rb,re,donemAd;
+  if(rapMod==="gun"){ rb=g0; re=g0+G-1; donemAd=fmtTarih(rb)+"."+bd.getFullYear()+" · Günlük"; }
+  else if(rapMod==="hafta"){ rb=g0; re=g0+7*G-1; donemAd=fmtTarih(rb)+" – "+fmtTarih(re)+" · Haftalık"; }
+  else if(rapMod==="ay"){ rb=g0; re=g0+30*G-1; donemAd=fmtTarih(rb)+" – "+fmtTarih(re)+" · Aylık"; }
+  else { rb=rapBas?new Date(rapBas+"T00:00:00").getTime():0; re=rapBit?new Date(rapBit+"T23:59:59").getTime():Date.now(); donemAd=(rapBas||"…")+" – "+(rapBit||"bugün")+" · Özel"; }
+  const pHar=H.filter(x=>{ const t=new Date(x.tarih).getTime(); return t>=rb&&t<=re; });
+
+  // —— pazarlamacı bazlı dönem performansı ——
+  const pazPerf=pazarlamacilar.map(u=>{ const hs=pHar.filter(x=>x.kullaniciId===u.id);
+    const sat=hs.filter(x=>x.tip==="satis"), kons=hs.filter(x=>x.tip==="konsinye");
+    const satAdet=sat.reduce((s,x)=>s+num(x.adet),0);
+    const satTutar=sat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+    const konsAdet=kons.reduce((s,x)=>s+num(x.adet),0);
+    const konsTutar=kons.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+    const tah=hs.filter(x=>x.tip==="tahsilat").reduce((s,x)=>s+num(x.tutar),0);
+    const avans=hs.filter(x=>x.tip==="avans").reduce((s,x)=>s+num(x.tutar),0);
+    const ureticiBorc=sat.reduce((s,x)=>s+num(x.adet)*num(x.alisFiyat),0);
+    const marj=satTutar-ureticiBorc;
+    const mek=new Set(hs.filter(x=>["satis","konsinye","tahsilat","avans","stant"].includes(x.tip)).map(x=>x.yer||"?")); mek.delete("?");
+    const tabla=hs.filter(x=>x.tip==="tabla").length;
+    return {u,satAdet,satTutar,konsAdet,konsTutar,tah,avans,ureticiBorc,marj,mekan:mek.size,tabla}; })
+    .sort((a,b)=>b.satTutar-a.satTutar);
+  const T={satAdet:0,satTutar:0,konsAdet:0,konsTutar:0,tah:0,avans:0,ureticiBorc:0,marj:0};
+  pazPerf.forEach(p=>{ T.satAdet+=p.satAdet;T.satTutar+=p.satTutar;T.konsAdet+=p.konsAdet;T.konsTutar+=p.konsTutar;T.tah+=p.tah;T.avans+=p.avans;T.ureticiBorc+=p.ureticiBorc;T.marj+=p.marj; });
+  const aktifMekan=new Set(pHar.filter(x=>["satis","konsinye","tahsilat","stant"].includes(x.tip)).map(x=>x.yer||"?")); aktifMekan.delete("?");
+  const aktifPaz=pazPerf.filter(p=>p.satAdet||p.konsAdet||p.tah||p.mekan).length;
+
+  // —— açık konsinyeler (tüm zaman, kalan>0) — ürünlerin sahadaki yerleri ——
+  const acikKons=H.filter(x=>x.tip==="konsinye" && num(x.kalan)>0)
+    .map(x=>({yer:x.yer||"?",urun:x.urunAd||"?",kalan:num(x.kalan),fiyat:num(x.satisFiyat),tutar:num(x.kalan)*num(x.satisFiyat),paz:x.kullaniciAd||kulAd(x.kullaniciId),tarih:x.tarih}))
+    .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+  const acikKonsAdet=acikKons.reduce((s,r)=>s+r.kalan,0), acikKonsTutar=acikKons.reduce((s,r)=>s+r.tutar,0);
+
+  // —— alacaklar: mekan/müşteri bazlı (borç − avans), tüm zaman ——
+  const alMap={};
+  H.forEach(x=>{ const borc=harAlacak(x); if(borc>0){ const k=x.yer||"?"; const o=alMap[k]||(alMap[k]={yer:k,borc:0,avans:0,paz:x.kullaniciAd||kulAd(x.kullaniciId)}); o.borc+=borc; } });
+  H.filter(x=>x.tip==="avans").forEach(x=>{ const k=x.yer||"?"; const o=alMap[k]||(alMap[k]={yer:k,borc:0,avans:0,paz:x.kullaniciAd||kulAd(x.kullaniciId)}); o.avans+=num(x.tutar); });
+  const alacaklar=Object.values(alMap).map(o=>({...o,net:o.borc-o.avans})).filter(o=>Math.abs(o.net)>0.5).sort((a,b)=>b.net-a.net);
+  const netAlacakTop=alacaklar.reduce((s,o)=>s+o.net,0);
+  // verecek: pazarlamacı → üretici (tüm zaman satılan malın alış bedeli)
+  const verecek=pazarlamacilar.map(u=>({u,borc:H.filter(x=>x.tip==="satis"&&x.kullaniciId===u.id).reduce((s,x)=>s+num(x.adet)*num(x.alisFiyat),0)})).filter(v=>v.borc>0.5).sort((a,b)=>b.borc-a.borc);
+
+  // —— müşteri bilgileri ——
+  const musBilgi=(musteriler||[]).filter(m=>!m.arsiv).map(m=>{ const hs=H.filter(x=>x.musteriId===m.id||x.yer===m.ad);
+    const satT=hs.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+    const konsA=hs.filter(x=>x.tip==="konsinye").reduce((s,x)=>s+num(x.kalan),0);
+    const son=hs.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih))[0];
+    const pazSet=new Set(hs.map(x=>x.kullaniciAd||kulAd(x.kullaniciId)).filter(v=>v&&v!=="—"&&v!=="?"));
+    return {m,satT,konsA,sonTarih:son?son.tarih:null,paz:Array.from(pazSet).join(", ")}; })
+    .sort((a,b)=>b.satT-a.satT);
+
+  // —— UI yardımcıları ——
+  const kart=(et,deg,alt2,renk)=>h("div",{style:{...S.card,padding:"12px 14px",borderLeft:"4px solid "+(renk||C.navyHdr)}},
+    h("div",{style:{fontSize:11,color:"#64748b",fontWeight:800,textTransform:"uppercase",letterSpacing:.3}},et),
+    h("div",{style:{fontSize:19,fontWeight:800,marginTop:3,color:renk||"#0f172a"}},deg),
+    alt2 && h("div",{style:{fontSize:11.5,color:"#64748b",marginTop:2}},alt2));
+  const Tablo=(cols,rows,bos)=> !rows.length
+    ? h("div",{style:{...S.card,padding:18,color:"#64748b",textAlign:"center"}}, bos||"Kayıt yok.")
+    : h("div",{style:{...S.card,overflowX:"auto"}},
+        h("table",{style:{width:"100%",borderCollapse:"collapse",minWidth:520}},
+          h("thead",null,h("tr",{style:{background:"#f8fafc"}}, cols.map((c,i)=>h("th",{key:i,style:{textAlign:(c&&c.r)?"right":"left",padding:"9px 11px",fontSize:11,color:"#475569",fontWeight:800,textTransform:"uppercase",letterSpacing:.3,borderBottom:"2px solid "+C.line,whiteSpace:"nowrap"}}, (c&&c.t)||c)))),
+          h("tbody",null, rows.map((r,ri)=>h("tr",{key:ri,style:{background:ri%2?"#fff":"#fcfdfe"}}, r.map((cell,ci)=>{ const c=cols[ci]||{};
+            return h("td",{key:ci,style:{padding:"8px 11px",fontSize:13,borderBottom:"1px solid #eef2f7",textAlign:c.r?"right":"left",whiteSpace:c.nowrap?"nowrap":"normal",fontWeight:c.b?700:400}}, cell); }))))));
+
+  const donemBar=h("div",{style:{...S.card,padding:"10px 12px",marginBottom:14}},
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}},
+      h("span",{style:{fontSize:12.5,fontWeight:800,color:"#334155"}},"📅 Dönem:"),
+      [["gun","Günlük"],["hafta","Haftalık"],["ay","Aylık"],["ozel","Özel"]].map(([k,ad])=>
+        h("button",{key:k,onClick:()=>setRapMod(k),style:{...S.btn(rapMod===k?"p":""),padding:"6px 12px",fontWeight:700,fontSize:12.5}},ad)),
+      rapMod!=="ozel" && h("input",{type:"date",style:{...S.input,width:150},value:rapTarih,onChange:e=>setRapTarih(e.target.value)}),
+      rapMod==="ozel" && h("input",{type:"date",style:{...S.input,width:140},value:rapBas,onChange:e=>setRapBas(e.target.value)}),
+      rapMod==="ozel" && h("span",{style:{color:"#64748b"}},"–"),
+      rapMod==="ozel" && h("input",{type:"date",style:{...S.input,width:140},value:rapBit,onChange:e=>setRapBit(e.target.value)}),
+      h("span",{style:{fontSize:12,color:"#64748b",marginLeft:"auto"}},donemAd)));
+
+  const tipEt={al:"🎒 Çanta al",satis:"💰 Satış",konsinye:"🏬 Konsinye",iade:"↩ İade",tahsilat:"🧾 Tahsilat",avans:"💳 Avans",stant:"🎪 Stant",tabla:"🧹 Tabla",diplomasi:"🤝 Diplomasi"};
+
+  const ozetView=()=>h("div",null,
+    h("div",{style:{display:"grid",gap:10,gridTemplateColumns:"repeat(auto-fill,minmax(158px,1fr))",marginBottom:14}},
+      kart("Satış",T.satAdet+" ad",tl(T.satTutar),"#047857"),
+      kart("Açık konsinye",acikKonsAdet+" ad",tl(acikKonsTutar),"#7c3aed"),
+      kart("Tahsilat",tl(T.tah),"dönem içi","#0369a1"),
+      kart("Marj (kâr)",tl(T.marj),"satış − alış","#047857"),
+      kart("Üreticiye borç",tl(T.ureticiBorc),"dönem satışları","#b45309"),
+      kart("Net alacak (güncel)",tl(netAlacakTop),"tüm açık borç","#b91c1c"),
+      kart("Aktif pazarlamacı",aktifPaz+" / "+pazarlamacilar.length,"dönemde iş yapan","#0f172a"),
+      kart("Uğranılan mekan",aktifMekan.size+"","dönem içi","#0369a1")),
+    h("div",{style:{...S.label,margin:"6px 2px 8px",color:"#334155"}},"🏅 Pazarlamacı performansı · "+donemAd),
+    Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"Konsinye",r:1},{t:"Tahsilat",r:1},{t:"Marj",r:1},{t:"Mekan",r:1}],
+      pazPerf.map(p=>[p.u.ad,p.satAdet+" ad",tl(p.satTutar),p.konsAdet+" ad",tl(p.tah),tl(p.marj),p.mekan+""]),
+      "Bu dönemde hareket yok."));
+
+  const pazView=()=>h("div",null,
+    Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"Kons. ad",r:1},{t:"Kons. ₺",r:1},{t:"Tahsilat",r:1},{t:"Avans",r:1},{t:"Üretici borç",r:1},{t:"Marj",r:1},{t:"Mekan",r:1},{t:"Tabla",r:1}],
+      pazPerf.map(p=>[
+        h("button",{onClick:()=>{setSeciliPaz(p.u.id);setHTip("");setAlt("hareket");},style:{background:"none",border:"none",color:"#0369a1",fontWeight:800,cursor:"pointer",padding:0,fontSize:13,textAlign:"left"}},(p.u.simge||"👤")+" "+p.u.ad+" ›"),
+        p.satAdet+"",tl(p.satTutar),p.konsAdet+"",tl(p.konsTutar),tl(p.tah),tl(p.avans),tl(p.ureticiBorc),tl(p.marj),p.mekan+"",p.tabla+""]),
+      "Bu dönemde hareket yok."),
+    h("div",{style:{fontSize:12,color:"#64748b",marginTop:8}},"👆 İsme dokun → o pazarlamacının hareket dökümü açılır."));
+
+  const konsView=()=>h("div",null,
+    h("div",{style:{display:"grid",gap:10,gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",marginBottom:12}},
+      kart("Açık konsinye",acikKonsAdet+" adet",tl(acikKonsTutar),"#7c3aed"),
+      kart("Ürün bulunan mekan",new Set(acikKons.map(r=>r.yer)).size+"","sahada duran","#0369a1")),
+    h("div",{style:{...S.label,margin:"4px 2px 8px",color:"#334155"}},"🏬 Şu an sahada duran konsinye ürünler — nerede, hangi ürün, kaç adet"),
+    Tablo([{t:"Mekan",b:1},"Ürün",{t:"Kalan",r:1},{t:"Fiyat",r:1},{t:"Tutar",r:1},"Pazarlamacı",{t:"Bırakılış",r:1,nowrap:1}],
+      acikKons.map(r=>[r.yer,r.urun,r.kalan+" ad",tl(r.fiyat),tl(r.tutar),r.paz,fmtTarih(r.tarih)]),
+      "Açık konsinye yok."));
+
+  const alacakView=()=>h("div",null,
+    h("div",{style:{display:"grid",gap:10,gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",marginBottom:12}},
+      kart("Net alacak",tl(netAlacakTop),"müşterilerden","#b91c1c"),
+      kart("Üreticiye toplam verecek",tl(verecek.reduce((s,v)=>s+v.borc,0)),"pazarlamacılardan","#b45309")),
+    h("div",{style:{...S.label,margin:"4px 2px 8px",color:"#334155"}},"💵 Müşteri alacakları (borç − avans)"),
+    Tablo([{t:"Mekan / Müşteri",b:1},"Pazarlamacı",{t:"Borç",r:1},{t:"Avans",r:1},{t:"Net",r:1}],
+      alacaklar.map(o=>[o.yer,o.paz,tl(o.borc),o.avans?("−"+tl(o.avans)):"—",h("b",{style:{color:o.net>=0?"#b91c1c":"#0369a1"}},(o.net>=0?"":"avans ")+tl(Math.abs(o.net)))]),
+      "Açık alacak yok."),
+    h("div",{style:{...S.label,margin:"18px 2px 8px",color:"#334155"}},"🏭 Pazarlamacı → üreticiye verecek (satılan malın alış bedeli)"),
+    Tablo([{t:"Pazarlamacı",b:1},{t:"Verecek",r:1}],
+      verecek.map(v=>[(v.u.simge||"👤")+" "+v.u.ad,tl(v.borc)]),
+      "Kayıt yok."));
+
+  const musView=()=>h("div",null,
+    h("div",{style:{...S.label,margin:"4px 2px 8px",color:"#334155"}},"🗺️ Müşteriler — "+musBilgi.length+" mekan"),
+    Tablo([{t:"Müşteri / Mekan",b:1},"Bölge",{t:"Top. satış",r:1},{t:"Açık kons.",r:1},"Pazarlamacı",{t:"Son işlem",r:1,nowrap:1},{t:"Konum",r:1}],
+      musBilgi.map(x=>[x.m.ad,x.m.bolge||"—",tl(x.satT),x.konsA?(x.konsA+" ad"):"—",x.paz||"—",x.sonTarih?fmtTarih(x.sonTarih):"—",
+        (x.m.lat&&x.m.lng)? h("a",{href:"https://www.google.com/maps/search/?api=1&query="+x.m.lat+","+x.m.lng,target:"_blank",style:{color:"#0369a1",fontWeight:800,textDecoration:"none"}},"🗺️"):"—"]),
+      "Müşteri yok."));
+
+  const hareketView=()=>{ const hLog=pHar.filter(x=>(!seciliPaz||x.kullaniciId===seciliPaz)&&(!hTip||x.tip===hTip)).slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+    return h("div",null,
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,alignItems:"center"}},
+        h("select",{style:{...S.input,width:200},value:seciliPaz,onChange:e=>setSeciliPaz(e.target.value)},
+          h("option",{value:""},"Tüm pazarlamacılar"), pazarlamacilar.map(u=>h("option",{key:u.id,value:u.id},u.ad))),
+        h("select",{style:{...S.input,width:170},value:hTip,onChange:e=>setHTip(e.target.value)},
+          h("option",{value:""},"Tüm işlemler"), Object.keys(tipEt).map(k=>h("option",{key:k,value:k},tipEt[k]))),
+        (seciliPaz||hTip) && h("button",{style:S.ibtn,onClick:()=>{setSeciliPaz("");setHTip("");}},"✕ Temizle"),
+        h("span",{style:{fontSize:12,color:"#64748b",marginLeft:"auto"}},hLog.length+" hareket")),
+      Tablo([{t:"Tarih",nowrap:1},"Pazarlamacı","İşlem","Ürün",{t:"Adet",r:1},"Mekan",{t:"Tutar",r:1}],
+        hLog.map(x=>{ const tutar = x.tip==="satis"||x.tip==="konsinye" ? num(x.adet)*num(x.satisFiyat) : (x.tutar!=null?num(x.tutar):(x.fiyat!=null?num(x.fiyat):0));
+          return [fmtTarihSaat(x.tarih),x.kullaniciAd||kulAd(x.kullaniciId),tipEt[x.tip]||x.tip,x.urunAd||"—",num(x.adet)?num(x.adet)+"":"—",x.yer||"—",tutar?tl(tutar):"—"]; }),
+        "Bu filtrede hareket yok.")); };
+
+  return h("div",null,
+    h("div",{style:{fontSize:20,fontWeight:800,color:C.navyHdr,marginBottom:3}},"📊 Pazarlama Takip"),
+    h("div",{style:{fontSize:12.5,color:"#64748b",marginBottom:14}},"Pazarlamacıların hareketleri, satış & konsinye, ürün yerleri, müşteriler, performans ve alacak/verecek — tek panelde."),
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
+      [["ozet","📊 Özet"],["paz","👥 Pazarlamacılar"],["kons","🏬 Konsinye"],["alacak","💰 Alacak / Verecek"],["mus","🗺️ Müşteriler"],["hareket","📜 Hareketler"]].map(([k,ad])=>
+        h("button",{key:k,onClick:()=>setAlt(k),style:{...S.btn(alt===k?"p":""),padding:"9px 15px",fontWeight:700,fontSize:13.5}},ad))),
+    ["ozet","paz","hareket"].includes(alt) && donemBar,
+    alt==="ozet" && ozetView(),
+    alt==="paz" && pazView(),
+    alt==="kons" && konsView(),
+    alt==="alacak" && alacakView(),
+    alt==="mus" && musView(),
+    alt==="hareket" && hareketView());
+}
+
+/* ============================================================
    APP
    ============================================================ */
 function App(){
@@ -2750,7 +2931,7 @@ function App(){
   if(!aktif) return h(GirisEkran,{kullanicilar,onGiris:giris});
   const isAdmin=aktif.rol==="admin";
   // pazarlamacı: üretim planını (Gantt) görür ama stok/maliyeti görmez
-  const navListe = isAdmin ? [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]] : [["pazarlama","🎒 Pazarlama"],["plan","🏭 Cephane Üretim"]];
+  const navListe = isAdmin ? [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","📊 Pazarlama Takip"]] : [["pazarlama","🎒 Pazarlama"],["plan","🏭 Cephane Üretim"]];
   const izin = navListe.map(x=>x[0]);
   const gorSekme = izin.includes(sekme) ? sekme : (isAdmin?"plan":"pazarlama");
 
@@ -2773,7 +2954,9 @@ function App(){
             gorSekme==="plan"?"← Pazarlama":"🏭 Cephane Üretim")),
     ekipAcik && h(EkipModal,{kullanicilar,aktif,tablaUcret,onKapat:()=>setEkipAcik(false)}),
     gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
-    gorSekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret}),
+    gorSekme==="pazarlama" && (isAdmin
+      ? h(PazarlamaTakip,{hareketler:pazHareket,musteriler,kullanicilar,urunler:stokUrun,seferler})
+      : h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret})),
     gorSekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
