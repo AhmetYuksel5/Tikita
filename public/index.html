@@ -1293,6 +1293,26 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     await harKaydet({tip:"diplomasi",musteriId:musteri.id||"",yer:musteri.ad||"",bolge:musteri.bolge||"",adet:seciliUrun.length,urunAdlar:seciliUrun.map(u=>u.ad).join(", "),tarih:new Date().toISOString()});
     setSec({}); alert("📨 Gönderildi — diplomatik ilişki kaydedildi! 🤝");
   }
+  // müşteriye hesap dökümü (hareketler + açık konsinye + bakiye) → WhatsApp
+  function musteriDokum(){ const tel=(musteri.telefon||"").replace(/\D/g,""); const L=[];
+    L.push("📋 "+(musteri.ad||"Müşteri")+" — Hesap Dökümü"); L.push(fmtTarih(Date.now())+"."+new Date().getFullYear()); L.push("");
+    if(burada.length){ L.push("🏬 Sizde açık konsinye:"); burada.forEach(p=>L.push("• "+p.urunAd+": "+p.kalan+" adet"+(p.satisFiyat>0?(" ("+tl(p.satisFiyat)+"/adet)"):""))); L.push(""); }
+    const gos=har.filter(x=>["satis","konsinye","iade","stant","tahsilat","avans"].includes(x.tip)).slice(0,25);
+    if(gos.length){ L.push("📜 Son hareketler:");
+      gos.forEach(x=>{ const t=tipBilgi[x.tip]||{i:"•"}; const tar=fmtTarih(new Date(x.tarih).getTime()); let s2="";
+        if(x.tip==="satis") s2=(x.urunAd||"")+" ×"+num(x.adet)+" — "+tl(num(x.adet)*num(x.satisFiyat));
+        else if(x.tip==="konsinye") s2=(x.urunAd||"")+" ×"+num(x.adet)+" (konsinye)";
+        else if(x.tip==="iade") s2=(x.urunAd||"")+" ×"+num(x.adet)+" (iade)";
+        else if(x.tip==="stant") s2="Stant"+(x.mod==="satis"?(" "+tl(num(x.fiyat))):" (hediye)");
+        else if(x.tip==="tahsilat") s2="Tahsilat +"+tl(num(x.tutar));
+        else if(x.tip==="avans") s2="Avans (önden) "+tl(num(x.tutar));
+        L.push("• "+tar+" "+t.i+" "+s2); }); L.push(""); }
+    if(alacakTop>0) L.push("💵 Bakiyeniz (borç): "+tl(alacakTop));
+    else if(alacakTop<0) L.push("💳 Alacağınız (avans): "+tl(-alacakTop));
+    else L.push("✅ Bakiye: 0 — borç yok");
+    const msg=L.join("\n");
+    if(navigator.share){ navigator.share({text:msg}).catch(()=>{}); return; }
+    window.open("https://wa.me/"+(tel?("9"+tel):"")+"?text="+encodeURIComponent(msg),"_blank"); }
   const sekmeBtn=(k,et)=>h("button",{type:"button",onClick:()=>setTab(k),
     style:{flex:1,padding:"8px 6px",borderRadius:9,border:"1px solid "+(tab===k?"#b45309":C.line),background:tab===k?"#b45309":"#fff",color:tab===k?"#fff":C.txt,fontWeight:800,fontSize:12.5,cursor:"pointer"}},et);
   return h(Modal,{ baslik:"⚔️ "+(musteri.ad||"Mevki"), onKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:onKapat},"Kapat") },
@@ -1313,6 +1333,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
       islemFormu(akn,setAkn,akinOnayla,false,"✓ İşlemi kaydet")),
     // ——— SEKME: HAREKETLER ———
     tab==="hareketler" && h("div",null,
+      h("button",{style:{...S.btn(),width:"100%",marginBottom:10,borderColor:"#16a34a",color:"#16a34a",fontWeight:800},onClick:musteriDokum},"📲 Dökümü müşteriye WhatsApp'tan gönder"),
       h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}},
         h("div",{style:{flex:"1 1 110px",background:"#ecfdf5",borderRadius:10,padding:"8px 10px"}},
           h("div",{style:{fontSize:10.5,color:"#047857",fontWeight:700}},"💰 Toplam satış"),
@@ -1895,6 +1916,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [duzen,setDuzen]=useState(null);      // ürün görsel/bilgi
   const [musEdit,setMusEdit]=useState(null);  // müşteri (kale) ekle/düzenle
   const [arsivAcik,setArsivAcik]=useState(false);
+  const [rapMod,setRapMod]=useState("hafta"); const [rapBas,setRapBas]=useState(""); const [rapBit,setRapBit]=useState("");
   // —— KAPSAM: admin her şeyi görür; pazarlamacı yalnız kendi verisini (harita hariç) ——
   const adminGor = !!(aktif && aktif.rol==="admin");
   const _tumHar=hareketler||[], _tumMus=musteriler||[], _tumSef=seferler||[];
@@ -2038,7 +2060,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
       if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:b,seferId:sid,tarih:iso}); }
     if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
 
-  const altlar=[["komuta","🏰 Komuta"],["cephane","🎒 Cephane"],["kale","🛡️ Kaleler"],["gozcu","🔭 Gözcü"]];
+  const altlar=[["komuta","🏰 Komuta"],["rapor","📊 Raporlar"],["cephane","🎒 Cephane"],["kale","🛡️ Kaleler"],["gozcu","🔭 Gözcü"]];
 
   // —— TASARIM 1: SEVİYE (RPG kahraman kartı) ——
   const heroKart=(renk,renk2,ikon,baslik,xp,statlar,rozetler)=>h("div",{style:{borderRadius:16,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
@@ -2365,7 +2387,96 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                 (m.lat&&m.lng)?h("a",{href:"https://www.google.com/maps/search/?api=1&query="+m.lat+","+m.lng,target:"_blank",style:{fontSize:12.5,fontWeight:700,color:"#0369a1",textDecoration:"none"}},"🗺️ Harita"):h("span",{style:{fontSize:11.5,color:C.mut}},"konum yok"),
                 h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:700},onClick:()=>setMusteriBag(m)},"⚔️ Satış / Akın"))); }))); };
 
-  const viewMap={komuta:fetihView,cephane:cephaneView,kale:kaleView,gozcu:gozcuView};
+  // —— 📊 RAPORLAR ——
+  const kaleKeyR=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"").toLocaleLowerCase("tr")));
+  const raporVeri=()=>{ const now=Date.now(); let rb,re,baslik;
+    if(rapMod==="gun"){ rb=gunBasi(now).getTime(); re=now; baslik="Bugün ("+fmtTarih(now)+")"; }
+    else if(rapMod==="hafta"){ rb=haftaBasi(now).getTime(); re=now; baslik="Bu hafta"; }
+    else if(rapMod==="ay"){ rb=ayBasi(now); re=now; baslik="Bu ay"; }
+    else { rb=rapBas?new Date(rapBas+"T00:00:00").getTime():0; re=rapBit?new Date(rapBit+"T23:59:59").getTime():now; baslik=(rapBas||"…")+" – "+(rapBit||"bugün"); }
+    const rHar=(hareketler||[]).filter(x=>{ const t=new Date(x.tarih).getTime(); return t>=rb&&t<=re; });
+    const rSatis=rHar.filter(x=>x.tip==="satis");
+    const satUrun={}; rSatis.forEach(x=>{ const k=x.urunAd||"?"; const o=satUrun[k]||(satUrun[k]={adet:0,ciro:0}); o.adet+=num(x.adet); o.ciro+=num(x.adet)*num(x.satisFiyat); });
+    const acikKons=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0);
+    const akU={}; acikKons.forEach(x=>{ const k=x.urunAd||"?"; const o=akU[k]||(akU[k]={kalan:0,yer:new Set()}); o.kalan+=num(x.kalan); o.yer.add(kaleKeyR(x)); });
+    const rStS=rHar.filter(x=>x.tip==="stant"&&x.mod==="satis");
+    return { baslik,
+      rSatAdet:rSatis.reduce((s,x)=>s+num(x.adet),0),
+      rCiro:rSatis.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0),
+      rMarj:rSatis.reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0),
+      rKonsAdet:rHar.filter(x=>x.tip==="konsinye").reduce((s,x)=>s+num(x.adet),0),
+      rIadeAdet:rHar.filter(x=>x.tip==="iade").reduce((s,x)=>s+num(x.adet),0),
+      rStH:rHar.filter(x=>x.tip==="stant"&&x.mod!=="satis").length, rStS:rStS.length, rStSGelir:rStS.reduce((s,x)=>s+num(x.fiyat),0),
+      rTahsil:rHar.filter(x=>x.tip==="tahsilat").reduce((s,x)=>s+num(x.tutar),0),
+      rAvans:rHar.filter(x=>x.tip==="avans").reduce((s,x)=>s+num(x.tutar),0),
+      rMekan:new Set(rHar.filter(x=>["satis","konsinye","stant","iade","tahsilat","avans"].includes(x.tip)).map(kaleKeyR)).size,
+      satUrunL:Object.entries(satUrun).map(([ad,o])=>({ad,adet:o.adet,ciro:o.ciro})).sort((a,b)=>b.ciro-a.ciro),
+      acikKonsYer:new Set(acikKons.map(kaleKeyR)).size, acikKonsAdetT:acikKons.reduce((s,x)=>s+num(x.kalan),0),
+      acikKonsUrunL:Object.entries(akU).map(([ad,o])=>({ad,kalan:o.kalan,yer:o.yer.size})).sort((a,b)=>b.kalan-a.kalan),
+      netAlacak:alacakGenel, kisi:(aktif?aktif.ad:"") }; };
+  const raporMetin=v=>{ const L=[];
+    L.push("📊 PAZARLAMA RAPORU — "+v.baslik); if(v.kisi) L.push("👤 "+v.kisi); L.push("");
+    L.push("💰 Satış: "+v.rSatAdet+" adet · ciro "+tl(v.rCiro)+" · marj "+tl(v.rMarj));
+    L.push("🏬 Konsinye bırakılan: "+v.rKonsAdet+" adet");
+    if(v.rIadeAdet) L.push("↩ İade: "+v.rIadeAdet+" adet");
+    if(v.rStH||v.rStS) L.push("🎪 Stant: "+v.rStH+" hediye · "+v.rStS+" satış ("+tl(v.rStSGelir)+")");
+    if(v.rTahsil) L.push("🧾 Tahsilat: "+tl(v.rTahsil));
+    if(v.rAvans) L.push("💳 Avans (önden): "+tl(v.rAvans));
+    L.push("📍 İşlem yapılan mekan: "+v.rMekan);
+    L.push((v.netAlacak>=0?"💵 Net alacak: ":"💳 Net avans/kredi: ")+tl(Math.abs(v.netAlacak)));
+    L.push(""); L.push("🛒 Satılan ürünler:");
+    v.satUrunL.forEach(u=>L.push("  • "+u.ad+": "+u.adet+" adet · "+tl(u.ciro))); if(!v.satUrunL.length) L.push("  (yok)");
+    L.push(""); L.push("🏬 Güncel açık konsinye: "+v.acikKonsYer+" mekan · "+v.acikKonsAdetT+" adet");
+    v.acikKonsUrunL.forEach(u=>L.push("  • "+u.ad+": "+u.kalan+" adet ("+u.yer+" mekan)"));
+    return L.join("\n"); };
+  const raporHTML=v=>{ const row=(a,b)=>"<tr><td>"+a+"</td><td style='text-align:right;font-weight:700'>"+b+"</td></tr>";
+    return "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Pazarlama Raporu</title><style>body{font-family:system-ui,Arial;padding:22px;color:#0f172a}h1{font-size:20px;margin:0}h2{font-size:14px;margin:18px 0 6px;border-bottom:2px solid #eee;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-size:13px}td{padding:5px 6px;border-bottom:1px solid #f1f5f9}.sub{color:#64748b;font-size:12px;margin-top:4px}</style></head><body>"
+      +"<h1>📊 Pazarlama Raporu</h1><div class=sub>"+v.baslik+(v.kisi?(" · "+v.kisi):"")+"</div>"
+      +"<h2>Özet</h2><table>"+row("💰 Satış",v.rSatAdet+" adet")+row("Ciro",tl(v.rCiro))+row("Marj",tl(v.rMarj))
+      +row("🏬 Konsinye bırakılan",v.rKonsAdet+" adet")+(v.rIadeAdet?row("↩ İade",v.rIadeAdet+" adet"):"")
+      +row("🎪 Stant",v.rStH+" hediye · "+v.rStS+" satış ("+tl(v.rStSGelir)+")")
+      +(v.rTahsil?row("🧾 Tahsilat",tl(v.rTahsil)):"")+(v.rAvans?row("💳 Avans",tl(v.rAvans)):"")
+      +row("📍 İşlem yapılan mekan",v.rMekan)+row(v.netAlacak>=0?"💵 Net alacak":"💳 Net avans/kredi",tl(Math.abs(v.netAlacak)))+"</table>"
+      +"<h2>Satılan ürünler</h2><table>"+(v.satUrunL.map(u=>row(u.ad,u.adet+" adet · "+tl(u.ciro))).join("")||"<tr><td>(yok)</td></tr>")+"</table>"
+      +"<h2>Güncel açık konsinye — "+v.acikKonsYer+" mekan · "+v.acikKonsAdetT+" adet</h2><table>"+(v.acikKonsUrunL.map(u=>row(u.ad,u.kalan+" adet · "+u.yer+" mekan")).join("")||"<tr><td>(yok)</td></tr>")+"</table>"
+      +"<div class=sub style='margin-top:22px'>Tikita · rapor</div></body></html>"; };
+  const raporPDF=v=>{ const w=window.open("","_blank"); if(!w) return alert("Açılır pencere engellendi — tarayıcı izni ver."); w.document.write(raporHTML(v)); w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },500); };
+  const raporWA=v=>{ const t=raporMetin(v); if(navigator.share){ navigator.share({text:t}).catch(()=>{}); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
+  const rIstat=(ad,deg,renk)=>h("div",{style:{background:"#f8fafc",borderRadius:9,padding:"8px 10px"}},
+    h("div",{style:{fontSize:10.5,color:C.mut,fontWeight:700}},ad), h("div",{style:{fontSize:15,fontWeight:800,color:renk}},deg));
+  const raporView=()=>{ const v=raporVeri();
+    return h("div",null,
+      h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"📊 Raporlar — dönem seç, istatistikleri gör, PDF indir veya WhatsApp'tan paylaş."),
+      h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}},
+        [["gun","Günlük"],["hafta","Haftalık"],["ay","Aylık"],["ozel","Özel tarih"]].map(([k,ad])=>
+          h("button",{key:k,type:"button",onClick:()=>setRapMod(k),style:{...S.btn(rapMod===k?"p":""),padding:"8px 14px",fontWeight:700}},ad))),
+      rapMod==="ozel" && h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,alignItems:"center"}},
+        h("input",{type:"date",style:{...S.input,width:150},value:rapBas,onChange:e=>setRapBas(e.target.value)}),
+        h("span",null,"–"),
+        h("input",{type:"date",style:{...S.input,width:150},value:rapBit,onChange:e=>setRapBit(e.target.value)})),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
+        h("button",{style:{...S.btn("p"),flex:"1 1 150px"},onClick:()=>raporPDF(v)},"📄 PDF indir"),
+        h("button",{style:{...S.btn(),flex:"1 1 150px",borderColor:"#16a34a",color:"#16a34a",fontWeight:800},onClick:()=>raporWA(v)},"📲 WhatsApp'tan gönder")),
+      h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12}},
+        h("div",{style:{...S.label,marginBottom:8}},"📅 "+v.baslik+" — özet"),
+        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}},
+          rIstat("💰 Satış",v.rSatAdet+" adet","#047857"), rIstat("Ciro",tl(v.rCiro),"#047857"), rIstat("Marj",tl(v.rMarj),"#047857"),
+          rIstat("🏬 Konsinye",v.rKonsAdet+" adet","#7c3aed"), rIstat("↩ İade",v.rIadeAdet+" adet","#b45309"),
+          rIstat("🎪 Stant",(v.rStH+v.rStS)+" ("+tl(v.rStSGelir)+")","#9333ea"),
+          rIstat("🧾 Tahsilat",tl(v.rTahsil),"#b91c1c"), rIstat("💳 Avans",tl(v.rAvans),"#0369a1"),
+          rIstat("📍 Mekan",v.rMekan+"","#0369a1"), rIstat(v.netAlacak>=0?"💵 Net alacak":"💳 Net avans",tl(Math.abs(v.netAlacak)),v.netAlacak>=0?"#b91c1c":"#0369a1"))),
+      h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12}},
+        h("div",{style:{...S.label,marginBottom:6}},"🛒 Satılan ürünler ("+v.baslik+")"),
+        !v.satUrunL.length ? h("div",{style:{fontSize:12.5,color:C.mut}},"Bu dönemde satış yok.")
+        : v.satUrunL.map((u,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:13}},
+            h("span",{style:{fontWeight:700}},u.ad), h("span",null,u.adet+" adet · "+tl(u.ciro))))),
+      h("div",{style:{...S.card,padding:"12px 14px"}},
+        h("div",{style:{...S.label,marginBottom:6}},"🏬 Güncel açık konsinye — "+v.acikKonsYer+" mekan · "+v.acikKonsAdetT+" adet"),
+        !v.acikKonsUrunL.length ? h("div",{style:{fontSize:12.5,color:C.mut}},"Açık konsinye yok.")
+        : v.acikKonsUrunL.map((u,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:13}},
+            h("span",{style:{fontWeight:700}},u.ad), h("span",null,u.kalan+" adet · "+u.yer+" mekan"))))); };
+
+  const viewMap={komuta:fetihView,rapor:raporView,cephane:cephaneView,kale:kaleView,gozcu:gozcuView};
   return h("div",null,
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
       altlar.map(([k,ad])=>h("button",{key:k,onClick:()=>setAlt(k),
