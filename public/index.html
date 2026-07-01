@@ -1030,7 +1030,7 @@ function CantaDoldurModal({ urunler, seferIdAl, onKapat }){
               value:mik[u.id]||"",onChange:e=>set(u.id,e.target.value),placeholder:"0"})); })));
 }
 
-// SEFER RAPORU — çanta boşaltılınca / geçmiş sefer özeti
+// SEFER RAPORU — çanta boşaltılınca / geçmiş sefer özeti (üreticiye verilecek + sana kalan; PDF & WhatsApp)
 function SeferRaporModal({ sefer, hareketler, onKapat }){
   const har=(hareketler||[]).filter(x=>x.seferId===sefer.id);
   const grp=t=>har.filter(x=>x.tip===t);
@@ -1038,21 +1038,72 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
   const al=grp("al"),sat=grp("satis"),kon=grp("konsinye"),iade=grp("iade");
   const alA=sum(al,x=>num(x.adet)),satA=sum(sat,x=>num(x.adet)),konA=sum(kon,x=>num(x.adet)),iadeA=sum(iade,x=>num(x.adet));
   const ciro=sum(sat,x=>num(x.adet)*num(x.satisFiyat)),kar=sum(sat,x=>num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)));
+  const ureticiBorc=sum(sat,x=>num(x.adet)*num(x.alisFiyat));   // sattığı malın alış bedeli → üreticiye verilecek
+  const tahsil=sum(sat,x=> x.tahsil==null? num(x.adet)*num(x.satisFiyat) : num(x.tahsil));
+  const alacak=Math.max(0, ciro-tahsil);
+  const pazAd=(AKTIF_KUL&&AKTIF_KUL.ad)||sefer.kullaniciAd||"";
   const bas=new Date(sefer.baslangic).getTime(), bit=sefer.bitis?new Date(sefer.bitis).getTime():Date.now();
+  const donem=fmtTarihSaat(bas)+(sefer.bitis?(" — "+fmtSaat(bit)):" — (açık)")+" · "+fmtSureSaat((bit-bas)/60000);
   const stat=(ad,deg,renk)=>h("div",{style:{...S.card,padding:"10px 8px",textAlign:"center"}},
     h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},ad), h("div",{style:{fontSize:18,fontWeight:800,color:renk,marginTop:2}},deg));
   const liste=(baslik,arr,renk,sag)=> arr.length? h("div",{style:{marginTop:10}},
     h("div",{style:{...S.label,marginBottom:4}},baslik),
     arr.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).map((x,i)=>h("div",{key:x.id||i,style:{display:"flex",justifyContent:"space-between",gap:8,padding:"5px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
-      h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, num(x.adet)+" × "+x.urunAd+(x.yer?(" → "+x.yer):"")),
+      h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, num(x.adet)+" × "+x.urunAd+(x.yer?(" → "+x.yer):"")+(x.kaynak==="konsinye"?" (konsinyeden)":"")),
       h("span",{style:{flexShrink:0,fontWeight:700,color:renk}}, sag(x))))) : null;
-  return h(Modal,{ baslik:"🧭 Sefer Raporu", onKapat, alt:h("button",{style:{...S.btn("p"),flex:1},onClick:onKapat},"Kapat") },
-    h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10}},
-      fmtTarihSaat(bas)+(sefer.bitis?(" — "+fmtSaat(bit)):" — (açık)")+" · "+fmtSureSaat((bit-bas)/60000)),
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:6}},
-      stat("🎒 Çıkış",alA,"#0e7490"), stat("💰 Satış",satA,C.yesilB), stat("🏬 Konsinye",konA,"#7c3aed")),
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}},
-      stat("↩ Dönen",iadeA,"#b45309"), stat("Ciro",tl(ciro),"#047857"), stat("Marj",tl(kar),"#047857")),
+
+  // —— çıktı / WhatsApp ——
+  const esc=s=>String(s==null?"":s).replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+  const seferMetin=()=>{ const L=[];
+    L.push("🧭 SEFER RAPORU"+(pazAd?" — "+pazAd:"")); L.push(donem); L.push("");
+    L.push("🎒 Çıkış "+alA+" · 💰 Satış "+satA+" · 🏬 Konsinye "+konA+" · ↩ Dönen "+iadeA); L.push("");
+    L.push("💵 HESAP");
+    L.push("• Toplam satış (ciro): "+tl(ciro));
+    L.push("• 🏭 Üreticiye verilecek: "+tl(ureticiBorc));
+    L.push("• 🫰 Sana kalan (kâr): "+tl(kar));
+    if(tahsil<ciro){ L.push("• Tahsil edilen: "+tl(tahsil)); L.push("• Kalan alacak: "+tl(alacak)); }
+    if(sat.length){ L.push(""); L.push("💰 SATIŞLAR"); sat.forEach(x=>L.push("• "+num(x.adet)+"× "+x.urunAd+(x.yer?(" → "+x.yer):"")+" = "+tl(num(x.adet)*num(x.satisFiyat))+(x.kaynak==="konsinye"?" (konsinyeden)":""))); }
+    if(kon.length){ L.push(""); L.push("🏬 KONSİNYE BIRAKILAN"); kon.forEach(x=>L.push("• "+num(x.adet)+"× "+x.urunAd+(x.yer?(" → "+x.yer):""))); }
+    return L.join("\n"); };
+  const seferHTML=()=>{ const rows=arr=>arr.map(x=>"<tr><td>"+num(x.adet)+"× "+esc(x.urunAd)+(x.yer?(" → "+esc(x.yer)):"")+(x.kaynak==="konsinye"?" <i>(konsinyeden)</i>":"")+"</td><td style='text-align:right'>"+tl(num(x.adet)*num(x.satisFiyat))+"</td></tr>").join("");
+    return "<!doctype html><html lang='tr'><head><meta charset='utf-8'><title>Sefer Raporu</title>"
+      +"<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a;max-width:640px;margin:24px auto;padding:0 16px}h1{font-size:20px;margin:0 0 4px}.sub{color:#64748b;font-size:13px;margin-bottom:16px}"
+      +".big{display:flex;gap:12px;margin:14px 0}.box{flex:1;border-radius:12px;padding:14px;text-align:center}.b1{background:#fff7ed;border:1px solid #fed7aa}.b2{background:#ecfdf5;border:1px solid #a7f3d0}"
+      +".box .t{font-size:12px;font-weight:700}.box .v{font-size:24px;font-weight:800;margin-top:4px}table{width:100%;border-collapse:collapse;margin:10px 0}td{padding:6px 4px;border-bottom:1px solid #e5e9f0;font-size:13px}h2{font-size:14px;margin:16px 0 4px}"
+      +"@media print{button{display:none}}</style></head><body>"
+      +"<h1>🧭 Sefer Raporu"+(pazAd?" — "+esc(pazAd):"")+"</h1><div class='sub'>"+esc(donem)+"</div>"
+      +"<table><tr><td>🎒 Çıkış</td><td style='text-align:right'>"+alA+"</td></tr>"
+      +"<tr><td>💰 Satış</td><td style='text-align:right'>"+satA+"</td></tr>"
+      +"<tr><td>🏬 Konsinye</td><td style='text-align:right'>"+konA+"</td></tr>"
+      +"<tr><td>↩ Dönen</td><td style='text-align:right'>"+iadeA+"</td></tr>"
+      +"<tr><td>Toplam satış (ciro)</td><td style='text-align:right'>"+tl(ciro)+"</td></tr>"
+      +(tahsil<ciro?("<tr><td>Tahsil edilen</td><td style='text-align:right'>"+tl(tahsil)+"</td></tr><tr><td>Kalan alacak</td><td style='text-align:right'>"+tl(alacak)+"</td></tr>"):"")
+      +"</table>"
+      +"<div class='big'><div class='box b1'><div class='t' style='color:#9a3412'>🏭 Üreticiye verilecek</div><div class='v' style='color:#b45309'>"+tl(ureticiBorc)+"</div></div>"
+      +"<div class='box b2'><div class='t' style='color:#065f46'>🫰 Sana kalan (kâr)</div><div class='v' style='color:#047857'>"+tl(kar)+"</div></div></div>"
+      +(sat.length?("<h2>💰 Satışlar</h2><table>"+rows(sat)+"</table>"):"")
+      +(kon.length?("<h2>🏬 Konsinye bırakılan</h2><table>"+kon.map(x=>"<tr><td>"+num(x.adet)+"× "+esc(x.urunAd)+(x.yer?(" → "+esc(x.yer)):"")+"</td><td style='text-align:right'>"+esc(x.bolge||"")+"</td></tr>").join("")+"</table>"):"")
+      +"</body></html>"; };
+  const seferPDF=()=>{ const w=window.open("","_blank"); if(!w) return alert("Açılır pencere engellendi — tarayıcı izni ver."); w.document.write(seferHTML()); w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },400); };
+  const seferWA=()=>{ const t=seferMetin(); if(navigator.share){ navigator.share({text:t}).catch(()=>{}); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
+
+  return h(Modal,{ baslik:"🧭 Sefer Raporu", onKapat, alt:h(React.Fragment,null,
+      h("button",{style:{...S.btn("p"),flex:1},onClick:seferPDF},"📄 Çıktı"),
+      h("button",{style:{...S.btn(),flex:1,borderColor:"#16a34a",color:"#16a34a",fontWeight:800},onClick:seferWA},"📲 WhatsApp"),
+      h("button",{style:S.btn(),onClick:onKapat},"Kapat")) },
+    h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10}}, (pazAd?"👤 "+pazAd+" · ":"")+donem),
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:6}},
+      stat("🎒 Çıkış",alA,"#0e7490"), stat("💰 Satış",satA,C.yesilB), stat("🏬 Konsinye",konA,"#7c3aed"), stat("↩ Dönen",iadeA,"#b45309")),
+    // —— çanta boşaltıldı: üreticiye verilecek + sana kalan ——
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}},
+      h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center",background:"#fff7ed",border:"1px solid #fed7aa"}},
+        h("div",{style:{fontSize:11,color:"#9a3412",fontWeight:700}},"🏭 Üreticiye verilecek"),
+        h("div",{style:{fontSize:22,fontWeight:800,color:"#b45309",marginTop:3}},tl(ureticiBorc))),
+      h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center",background:"#ecfdf5",border:"1px solid #a7f3d0"}},
+        h("div",{style:{fontSize:11,color:"#065f46",fontWeight:700}},"🫰 Sana kalan (kâr)"),
+        h("div",{style:{fontSize:22,fontWeight:800,color:"#047857",marginTop:3}},tl(kar)))),
+    h("div",{style:{fontSize:12,color:C.mut,marginTop:8,textAlign:"center"}},
+      "Ciro "+tl(ciro)+(tahsil<ciro?(" · Tahsil "+tl(tahsil)+" · Kalan alacak "+tl(alacak)):"")),
     liste("💰 Satışlar",sat,"#047857",x=>tl(num(x.adet)*num(x.satisFiyat))),
     liste("🏬 Konsinye bırakılanlar",kon,"#7c3aed",x=>(x.bolge||"")),
     (satA===0&&konA===0) && h("div",{style:{fontSize:12.5,color:C.mut,marginTop:10,textAlign:"center"}},"Bu seferde satış/konsinye yapılmadı."));
