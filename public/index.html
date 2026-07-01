@@ -25,6 +25,7 @@
   .tk-pop{animation:tkpop .5s cubic-bezier(.2,.8,.2,1.2) both}
   @keyframes tkfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
   .tk-float{animation:tkfloat 2.4s ease-in-out infinite}
+  @keyframes pulse{0%{transform:scale(1);opacity:1}50%{transform:scale(1.18);opacity:.7}100%{transform:scale(1);opacity:1}}
   @keyframes tkshine{to{background-position:200% 0}}
   .tk-shine{background-size:200% auto;animation:tkshine 2.5s linear infinite}
   .tk-pcard{transition:transform .15s ease, box-shadow .15s ease}
@@ -2061,7 +2062,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
       if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:b,seferId:sid,tarih:iso}); }
     if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
 
-  const altlar=[["komuta","🏰 Komuta"],["rapor","📊 Raporlar"],["cephane","🎒 Cephane"],["kale","🛡️ Kaleler"],["gozcu","🔭 Gözcü"]];
+  const altlar=[["komuta","🏰 Komuta"],["rapor","📊 Raporlar"],["cephane","🎒 Cephane Hizmetleri"],["kale","🛡️ Kaleler"],["gozcu","🔭 Gözcü"]];
 
   // —— TASARIM 1: SEVİYE (RPG kahraman kartı) ——
   const heroKart=(renk,renk2,ikon,baslik,xp,statlar,rozetler)=>h("div",{style:{borderRadius:16,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
@@ -2311,27 +2312,45 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     if(son) toplanacak.push({makine:mk,is:son}); });
   const tablaUc=tablaUcret!=null?num(tablaUcret):5;
   const tablaKazanc=(hareketler||[]).filter(x=>x.tip==="tabla").reduce((s,x)=>s+num(x.tutar),0);
-  // çoklu kullanıcı çakışmasını önle: atomik topla — aynı tabla iki kez ücretlenmez
-  async function tablaTopla(t){ if(!confirm(t.makine.ad+" — "+(t.is.ad||"baskı")+" tablası toplandı mı?\nÜcret: "+tl(tablaUc))) return;
-    const ref=doc(db,"plan",t.is.id);
-    try{ await runTransaction(db, async(tx)=>{ const snap=await tx.get(ref);
-        if(!snap.exists()) throw new Error("yok");
-        if(snap.data().tablaAlindi) throw new Error("alindi");
-        tx.set(ref,{tablaAlindi:true,tablaAlanId:(AKTIF_KUL?AKTIF_KUL.id:""),tablaAlanAd:(AKTIF_KUL?AKTIF_KUL.ad:"")},{merge:true}); }); }
-    catch(e){ if(String(e.message||e)==="alindi") return alert("⚠ Bu tablayı az önce başka biri topladı."); return alert("Toplanamadı, tekrar dene."); }
+  // rezervasyon (30 dk) — üstlenen kişiye kilitlenir, başkasına verilmez
+  const benId=aktif?aktif.id:"";
+  const rezAktif=t=> t.is.rezerveId && num(t.is.rezerveBitis)>nowT;
+  const rezBenim=t=> rezAktif(t) && t.is.rezerveId===benId;
+  const rezBaska=t=> rezAktif(t) && t.is.rezerveId!==benId;
+  const tablaBadge=toplanacak.some(t=>!rezBaska(t));   // ilgilenebileceğim (boşta ya da benim) tabla var mı
+  async function tablaUstlen(t){ const ref=doc(db,"plan",t.is.id);
+    try{ await runTransaction(db, async(tx)=>{ const s=await tx.get(ref); if(!s.exists())throw new Error("yok"); const d=s.data();
+      if(d.tablaAlindi) throw new Error("alindi");
+      if(d.rezerveId && d.rezerveId!==benId && num(d.rezerveBitis)>Date.now()) throw new Error("rezerve");
+      tx.set(ref,{rezerveId:benId,rezerveAd:(aktif?aktif.ad:""),rezerveBitis:Date.now()+30*60000},{merge:true}); }); }
+    catch(e){ const m=String(e.message||e); if(m==="alindi")return alert("Bu tabla zaten toplanmış."); if(m==="rezerve")return alert("⚠ Bu görevi başka biri üstlendi."); return alert("Olmadı, tekrar dene."); }
+    alert("🖐 Görev senin — 30 dk içinde topla."); }
+  async function tablaTopla(t){ if(!confirm("Tabla toplandı mı?\nÜcret: "+tl(tablaUc))) return; const ref=doc(db,"plan",t.is.id);
+    try{ await runTransaction(db, async(tx)=>{ const s=await tx.get(ref); if(!s.exists())throw new Error("yok"); const d=s.data();
+      if(d.tablaAlindi) throw new Error("alindi");
+      if(d.rezerveId && d.rezerveId!==benId && num(d.rezerveBitis)>Date.now()) throw new Error("rezerve");
+      tx.set(ref,{tablaAlindi:true,tablaAlanId:benId,tablaAlanAd:(aktif?aktif.ad:""),rezerveId:"",rezerveBitis:0},{merge:true}); }); }
+    catch(e){ const m=String(e.message||e); if(m==="alindi")return alert("Bu tabla zaten toplanmış."); if(m==="rezerve")return alert("⚠ Bu görevi başka biri üstlenmiş."); return alert("Olmadı, tekrar dene."); }
     await harKaydet({tip:"tabla",tutar:tablaUc,urunAd:t.is.ad||"Tabla",tarih:new Date().toISOString()});
     alert("🧹 Toplandı · +"+tl(tablaUc)); }
+  async function tablaBirak(t){ await save("plan",{id:t.is.id,rezerveId:"",rezerveBitis:0}); }
   const cephaneView=()=>h("div",null,
     // toplanacak tablalar (görev)
     toplanacak.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12,border:"1px solid #fb8c00",background:"#fff8ef"}},
       h("div",{style:{...S.label,marginBottom:8,color:"#7a3e00"}},"🧹 Toplanacak tablalar — "+toplanacak.length+" baskı · "+tl(tablaUc)+"/baskı"),
       h("div",{style:{display:"grid",gap:8}},
-        toplanacak.map((t,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"#fff",borderRadius:10,border:"1px solid #ffe2b8"}},
-          h("div",{style:{fontSize:20}},"🖨"),
-          h("div",{style:{flex:1,minWidth:0}},
-            h("div",{style:{fontWeight:800,fontSize:13.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (num(t.is.adet)?num(t.is.adet)+"× ":"")+(t.is.ad||"Baskı")),
-            h("div",{style:{fontSize:11,color:C.mut}}, "🖨 "+t.makine.ad+" · bitti "+fmtTarihSaat(new Date(t.is.baslangic).getTime()+num(t.is.sureDk)*60000))),
-          h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:800,flexShrink:0},onClick:()=>tablaTopla(t)},"🧹 Topla +"+tl(tablaUc)))))),
+        toplanacak.map((t,i)=>{ const bn=rezBenim(t), bs=rezBaska(t); const kalanDk=Math.max(0,Math.ceil((num(t.is.rezerveBitis)-nowT)/60000));
+          return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"#fff",borderRadius:10,border:"1px solid "+(bs?"#e2e8f0":"#ffe2b8"),opacity:bs?.7:1}},
+            h("div",{style:{fontSize:20}},"🖨"),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontWeight:800,fontSize:13.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (num(t.is.adet)?num(t.is.adet)+"× ":"")+(t.is.ad||"Baskı")),
+              h("div",{style:{fontSize:11,color:C.mut}}, "🖨 "+t.makine.ad+" · bitti "+fmtTarihSaat(new Date(t.is.baslangic).getTime()+num(t.is.sureDk)*60000))),
+            bs ? h("span",{style:{fontSize:11.5,fontWeight:700,color:C.mut,flexShrink:0}}, "🔒 "+(t.is.rezerveAd||"başka")+" · "+kalanDk+"dk")
+            : bn ? h("div",{style:{display:"flex",gap:6,flexShrink:0,alignItems:"center"}},
+                h("span",{style:{fontSize:11,color:"#b45309",fontWeight:700}},"⏳ "+kalanDk+"dk"),
+                h("button",{style:{...S.ibtn,padding:"5px 8px"},onClick:()=>tablaBirak(t)},"↩"),
+                h("button",{style:{...S.ibtn,color:"#fff",background:C.yesilB,borderColor:C.yesilB,fontWeight:800},onClick:()=>tablaTopla(t)},"✅ Bitir +"+tl(tablaUc)))
+            : h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:800,flexShrink:0},onClick:()=>tablaUstlen(t)},"🖐 Üstlen (30dk)")); }))),
     tablaKazanc>0 && h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:10}},"🧹 Toplam tabla ücretin: "+tl(tablaKazanc)),
     h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"🎒 Cephane — ürünlerin. Atölyeden çantana al, sahada sat/konsinye yap."),
     !urunListe.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Ürün yok. Stok sekmesinden ekle.")
@@ -2522,7 +2541,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   return h("div",null,
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
       altlar.map(([k,ad])=>h("button",{key:k,onClick:()=>setAlt(k),
-        style:{...S.btn(alt===k?"p":""),padding:"10px 18px",fontWeight:700,fontSize:14}},ad))),
+        style:{...S.btn(alt===k?"p":""),padding:"10px 18px",fontWeight:700,fontSize:14,position:"relative"}},
+        ad,
+        (k==="cephane" && tablaBadge) && h("span",{style:{position:"absolute",top:-6,right:-6,minWidth:18,height:18,padding:"0 5px",borderRadius:9,background:"#dc2626",color:"#fff",fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 0 2px "+C.bg,animation:"pulse 1.6s infinite"}},"!")))),
     (viewMap[alt]||fetihView)(),
     cantaDoldur && h(CantaDoldurModal,{urunler,seferIdAl,onKapat:()=>setCantaDoldur(false)}),
     musteriBag && h(MevkiModal,{musteri:musteriBag,bagItems:cephane,urunler,hareketler,aktifSeferId:aktifSefer?aktifSefer.id:null,onKapat:()=>setMusteriBag(null)}),
@@ -2729,7 +2750,7 @@ function App(){
   if(!aktif) return h(GirisEkran,{kullanicilar,onGiris:giris});
   const isAdmin=aktif.rol==="admin";
   // pazarlamacı: üretim planını (Gantt) görür ama stok/maliyeti görmez
-  const navListe = isAdmin ? [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]] : [["pazarlama","🛒 Pazarlama"],["plan","📅 Üretim Planı"]];
+  const navListe = isAdmin ? [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]] : [["pazarlama","🎒 Pazarlama"],["plan","🏭 Cephane Üretim"]];
   const izin = navListe.map(x=>x[0]);
   const gorSekme = izin.includes(sekme) ? sekme : (isAdmin?"plan":"pazarlama");
 
@@ -2744,8 +2765,12 @@ function App(){
       h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:cikis},"Çıkış")),
     // üst sekme
     h("div",{style:{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}},
-      navListe.map(([k,ad])=>
-        h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(gorSekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
+      isAdmin
+        ? navListe.map(([k,ad])=>
+            h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(gorSekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))
+        // pazarlamacı: bu zaten ana sayfası — tek geçiş butonu (Cephane Üretim ↔ Pazarlama)
+        : h("button",{onClick:()=>setSekme(gorSekme==="plan"?"pazarlama":"plan"),style:{...S.btn(),padding:"10px 18px",fontWeight:700}},
+            gorSekme==="plan"?"← Pazarlama":"🏭 Cephane Üretim")),
     ekipAcik && h(EkipModal,{kullanicilar,aktif,tablaUcret,onKapat:()=>setEkipAcik(false)}),
     gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
     gorSekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret}),
@@ -2809,11 +2834,13 @@ function App(){
                 h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 10px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+C.line,display:"flex",flexDirection:"column",justifyContent:"center"}},
                   h("div",{style:{fontWeight:800,fontSize:14}},mk.ad),
                   mk.tur && h("div",{style:{fontSize:11,color:C.mut}},mk.tur),
-                  tablaIs && isAdmin && h("div",{ title:"Önceki baskı bitti — tablayı topla. Tıkla: alındı.",
-                    onClick:()=>{ if(confirm(mk.ad+": tabla alındı mı?")) save("plan",{id:tablaIs.id,tablaAlindi:true}); },
-                    style:{marginTop:5,fontSize:10,fontWeight:800,color:"#7a3e00",background:"#ffe2b8",
-                      border:"1px solid #fb8c00",borderRadius:6,padding:"2px 5px",cursor:"pointer",lineHeight:1.2,alignSelf:"flex-start"}},
-                    "🧹 Tabla topla")),
+                  tablaIs && isAdmin && (()=>{ const rez = tablaIs.rezerveId && num(tablaIs.rezerveBitis)>now;
+                    const kalanDk = rez ? Math.max(0,Math.ceil((num(tablaIs.rezerveBitis)-now)/60000)) : 0;
+                    return h("div",{ title: rez ? (tablaIs.rezerveAd||"Bir pazarlamacı")+" üstlendi ("+kalanDk+" dk). Yine de topla: müdahale.": "Önceki baskı bitti — tablayı topla. Tıkla: alındı.",
+                      onClick:()=>{ if(confirm(mk.ad+(rez?" — "+(tablaIs.rezerveAd||"pazarlamacı")+" üstlenmiş. Yine de topla?":": tabla alındı mı?"))) save("plan",{id:tablaIs.id,tablaAlindi:true,rezerveId:"",rezerveBitis:0}); },
+                      style:{marginTop:5,fontSize:10,fontWeight:800,color: rez?"#7a1f1f":"#7a3e00",background: rez?"#ffd9d3":"#ffe2b8",
+                        border:"1px solid "+(rez?"#dc2626":"#fb8c00"),borderRadius:6,padding:"2px 5px",cursor:"pointer",lineHeight:1.2,alignSelf:"flex-start"}},
+                      rez ? "🔒 "+(tablaIs.rezerveAd||"üstlenildi")+" · "+kalanDk+"dk" : "🧹 Tabla topla"); })()),
                 h("div",{style:{position:"relative",width:toplamW,flexShrink:0,
                   backgroundImage:"repeating-linear-gradient(90deg,#c8d3e0 0 1px,transparent 1px "+GUN_W+"px),"+
                     "repeating-linear-gradient(90deg,#eef2f7 0 1px,transparent 1px "+(GUN_W*step/24)+"px)"}},
