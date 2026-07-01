@@ -604,6 +604,33 @@ function KonsinyeDagilimModal({ urun, dagilim, workshopKons, onIade, onSatildi, 
         h("button",{style:{...S.btn(),flex:1,borderColor:C.yesilB,color:C.yesilB,fontWeight:800},onClick:async()=>{await onSatildi(num(n));onKapat();}},"💰 Satıldı"))));
 }
 
+/* Satıldı çipine dokununca — pazarlamacıların sattığı ürünlerin yer dağılımı (konsinyeden satılan işaretli) */
+function SatisDagilimModal({ urun, dagilim, workshopSat, onIade, onKapat }){
+  const [n,setN]=useState(1);
+  const yerler = dagilim ? Object.keys(dagilim.yer).map(y=>({yer:y,adet:dagilim.yer[y].adet,kons:dagilim.yer[y].kons,paz:Array.from(dagilim.yer[y].paz).join(", ")})).sort((a,b)=>b.adet-a.adet) : [];
+  const toplam = dagilim?dagilim.toplam:0, konsToplam = dagilim?dagilim.kons:0;
+  return h(Modal,{ baslik:"💰 Satıldı — "+urun.ad, onKapat, alt:h("button",{style:S.btn(),onClick:onKapat},"Kapat") },
+    h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10}},"Pazarlamacıların sattığı ürünler — nereye, ne kadar. 🏬 rozeti konsinyeden satılanı gösterir."),
+    h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:12,flexWrap:"wrap"}},
+      h("div",{style:{fontSize:30,fontWeight:800,color:C.yesilB,lineHeight:1}},toplam),
+      h("div",{style:{fontSize:13,color:C.mut,fontWeight:700}},"adet · "+yerler.length+" mekan"),
+      konsToplam>0 && h("div",{style:{fontSize:11.5,fontWeight:800,color:"#7c3aed",background:"#f3edff",borderRadius:6,padding:"3px 8px"}},"🏬 "+konsToplam+" konsinyeden")),
+    yerler.length
+      ? h("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+          yerler.map((y,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"#f2fbf4",border:"1px solid #d5f0dd",borderRadius:9}},
+            h("div",{style:{fontSize:17,flexShrink:0}},"📍"),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontWeight:800,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},y.yer),
+              (y.paz||y.kons>0) ? h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                y.paz?"👤 "+y.paz:"", y.kons>0?h("span",{style:{marginLeft:y.paz?6:0,color:"#7c3aed",fontWeight:700}},"🏬 "+y.kons+" konsinyeden"):null) : null),
+            h("div",{style:{fontSize:16,fontWeight:800,color:C.yesilB,flexShrink:0}},y.adet+" ad"))))
+      : h("div",{style:{...S.card,padding:16,color:C.mut,textAlign:"center"}},"Pazarlamacı satışı yok."),
+    workshopSat>0 && h("div",{style:{marginTop:16,paddingTop:14,borderTop:"1px dashed "+C.line}},
+      h("div",{style:{...S.label,marginBottom:6}},"🏬 Atölye satış kaydı · "+workshopSat+" adet"),
+      h(Field,{label:"Adet"},h("input",{type:"number",min:1,style:{...S.input,fontWeight:700},value:n,onChange:e=>setN(e.target.value),onFocus:e=>e.target.select()})),
+      h("button",{style:{...S.btn(),width:"100%",borderColor:"#0369a1",color:"#0369a1",fontWeight:800},onClick:async()=>{await onIade(num(n));onKapat();}},"↩ Stoğa iade")));
+}
+
 function StokTab({ urunler, plan, filamentler, hareketler }){
   const [edit,setEdit]=useState(null);
   const [aks,setAks]=useState(null);   // kutucuk komut penceresi {u,stage}
@@ -702,6 +729,19 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   },[hareketler]);
   const sahaKonsToplam = Object.values(konsSaha).reduce((s,o)=>s+o.toplam,0);
 
+  // pazarlamacıların yaptığı SATIŞLAR (pazarlama_hareket, tip satis) — ürün başına yer dağılımı; konsinyeden satılan ayrıca işaretli
+  const satSaha = useMemo(()=>{
+    const m={};   // urunId -> { toplam, kons, yer:{ yerAdı:{adet, kons, paz:Set} } }
+    (hareketler||[]).forEach(x=>{ if(x.tip!=="satis"||!x.urunId) return; const a=num(x.adet); if(a<=0) return;
+      const kons = x.kaynak==="konsinye";
+      const o=m[x.urunId]||(m[x.urunId]={toplam:0,kons:0,yer:{}});
+      o.toplam+=a; if(kons)o.kons+=a;
+      const y=x.yer||"?"; const yo=o.yer[y]||(o.yer[y]={adet:0,kons:0,paz:new Set()});
+      yo.adet+=a; if(kons)yo.kons+=a; if(x.kullaniciAd) yo.paz.add(x.kullaniciAd); });
+    return m;
+  },[hareketler]);
+  const sahaSatToplam = Object.values(satSaha).reduce((s,o)=>s+o.toplam,0);
+
   const T = liste.reduce((a,u)=>{a.basim+=num(basimMap[u.id]);a.montajda+=montajdaOf(u);a.stokta+=num(u.stokta);a.konsinye+=num(u.konsinye);a.satildi+=num(u.satildi);return a;},{basim:0,montajda:0,stokta:0,konsinye:0,satildi:0});
 
   // montajdaki havuzdan N adet tüket (stoğa ekle veya zayiat) — parçalıda her parçadan N
@@ -768,7 +808,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
       ozetKart("🔧 Montajda",T.montajda,"#c2410c"),
       ozetKart("📥 Stokta",T.stokta,"#0369a1"),
       ozetKart("🏬 Konsinye",sahaKonsToplam,"#7c3aed"),
-      ozetKart("💰 Satıldı",T.satildi,C.yesilB)),
+      ozetKart("💰 Satıldı",sahaSatToplam,C.yesilB)),
     h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:12}},"ℹ️ Aşama çipine dokun → adet girip komut çalıştır ya da adedi doğrudan belirle. Basımı biten baskılar otomatik 🔧 Montajda'ya düşer."),
     h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setEdit({ad:"",parcalar:[],stokta:0,konsinye:0,not:""})},"+ Ürün"),
     !liste.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Ürün yok. + Ürün ile ekle.")
@@ -799,7 +839,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
               asamaChip("🔧","Montaj",montajdaOf(u),"#c2410c",()=>setAks({u,stage:"montajda"})),
               asamaChip("📥","Stok",u.stokta,"#0369a1",()=>setAks({u,stage:"stokta"})),
               asamaChip("🏬","Konsinye",(konsSaha[u.id]?konsSaha[u.id].toplam:0),"#7c3aed",()=>setAks({u,stage:"konsinye"})),
-              asamaChip("💰","Satıldı",u.satildi,C.yesilB,()=>setAks({u,stage:"satildi"}))),
+              asamaChip("💰","Satıldı",(satSaha[u.id]?satSaha[u.id].toplam:0),C.yesilB,()=>setAks({u,stage:"satildi"}))),
             num(u.zayiat)>0 && h("div",{style:{fontSize:10.5,color:C.kirmiziB,fontWeight:700}},"⚠ Zayiat: "+num(u.zayiat)),
             // parça stoğu — yalnızca parçalı üründe, sade
             parcali && (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p));
@@ -839,7 +879,9 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
     edit && h(StokModal,{kayit:edit,onKapat:()=>setEdit(null)}),
     aks && aks.stage==="konsinye" && h(KonsinyeDagilimModal,{urun:aks.u, dagilim:konsSaha[aks.u.id], workshopKons:num(aks.u.konsinye),
       onIade:(n)=>konsinyedenCikar(aks.u,n,"stokta"), onSatildi:(n)=>konsinyedenCikar(aks.u,n,"satildi"), onKapat:()=>setAks(null)}),
-    aks && aks.stage!=="konsinye" && (()=>{ const cfg=aksiyonCfg(aks.u,aks.stage); if(!cfg) return null;
+    aks && aks.stage==="satildi" && h(SatisDagilimModal,{urun:aks.u, dagilim:satSaha[aks.u.id], workshopSat:num(aks.u.satildi),
+      onIade:(n)=>satistanIade(aks.u,n), onKapat:()=>setAks(null)}),
+    aks && aks.stage!=="konsinye" && aks.stage!=="satildi" && (()=>{ const cfg=aksiyonCfg(aks.u,aks.stage); if(!cfg) return null;
       return h(StokAksiyonModal,{baslik:cfg.baslik,mevcut:cfg.mevcut,acts:cfg.acts,onAyarla:cfg.onAyarla,onKapat:()=>setAks(null)}); })());
 }
 
