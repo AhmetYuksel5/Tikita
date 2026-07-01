@@ -1906,7 +1906,7 @@ function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, onSec }){
       tamEkran?"✕":"⛶"));
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif }){
+function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif, tablaUcret }){
   const [alt,setAlt]=useState("komuta");
   const [yeniBolge,setYeniBolge]=useState("");
   const [cantaDoldur,setCantaDoldur]=useState(false);
@@ -2300,7 +2300,29 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
               h("div",{style:{height:"100%",width:Math.min(100,k.seviye/6*100)+"%",background:"linear-gradient(90deg,#f59e0b,#b45309)",borderRadius:99}})))))));
 
   // —— 🎒 CEPHANE (ürün kartları) ——
+  // 🧹 toplanacak tablalar — bitmiş ama toplanmamış baskılar (görev + ücret)
+  const nowT=Date.now();
+  const toplanacak=[]; (makineler||[]).forEach(mk=>{ const mjobs=(plan||[]).filter(p=>p.makineId===mk.id);
+    const calisan=mjobs.some(p=>p.basladi && new Date(p.baslangic).getTime()<=nowT && new Date(p.baslangic).getTime()+num(p.sureDk)*60000>nowT);
+    if(calisan) return;
+    mjobs.filter(p=>p.basladi && !p.tablaAlindi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=nowT).forEach(p=>toplanacak.push({makine:mk,is:p})); });
+  const tablaUc=tablaUcret!=null?num(tablaUcret):5;
+  const tablaKazanc=(hareketler||[]).filter(x=>x.tip==="tabla").reduce((s,x)=>s+num(x.tutar),0);
+  async function tablaTopla(t){ if(!confirm(t.makine.ad+" — "+(t.is.ad||"baskı")+" tablası toplandı mı?\nUcret: "+tl(tablaUc))) return;
+    await save("plan",{id:t.is.id,tablaAlindi:true});
+    await harKaydet({tip:"tabla",tutar:tablaUc,urunAd:t.is.ad||"Tabla",tarih:new Date().toISOString()}); }
   const cephaneView=()=>h("div",null,
+    // toplanacak tablalar (görev)
+    toplanacak.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12,border:"1px solid #fb8c00",background:"#fff8ef"}},
+      h("div",{style:{...S.label,marginBottom:8,color:"#7a3e00"}},"🧹 Toplanacak tablalar — "+toplanacak.length+" baskı · "+tl(tablaUc)+"/baskı"),
+      h("div",{style:{display:"grid",gap:8}},
+        toplanacak.map((t,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"#fff",borderRadius:10,border:"1px solid #ffe2b8"}},
+          h("div",{style:{fontSize:20}},"🖨"),
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontWeight:800,fontSize:13.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (num(t.is.adet)?num(t.is.adet)+"× ":"")+(t.is.ad||"Baskı")),
+            h("div",{style:{fontSize:11,color:C.mut}}, "🖨 "+t.makine.ad+" · bitti "+fmtTarihSaat(new Date(t.is.baslangic).getTime()+num(t.is.sureDk)*60000))),
+          h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:800,flexShrink:0},onClick:()=>tablaTopla(t)},"🧹 Topla +"+tl(tablaUc)))))),
+    tablaKazanc>0 && h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:10}},"🧹 Toplam tabla ücretin: "+tl(tablaKazanc)),
     h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"🎒 Cephane — ürünlerin. Atölyeden çantana al, sahada sat/konsinye yap."),
     !urunListe.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Ürün yok. Stok sekmesinden ekle.")
     : h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))"}},
@@ -2547,7 +2569,8 @@ function GirisEkran({ kullanicilar, onGiris }){
           h("button",{style:{...S.btn("p"),width:"100%",marginTop:8},onClick:girisYap},"Giriş yap"))
     ));
 }
-function EkipModal({ kullanicilar, aktif, onKapat }){
+function EkipModal({ kullanicilar, aktif, tablaUcret, onKapat }){
+  const [tUcret,setTUcret]=useState(tablaUcret!=null?String(tablaUcret):"5");
   const [ad,setAd]=useState(""); const [pin,setPin]=useState(""); const [simge,setSimge]=useState(SIMGELER[0]); const [rol,setRol]=useState("pazarlamaci");
   async function ekle(){ if(!ad.trim()) return alert("İsim gir."); if(pin.length<4) return alert("4+ haneli PIN belirle.");
     await save("kullanici",{ad:ad.trim(),rol,simge,renkH:adRenk(ad).H,...(await yeniKullaniciPin(pin))});
@@ -2556,7 +2579,13 @@ function EkipModal({ kullanicilar, aktif, onKapat }){
     if(u.rol==="admin"&&adminSay<=1) return alert("Son yönetici silinemez.");
     if(u.id===aktif.id) return alert("Kendini silemezsin.");
     if(!confirm(u.ad+" silinsin mi? (Kalan oyun verileri durur.)")) return; await remove("kullanici",u.id); }
-  return h(Modal,{baslik:"👥 Ekip — pazarlamacılar", onKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:onKapat},"Kapat")},
+  async function ucretKaydet(){ await save("ayar",{id:"genel",tablaUcret:num(tUcret)}); alert("💾 Tabla ücreti kaydedildi: "+tl(num(tUcret))+"/baskı"); }
+  return h(Modal,{baslik:"👥 Ekip & Ayarlar", onKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:onKapat},"Kapat")},
+    h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14,background:"#f8fafc"}},
+      h("div",{style:{...S.label,marginBottom:8}},"⚙ Ayarlar"),
+      h("div",{style:{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}},
+        h(Field,{label:"🧹 Tabla toplama ücreti (baskı başına ₺)"}, h("input",{type:"number",min:0,step:"0.5",style:{...S.input,width:140},value:tUcret,onChange:e=>setTUcret(e.target.value)})),
+        h("button",{style:{...S.btn("p")},onClick:ucretKaydet},"Kaydet"))),
     h("div",{style:{display:"grid",gap:8,marginBottom:14}},
       kullanicilar.slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>
         h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:10,border:"1px solid "+C.line,borderRadius:10,padding:"8px 10px"}},
@@ -2592,6 +2621,9 @@ function App(){
   const bolgeler = useColl("bolge");
   const musteriler = useColl("musteri");
   const seferler = useColl("sefer");
+  const ayarlar = useColl("ayar");
+  const ayar = ayarlar.find(a=>a.id==="genel")||{};
+  const tablaUcret = ayar.tablaUcret!=null ? num(ayar.tablaUcret) : 5;
   const {rows:kullanicilar,loaded:kulYuklendi}=useKullanici();
   const [aktifId,setAktifId]=useState(()=>{ try{ return localStorage.getItem("tk_uid"); }catch(e){ return null; } });
   const [ekipAcik,setEkipAcik]=useState(false);
@@ -2686,8 +2718,10 @@ function App(){
   if(!kulYuklendi) return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"#64748b"}},"⏳ Yükleniyor…");
   if(!aktif) return h(GirisEkran,{kullanicilar,onGiris:giris});
   const isAdmin=aktif.rol==="admin";
-  const gorSekme = isAdmin ? sekme : "pazarlama";        // pazarlamacı sadece pazarlamayı görür
-  const navListe = isAdmin ? [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]] : [["pazarlama","🛒 Pazarlama"]];
+  // pazarlamacı: üretim planını (Gantt) görür ama stok/maliyeti görmez
+  const navListe = isAdmin ? [["plan","📅 Üretim Planı"],["stok","📦 Stok"],["pazarlama","🛒 Pazarlama"]] : [["pazarlama","🛒 Pazarlama"],["plan","📅 Üretim Planı"]];
+  const izin = navListe.map(x=>x[0]);
+  const gorSekme = izin.includes(sekme) ? sekme : (isAdmin?"plan":"pazarlama");
 
   return h("div",{style:S.wrap},
     // kullanıcı çubuğu
@@ -2698,13 +2732,13 @@ function App(){
         h("div",{style:{fontSize:11,opacity:.75}}, isAdmin?"Yönetici — tüm yetkiler":"Pazarlamacı")),
       isAdmin && h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:()=>setEkipAcik(true)},"👥 Ekip"),
       h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:cikis},"Çıkış")),
-    // üst sekme (yalnız admin için — pazarlamacıda tek sekme gereksiz)
-    isAdmin && h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+    // üst sekme
+    h("div",{style:{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}},
       navListe.map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(gorSekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
-    ekipAcik && h(EkipModal,{kullanicilar,aktif,onKapat:()=>setEkipAcik(false)}),
+    ekipAcik && h(EkipModal,{kullanicilar,aktif,tablaUcret,onKapat:()=>setEkipAcik(false)}),
     gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler}),
-    gorSekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif}),
+    gorSekme==="pazarlama" && h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret}),
     gorSekme==="plan" && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
@@ -2723,10 +2757,10 @@ function App(){
           h("button",{style:S.ibtn,title:"Uzaklaştır",onClick:()=>setZoom(z=>Math.max(1,Math.round((z-0.5)*10)/10))},"🔍−"),
           h("span",{style:{fontSize:12,color:C.mut,minWidth:30,textAlign:"center"}},zoom+"x"),
           h("button",{style:S.ibtn,title:"Yakınlaştır",onClick:()=>setZoom(z=>Math.min(6,Math.round((z+0.5)*10)/10))},"🔍+")),
-        undoVar && h("button",{style:{...S.btn(),borderColor:"#c2410c",color:"#c2410c",fontWeight:800},onClick:geriAl,title:"Son değişikliği geri al"},"↶ Geri al"),
-        h("button",{style:S.btn(),onClick:()=>setMakineAcik(true)},"⚙ Makineler"),
-        h("button",{style:S.btn(),onClick:()=>setFilamentAcik(true)},"🧵 Filament"),
-        h("button",{style:S.btn("p"),onClick:()=>setIsModal({})},"+ Baskı Planla"))),
+        isAdmin && undoVar && h("button",{style:{...S.btn(),borderColor:"#c2410c",color:"#c2410c",fontWeight:800},onClick:geriAl,title:"Son değişikliği geri al"},"↶ Geri al"),
+        isAdmin && h("button",{style:S.btn(),onClick:()=>setMakineAcik(true)},"⚙ Makineler"),
+        isAdmin && h("button",{style:S.btn(),onClick:()=>setFilamentAcik(true)},"🧵 Filament"),
+        isAdmin && h("button",{style:S.btn("p"),onClick:()=>setIsModal({})},"+ Baskı Planla"))),
 
     // gantt kartı
     h("div",{style:{...S.card,overflow:"hidden",marginBottom:16,userSelect:"none",WebkitUserSelect:"none"}},
@@ -2765,7 +2799,7 @@ function App(){
                 h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 10px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+C.line,display:"flex",flexDirection:"column",justifyContent:"center"}},
                   h("div",{style:{fontWeight:800,fontSize:14}},mk.ad),
                   mk.tur && h("div",{style:{fontSize:11,color:C.mut}},mk.tur),
-                  tablaIs && h("div",{ title:"Önceki baskı bitti — tablayı topla. Tıkla: alındı.",
+                  tablaIs && isAdmin && h("div",{ title:"Önceki baskı bitti — tablayı topla. Tıkla: alındı.",
                     onClick:()=>{ if(confirm(mk.ad+": tabla alındı mı?")) save("plan",{id:tablaIs.id,tablaAlindi:true}); },
                     style:{marginTop:5,fontSize:10,fontWeight:800,color:"#7a3e00",background:"#ffe2b8",
                       border:"1px solid #fb8c00",borderRadius:6,padding:"2px 5px",cursor:"pointer",lineHeight:1.2,alignSelf:"flex-start"}},
@@ -2791,10 +2825,10 @@ function App(){
                           display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                           overflow:"hidden",color:"#7f1d1d",fontSize:10,fontWeight:800,lineHeight:1.2}},
                         width>50 && h(React.Fragment,null, h("div",null,"⚠ KAYIP"), h("div",{style:{fontWeight:600}},fmtSureSaat((pt.e-pt.s)/60000))));
-                      return h("div",{key:pt.k,onClick:()=>setIsModal({makineId:mk.id,baslangic:pt.s}),
-                        title:"Boş — tıkla, iş planla",
+                      return h("div",{key:pt.k,onClick:isAdmin?()=>setIsModal({makineId:mk.id,baslangic:pt.s}):undefined,
+                        title:isAdmin?"Boş — tıkla, iş planla":"Boş",
                         style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
-                          background:C.kirmizi,border:"1px solid "+C.kirmiziB,borderRadius:7,cursor:"pointer",
+                          background:C.kirmizi,border:"1px solid "+C.kirmiziB,borderRadius:7,cursor:isAdmin?"pointer":"default",
                           display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                           overflow:"hidden",color:C.kirmiziT,fontSize:11,fontWeight:700,lineHeight:1.25}},
                         width>54 && h(React.Fragment,null, h("div",null,fmtSaat(pt.s)), h("div",null,fmtSaat(pt.e))));
@@ -2811,10 +2845,10 @@ function App(){
                     else if(x.s>now){ dr={bg:C.planBg,bd:C.planB,tc:C.planT,dash:true}; durStr="planlandı"; }
                     else if(x.e>now){ dr={bg:C.onayBg,bd:C.onayB,tc:C.onayT,onay:true}; durStr="onay bekliyor"; }
                     else { dr={bg:C.bitBg,bd:C.bitB,tc:C.bitT,dash:true}; durStr="başlamadı"; }
-                    return h("div",{key:"j"+i, onClick:()=> dr.onay ? baslat(x.p) : setIsModal(x.p),
+                    return h("div",{key:"j"+i, onClick: isAdmin ? (()=> dr.onay ? baslat(x.p) : setIsModal(x.p)) : undefined,
                       title:x.p.ad+" · "+durStr+" · bitiş "+fmtTarihSaat(x.e),
                       style:{position:"absolute",left:left+2,top:8,width:width-4,height:ROW_H-16,
-                        background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",
+                        background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:isAdmin?"pointer":"default",
                         display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                         overflow:"hidden",color:dr.tc,fontSize:11,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
                       h("span",{style:{position:"absolute",top:4,right:5,width:8,height:8,borderRadius:8,background:x.p.ams?C.mavi:C.sari}}),
@@ -2828,8 +2862,8 @@ function App(){
             })
           ))),
 
-    // alt paneller
-    h("div",{style:{display:"grid",gap:14,gridTemplateColumns:"repeat(auto-fit,minmax(330px,1fr))"}},
+    // alt paneller (üretim analizleri — yalnız yönetici)
+    isAdmin && h("div",{style:{display:"grid",gap:14,gridTemplateColumns:"repeat(auto-fit,minmax(330px,1fr))"}},
       // boş kalacak makineler
       h("div",{style:S.card},
         h("div",{style:S.hdr},"BOŞ KALACAK MAKİNELER"),
