@@ -2004,6 +2004,9 @@ const BOLGE_UNVAN=[[1,"Sınır Beyi","🚩"],[2,"Sancak Beyi","🏳️"],[4,"Bey
 const KOMUTAN=[[0,"Acemi Er","🌱"],[50,"Onbaşı","🎖️"],[150,"Çavuş","🏅"],[400,"Teğmen","⭐"],[900,"Yüzbaşı","🔥"],[2000,"Binbaşı","⚔️"],[4500,"Paşa","🏰"],[9000,"Serdar-ı Ekrem","👑"]];
 // diplomatik ilişki (kale ile iletişim) payeleri
 const DIPLO_TIER=[[0,"Yalnız Kurt","🐺"],[3,"Ulak","✉️"],[10,"Elçi","🕊️"],[25,"Sefir","🤝"],[60,"Baş Müzakereci","🎖️"],[120,"Diplomasi Üstadı","🏛️"]];
+// TEHDİT — son akından beri geçen güne göre kale durumu (7 / 14 / 30 gün)
+const TEHDIT=[[0,"Güvende","🟢","#16a34a"],[7,"Huzursuz","🟡","#ca8a04"],[14,"Tehdit altında","🟠","#ea580c"],[30,"Düşmek üzere","🔴","#dc2626"]];
+function tehditOf(gun){ let t=TEHDIT[0]; for(const x of TEHDIT) if(gun>=x[0]) t=x; return t; }
 function katOf(table,v){ let r=table[0]; for(const x of table) if(v>=x[0]) r=x; return r; }
 function kaleSeviye(guc){ const t=[0,25,80,200,500,1200]; let lv=1; for(let i=1;i<t.length;i++) if(guc>=t[i]) lv=i+1; return lv; }
 
@@ -2062,10 +2065,11 @@ function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, onSec }){
     kl.forEach(k=>{ const ll=[+k.lat,+k.lng]; pts.push(ll); const sz=Math.round((13+(k.seviye||1)*3)*zf);
       const rozet = k.simge ? "<span style=\"position:absolute;top:-"+Math.round(sz*.28)+"px;right:-"+Math.round(sz*.34)+"px;font-size:"+Math.round(sz*.6)+"px;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 0 1px #fff)\">"+k.simge+"</span>" : "";
       const stantR = k.stant ? "<span style=\"position:absolute;bottom:-"+Math.round(sz*.12)+"px;left:-"+Math.round(sz*.34)+"px;font-size:"+Math.round(sz*.5)+"px;filter:drop-shadow(0 0 2px #fff)\">🎪</span>" : "";
+      const tehR = (k.tehdit && k.tehdit[0]>=7) ? "<span style=\"position:absolute;top:-"+Math.round(sz*.3)+"px;left:-"+Math.round(sz*.3)+"px;font-size:"+Math.round(sz*.5)+"px;filter:drop-shadow(0 0 2px #fff)\">"+k.tehdit[2]+"</span>" : "";
       const icon=L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz],
-        html:"<div style=\"position:relative;font-size:"+sz+"px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))\">🏰"+rozet+stantR+"</div>"});
+        html:"<div style=\"position:relative;font-size:"+sz+"px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))\">🏰"+rozet+stantR+tehR+"</div>"});
       L.marker(ll,{icon,zIndexOffset:200}).addTo(lg)
-        .bindTooltip("<b>"+(k.ad||"Kale")+"</b> · Sv."+k.seviye+" · 💪 "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" · "+k.silahTier[2]+" "+k.silah+(k.stant?(" · 🎪 "+k.stant+" stant"):"")+(k.sahip?("<br>"+k.simge+" "+k.sahip.ad+"'in kalesi"):"")+"<br><i>dokun → ⚔️ akın</i>",{direction:"top"})
+        .bindTooltip("<b>"+(k.ad||"Kale")+"</b> · Sv."+k.seviye+" · 💪 "+k.guc+"<br>"+k.askerTier[2]+" "+k.asker+" · "+k.silahTier[2]+" "+k.silah+(k.stant?(" · 🎪 "+k.stant+" stant"):"")+(k.tehdit&&k.tehdit[0]>=7?("<br>"+k.tehdit[2]+" "+k.tehdit[1]+" · "+k.gunGecti+" gündür akın yok"):"")+(k.sahip?("<br>"+k.simge+" "+k.sahip.ad+"'in kalesi"):"")+"<br><i>dokun → ⚔️ akın</i>",{direction:"top"})
         .on("click",()=>onSec&&onSec(k));
     });
     // DİĞER EKİP — başka pazarlamacının kaleleri: salt-okunur, soluk, sadece isim + genel bilgi
@@ -2211,6 +2215,25 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     return k;
   }).filter(k=>!(k.musteriId&&arsivId.has(k.musteriId)))   // #10 arşivli kaleler gizli
     .sort((a,b)=>b.guc-a.guc);
+  // —— TEHDİT — her kale için son/ilk akın (herhangi bir hareket) & güne göre tehdit seviyesi ——
+  const _kaleKey=x=> x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
+  const sonAkinMap={}, ilkAkinMap={};
+  (hareketler||[]).forEach(x=>{ if(x.gerilla) return; if(!["satis","konsinye","iade","tahsilat","stant","avans"].includes(x.tip)) return;
+    const key=_kaleKey(x); const t=new Date(x.tarih).getTime(); if(!t) return;
+    if(!sonAkinMap[key]||t>sonAkinMap[key]) sonAkinMap[key]=t;
+    if(!ilkAkinMap[key]||t<ilkAkinMap[key]) ilkAkinMap[key]=t; });
+  kaleler.forEach(k=>{ k.sonAkin=sonAkinMap[k.key]||0; k.ilkAkin=ilkAkinMap[k.key]||0;
+    k.gunGecti = k.sonAkin ? Math.floor((now-k.sonAkin)/86400000) : 999; k.tehdit=tehditOf(k.gunGecti); });
+  const tehditli = kaleler.filter(k=>k.gunGecti>=7).sort((a,b)=>b.gunGecti-a.gunGecti);
+  const tehditSay = { huzur:kaleler.filter(k=>k.gunGecti>=7&&k.gunGecti<14).length,
+                      tehdit:kaleler.filter(k=>k.gunGecti>=14&&k.gunGecti<30).length,
+                      dus:kaleler.filter(k=>k.gunGecti>=30).length };
+  // yaşlanan konsinye (21+ gün hâlâ açık) + haftalık görev ilerlemesi (gerilla hariç)
+  const yaslananKons=(hareketler||[]).filter(x=>x.tip==="konsinye"&&!x.gerilla&&num(x.kalan)>0&&(now-new Date(x.tarih).getTime())>21*86400000);
+  const bhHar=(hareketler||[]).filter(x=>!x.gerilla && new Date(x.tarih).getTime()>=haf0);
+  const bhZiyaret=new Set(bhHar.filter(x=>["satis","konsinye","tahsilat","stant"].includes(x.tip)).map(_kaleKey)).size;
+  const bhTahsil=bhHar.filter(x=>x.tip==="tahsilat").reduce((s,x)=>s+num(x.tutar),0);
+  const bhYeniFetih=kaleler.filter(k=>k.ilkAkin>=haf0).length;
   // KOMUTANLAR — #9 TÜM ekibin küresel sıralaması (herkes görebilir; rekabet/teşvik)
   const gKaleMap={};
   (_tumHar||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId||x.gerilla) return;
@@ -2435,7 +2458,48 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
           onKeyDown:e=>{ if(e.key==="Enter") bolgeEkle(); },placeholder:"Hedef bölge ekle (örn. Üsküdar)"}),
         h("button",{style:S.btn("p"),onClick:bolgeEkle},"⚑ Bölge ekle")));
 
+  // —— 📋 GÜNLÜK BRİFİNG + 🎯 HAFTALIK GÖREVLER (tehdit döngüsü) ——
+  const brifingKart=()=>{
+    const uyari=[];
+    if(tehditSay.dus)   uyari.push(["🔴",tehditSay.dus+" kale düşmek üzere","30+ gündür akın yok","#dc2626"]);
+    if(tehditSay.tehdit)uyari.push(["🟠",tehditSay.tehdit+" kale tehdit altında","14+ gündür akın yok","#ea580c"]);
+    if(tehditSay.huzur) uyari.push(["🟡",tehditSay.huzur+" kale huzursuz","7+ gündür akın yok","#ca8a04"]);
+    if(alacakGenel>0)   uyari.push(["🧾",tl(alacakGenel)+" tahsil edilecek","açık alacak","#b91c1c"]);
+    if(yaslananKons.length) uyari.push(["⏳",yaslananKons.length+" mekanda bekleyen konsinye","21+ gündür satılmadı","#7c3aed"]);
+    const acil=tehditli.slice(0,4);
+    return h("div",{style:{...S.card,padding:0,overflow:"hidden",marginBottom:14,border:"1px solid "+(uyari.length?"#fdba74":"#bbf7d0")}},
+      h("div",{style:{padding:"11px 14px",background:uyari.length?"linear-gradient(135deg,#7c2d12,#9a3412)":"linear-gradient(135deg,#065f46,#047857)",color:"#fff",display:"flex",alignItems:"center",gap:10}},
+        h("span",{style:{fontSize:22}},uyari.length?"📋":"🛡️"),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:15,fontWeight:800}},"Günlük Brifing"),
+          h("div",{style:{fontSize:11.5,opacity:.9}}, uyari.length?(uyari.length+" konu dikkat istiyor"):"Cephede sükûnet — tehdit yok"))),
+      h("div",{style:{padding:"12px 14px"}},
+        uyari.length
+          ? h("div",{style:{display:"grid",gap:7,marginBottom:acil.length?12:4}},
+              uyari.map((u,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:"#fafbfc",border:"1px solid "+C.line,borderRadius:9,borderLeft:"4px solid "+u[3]}},
+                h("span",{style:{fontSize:16}},u[0]),
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontSize:13,fontWeight:800,color:u[3]}},u[1]),
+                  h("div",{style:{fontSize:11,color:C.mut}},u[2])))))
+          : h("div",{style:{fontSize:12.5,color:"#047857",fontWeight:700,marginBottom:8}},"✅ Tüm kaleler taze, alacak/konsinye temiz. Böyle devam!"),
+        acil.length>0 && h(React.Fragment,null,
+          h("div",{style:{...S.label,marginBottom:6}},"🚨 En acil kaleler — dokun, akına git"),
+          h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}},
+            acil.map((k,i)=>{ const mus=(musteriler||[]).find(m=>m.id===k.musteriId)||{ad:k.ad,bolge:k.bolge,lat:k.lat,lng:k.lng};
+              return h("button",{key:i,onClick:()=>setMusteriBag(mus),style:{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:99,cursor:"pointer",background:"#fff",border:"1px solid "+k.tehdit[3]}},
+                h("span",{style:{fontSize:13}},k.tehdit[2]),
+                h("span",{style:{fontSize:12.5,fontWeight:800,color:k.tehdit[3],maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad),
+                h("span",{style:{fontSize:10.5,fontWeight:700,color:C.mut}},k.gunGecti+"g")); }))),
+        h("div",{style:{...S.label,marginBottom:8}},"🎯 Bu haftanın görevleri"),
+        h("div",{style:{display:"grid",gap:8}},
+          h(Gorev,{ad:"Kaleye akın (ziyaret)",deg:bhZiyaret,hedef:5,renk:"#b45309"}),
+          h(Gorev,{ad:"Yeni kale fethet",deg:bhYeniFetih,hedef:2,renk:"#7c3aed"}),
+          h(Gorev,{ad:"Tahsilat yap",deg:bhTahsil,hedef:1000,renk:"#047857",birim:"tl"}),
+          h(Gorev,{ad:"Riskteki kaleyi kurtar (0 kalsın)",deg:Math.max(0,tehditli.length===0?1:0),hedef:1,renk:"#dc2626"}))));
+  };
+
   const fetihView=()=>h("div",null,
+    brifingKart(),
     // —— SEFER / AKIN (çanta) ——
     h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:14,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
       h("div",{style:{background: aktifSefer?"linear-gradient(135deg,#7c2d12,#b45309)":"linear-gradient(135deg,#334155,#0e7490)",color:"#fff",padding:"16px 18px"}},
@@ -2654,6 +2718,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         h("div",{style:{minWidth:0,flex:1}},
           h("div",{style:{fontWeight:800,fontSize:15.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad,(kale&&kale.stant)?h("span",{title:kale.stant+" stant",style:{marginLeft:5}},"🎪"):null),
           h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700}}, (m.bolge?("📍 "+m.bolge):"")+(sahip?((m.bolge?" · ":"")+sahip.simge+" "+sahip.ad):""))),
+        (kale && fethedildi && kale.gunGecti>=7) && h("span",{title:kale.tehdit[1]+" · "+kale.gunGecti+" gündür akın yok",style:{flexShrink:0,fontSize:11,fontWeight:800,color:"#fff",background:kale.tehdit[3],borderRadius:8,padding:"3px 7px"}}, kale.tehdit[2]+" "+kale.gunGecti+"g"),
         h("button",{style:{...S.ibtn,flexShrink:0},onClick:()=>setMusEdit(m)},"✎")),
       m.telefon && h("div",{style:{fontSize:13,marginTop:8}},"📞 ",
         h("a",{href:"tel:"+m.telefon,style:{fontWeight:700,color:"#0369a1",textDecoration:"none"}},m.telefon),
