@@ -75,11 +75,17 @@ const db = getFirestore(initializeApp(cfg));
 const { useState, useEffect, useMemo, useRef } = React;
 const h = React.createElement;
 
+/* ---------- DEMO MODU — demo hesabı aktifken oyun koleksiyonları 'demo_' önekine gider,
+   böylece deneme işlemleri ana veriyi/stoğu etkilemez. 'kullanici' paylaşılır (giriş listesi). */
+let DEMO_MODE=false;
+const DEMO_COLLS=new Set(["stok_urun","plan","pazarlama_hareket","bolge","musteri","sefer","makineler","filament","ayar"]);
+function cn(name){ return (DEMO_MODE && DEMO_COLLS.has(name)) ? ("demo_"+name) : name; }
+
 /* ---------- yardımcılar ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
-async function save(coll, obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,coll,id),d,{merge:true}); return id; }
-async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
-async function restoreDoc(coll,obj){ const {id,...data}=obj; await setDoc(doc(db,coll,id),data); } // merge yok → tam geri yükle
+async function save(coll, obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,cn(coll),id),d,{merge:true}); return id; }
+async function remove(coll,id){ await deleteDoc(doc(db,cn(coll),id)); }
+async function restoreDoc(coll,obj){ const {id,...data}=obj; await setDoc(doc(db,cn(coll),id),data); } // merge yok → tam geri yükle
 // aktif kullanıcı (oturum) — hareketler kime ait damgalansın
 let AKTIF_KUL=null;
 async function harKaydet(obj){ const o=AKTIF_KUL?{kullaniciId:AKTIF_KUL.id,kullaniciAd:AKTIF_KUL.ad,...obj}:obj; return save("pazarlama_hareket",o); }
@@ -101,9 +107,9 @@ async function bagYaz(u, yeniAdet, ekstra){ const uid=AKTIF_KUL?AKTIF_KUL.id:"";
 function fiyatOnay(kalemler){ const s=kalemler.filter(x=>num(x.fiyat)<=0);
   if(!s.length) return true;
   return confirm("⚠ Satış fiyatı 0 ₺ olan ürün(ler):\n"+s.map(x=>"• "+x.ad).join("\n")+"\n\nBu haliyle 0 ciro yazılır. Yine de devam edeyim mi?\n(Fiyatı Cephane / Stok kısmından düzeltebilirsin.)"); }
-function useColl(name){
+function useColl(name, demoFlag){
   const [rows,setRows]=useState([]);
-  useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>console.error(name,e)),[name]);
+  useEffect(()=>onSnapshot(collection(db,cn(name)),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>console.error(name,e)),[name,demoFlag]);
   return rows;
 }
 // kullanıcılar — yüklendi bilgisiyle (ilk-açılış ekranı için)
@@ -2576,14 +2582,14 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const rezBenim=t=> rezAktif(t) && t.is.rezerveId===benId;
   const rezBaska=t=> rezAktif(t) && t.is.rezerveId!==benId;
   const tablaBadge=toplanacak.some(t=>!rezBaska(t));   // ilgilenebileceğim (boşta ya da benim) tabla var mı
-  async function tablaUstlen(t){ const ref=doc(db,"plan",t.is.id);
+  async function tablaUstlen(t){ const ref=doc(db,cn("plan"),t.is.id);
     try{ await runTransaction(db, async(tx)=>{ const s=await tx.get(ref); if(!s.exists())throw new Error("yok"); const d=s.data();
       if(d.tablaAlindi) throw new Error("alindi");
       if(d.rezerveId && d.rezerveId!==benId && num(d.rezerveBitis)>Date.now()) throw new Error("rezerve");
       tx.set(ref,{rezerveId:benId,rezerveAd:(aktif?aktif.ad:""),rezerveBitis:Date.now()+30*60000},{merge:true}); }); }
     catch(e){ const m=String(e.message||e); if(m==="alindi")return alert("Bu tabla zaten toplanmış."); if(m==="rezerve")return alert("⚠ Bu görevi başka biri üstlendi."); return alert("Olmadı, tekrar dene."); }
     alert("🖐 Görev senin — 30 dk içinde topla."); }
-  async function tablaTopla(t){ if(!confirm("Tabla toplandı mı?\nÜcret: "+tl(tablaUc))) return; const ref=doc(db,"plan",t.is.id);
+  async function tablaTopla(t){ if(!confirm("Tabla toplandı mı?\nÜcret: "+tl(tablaUc))) return; const ref=doc(db,cn("plan"),t.is.id);
     try{ await runTransaction(db, async(tx)=>{ const s=await tx.get(ref); if(!s.exists())throw new Error("yok"); const d=s.data();
       if(d.tablaAlindi) throw new Error("alindi");
       if(d.rezerveId && d.rezerveId!==benId && num(d.rezerveBitis)>Date.now()) throw new Error("rezerve");
@@ -3150,22 +3156,36 @@ function CephaneBandi({ plan, makineler, now }){
 function App(){
   const [sekme, setSekme] = useState(()=>{ try{ const v=localStorage.getItem("tk_sekme")||"plan"; return v==="oyun"?"pazarlama":v; }catch(e){ return "plan"; } });
   useEffect(()=>{ try{ localStorage.setItem("tk_sekme",sekme); }catch(e){} },[sekme]);
-  const makineler = useColl("makineler");
-  const plan = useColl("plan");
-  const stokUrun = useColl("stok_urun");
-  const filamentler = useColl("filament");
-  const pazHareket = useColl("pazarlama_hareket");
-  const bolgeler = useColl("bolge");
-  const musteriler = useColl("musteri");
-  const seferler = useColl("sefer");
-  const ayarlar = useColl("ayar");
-  const ayar = ayarlar.find(a=>a.id==="genel")||{};
-  const tablaUcret = ayar.tablaUcret!=null ? num(ayar.tablaUcret) : 5;
+  // oturum önce çözülür → demo hesabıysa oyun koleksiyonları demo_ önekine gider
   const {rows:kullanicilar,loaded:kulYuklendi}=useKullanici();
   const [aktifId,setAktifId]=useState(()=>{ try{ return localStorage.getItem("tk_uid"); }catch(e){ return null; } });
-  const [ekipAcik,setEkipAcik]=useState(false);
   const aktif=kullanicilar.find(u=>u.id===aktifId)||null;
   AKTIF_KUL=aktif;
+  const demo=!!(aktif && aktif.demo); DEMO_MODE=demo;
+  const makineler = useColl("makineler",demo);
+  const plan = useColl("plan",demo);
+  const stokUrun = useColl("stok_urun",demo);
+  const filamentler = useColl("filament",demo);
+  const pazHareket = useColl("pazarlama_hareket",demo);
+  const bolgeler = useColl("bolge",demo);
+  const musteriler = useColl("musteri",demo);
+  const seferler = useColl("sefer",demo);
+  const ayarlar = useColl("ayar",demo);
+  const ayar = ayarlar.find(a=>a.id==="genel")||{};
+  const tablaUcret = ayar.tablaUcret!=null ? num(ayar.tablaUcret) : 5;
+  const [ekipAcik,setEkipAcik]=useState(false);
+  // 🎮 demo hesabı + verisini ana stoktan hazırla (yalnız yönetici; demo_ koleksiyonlarına yazar)
+  async function demoHazirla(){
+    if(!confirm("🎮 Demo hesabı ve verisi hazırlanacak.\nÜrünler/makineler ana veriden demo alanına kopyalanır (çantalar sıfır, satış geçmişi boş).\nDemo'da yaptıkların ana veriyi ETKİLEMEZ. Devam?")) return;
+    try{
+      await setDoc(doc(db,"kullanici","demo"),{ad:"Demo (deneme)",rol:"pazarlamaci",simge:"🎮",demo:true,pin:"0000",renkH:210},{merge:true});
+      for(const u of stokUrun){ const {id,pazStokK,satildi,konsinye,montajElle,parcaElle,parcaTuket,montajBitti,zayiat,...rest}=u; await setDoc(doc(db,"demo_stok_urun",id),{...rest,pazStokK:{}},{merge:false}); }
+      for(const m of makineler){ const {id,...rest}=m; await setDoc(doc(db,"demo_makineler",id),rest,{merge:false}); }
+      for(const f of filamentler){ const {id,...rest}=f; await setDoc(doc(db,"demo_filament",id),rest,{merge:false}); }
+      for(const a of ayarlar){ const {id,...rest}=a; await setDoc(doc(db,"demo_ayar",id),rest,{merge:false}); }
+      alert("🎮 Demo hazır!\nÇıkış yap → 'Demo (deneme)' hesabına PIN 0000 ile gir.\nYaptığın her şey demo alanında kalır, ana stok/veri etkilenmez.");
+    }catch(e){ alert("Demo hazırlanamadı: "+(e.message||e)); }
+  }
   function giris(u){ setAktifId(u.id); try{ localStorage.setItem("tk_uid",u.id); }catch(e){} }
   function cikis(){ setAktifId(null); try{ localStorage.removeItem("tk_uid"); }catch(e){} }
   const [bas, setBas] = useState(()=>haftaBasi(Date.now()).getTime());
@@ -3261,12 +3281,16 @@ function App(){
   const gorSekme = izin.includes(sekme) ? sekme : (isAdmin?"plan":"pazarlama");
 
   return h("div",{style:S.wrap},
+    // 🎮 DEMO şeridi — deneme modunda ana veri etkilenmez
+    demo && h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"8px 12px",borderRadius:10,background:"linear-gradient(135deg,#7c3aed,#0369a1)",color:"#fff",fontWeight:800,fontSize:12.5}},
+      h("span",{style:{fontSize:16}},"🎮"), h("span",null,"DEMO / deneme modu — burada yaptıkların ana stoğu ve gerçek verileri ETKİLEMEZ.")),
     // kullanıcı çubuğu
-    h("div",{style:{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:12,padding:"8px 12px",background:"#0f172a",borderRadius:12,color:"#fff"}},
+    h("div",{style:{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:12,padding:"8px 12px",background: demo?"#4c1d95":"#0f172a",borderRadius:12,color:"#fff"}},
       h("div",{style:{fontSize:22}},aktif.simge||"🙂"),
       h("div",{style:{flex:1,minWidth:0}},
         h("div",{style:{fontWeight:800,fontSize:14}},aktif.ad),
-        h("div",{style:{fontSize:11,opacity:.75}}, isAdmin?"Yönetici — tüm yetkiler":"Pazarlamacı")),
+        h("div",{style:{fontSize:11,opacity:.75}}, demo?"🎮 Demo (deneme)":(isAdmin?"Yönetici — tüm yetkiler":"Pazarlamacı"))),
+      isAdmin && h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:demoHazirla,title:"Demo hesabı ve verisini ana stoktan hazırla"},"🎮 Demo hazırla"),
       isAdmin && h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:()=>setEkipAcik(true)},"👥 Ekip"),
       h("button",{style:{...S.ibtn,background:"#1e293b",color:"#fff",borderColor:"#334155"},onClick:cikis},"Çıkış")),
     // üst sekme — yalnız yönetici (pazarlamacının tek sayfası var; üretim bandı şimdilik kaldırıldı)
