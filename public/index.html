@@ -1044,6 +1044,48 @@ function CantaDoldurModal({ urunler, seferIdAl, onKapat }){
               value:mik[u.id]||"",onChange:e=>set(u.id,e.target.value),placeholder:"0"})); })));
 }
 
+// ⚡ GERİLLA VURUŞU — seyyar / vur-kaç satış: çantadan bir bölgeye peşin satış (kalıcı kale kurmaz)
+function GerillaModal({ bagItems, bolgeler, aktifSeferId, seferIdAl, onKapat }){
+  const [bolge,setBolge]=useState("");
+  const [adet,setAdet]=useState({});   // urunId -> adet
+  const [fiyat,setFiyat]=useState({});  // urunId -> ₺ (varsayılan satışFiyatı)
+  const fiyatOf=u=> (fiyat[u.id]!==undefined&&fiyat[u.id]!=="") ? num(fiyat[u.id]) : num(u.satisFiyat);
+  const secili=(bagItems||[]).map(u=>({u,adet:Math.max(0,Math.floor(num(adet[u.id])))})).filter(x=>x.adet>0);
+  const toplam=secili.reduce((s,x)=>s+x.adet*fiyatOf(x.u),0);
+  const kar=secili.reduce((s,x)=>s+x.adet*(fiyatOf(x.u)-num(x.u.pazFiyat)),0);
+  async function vur(){
+    if(!bolge.trim()) return alert("Hangi bölgede seyyar satış yaptın? Bölge yaz.");
+    if(!secili.length) return alert("En az bir ürün adedi gir.");
+    for(const x of secili){ if(x.adet>bagOf(x.u)) return alert(x.u.ad+": çantanda "+bagOf(x.u)+" var."); }
+    if(!fiyatOnay(secili.map(x=>({ad:x.u.ad,fiyat:fiyatOf(x.u)})))) return;
+    const sid = aktifSeferId || (seferIdAl?await seferIdAl():null);
+    const iso=new Date().toISOString();
+    for(const {u,adet:ad} of secili){ const f=fiyatOf(u);
+      await bagYaz(u, bagOf(u)-ad);
+      await harKaydet({tip:"satis",gerilla:true,kaynak:"gerilla",urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(u.pazFiyat),satisFiyat:f,tahsil:ad*f,yer:"⚡ Seyyar · "+bolge.trim(),bolge:bolge.trim(),musteriId:"",seferId:sid,tarih:iso}); }
+    onKapat();
+    alert("⚡ Gerilla vuruşu! "+tl(toplam)+" peşin ganimet (kâr "+tl(kar)+").\nKalıcı kale kurulmadı — güç/rütbe kazandırmaz.");
+  }
+  return h(Modal,{ baslik:"⚡ Gerilla Vuruşu — seyyar satış", onKapat,
+    alt:h(React.Fragment,null,
+      h("button",{style:{...S.btn("p"),flex:1,background:"#b45309",borderColor:"#b45309"},onClick:vur}, "⚡ Vur & kaç"+(toplam>0?(" · "+tl(toplam)):"")),
+      h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
+    h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10,lineHeight:1.5}},"Hızlı ",h("b",null,"peşin")," satış — konsinye yok, alacak yok, anında nakit. Ama ",h("b",{style:{color:"#b45309"}},"kalıcı kale kurmaz"),": güç/rütbe/hakimiyet kazandırmaz."),
+    h(Field,{label:"📍 Bölge (nerede seyyar sattın?)"}, h(React.Fragment,null,
+      h("input",{style:S.input,list:"gerilla-bolge",value:bolge,onChange:e=>setBolge(e.target.value),placeholder:"örn. Kadıköy sahili"}),
+      h("datalist",{id:"gerilla-bolge"},(bolgeler||[]).map(b=>h("option",{key:b.id,value:b.ad}))))),
+    !bagItems.length ? h("div",{style:{...S.card,padding:16,color:C.mut,textAlign:"center"}},"Çantan boş. Önce Cephane'den ürün al.")
+    : h("div",{style:{display:"grid",gap:8}},
+        bagItems.map(u=>h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",background:"#fafbfc",border:"1px solid "+C.line,borderRadius:10}},
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+            h("div",{style:{fontSize:11,color:C.mut}},"çantanda "+bagOf(u))),
+          h("input",{type:"number",min:0,style:{...S.input,width:74,padding:"6px 8px",textAlign:"center"},title:"birim satış ₺",value:fiyat[u.id]!==undefined?fiyat[u.id]:(u.satisFiyat||""),onChange:e=>setFiyat(s=>({...s,[u.id]:e.target.value}))}),
+          h("input",{type:"number",min:0,style:{...S.input,width:60,padding:"6px 8px",textAlign:"center",fontWeight:700},placeholder:"adet",value:adet[u.id]||"",onChange:e=>setAdet(s=>({...s,[u.id]:e.target.value}))})))),
+    toplam>0 && h("div",{style:{marginTop:10,fontSize:12.5,fontWeight:700,color:"#78350f",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:9,padding:"8px 11px"}},
+      "⚡ Peşin ganimet: "+tl(toplam)+" · kâr "+tl(kar)));
+}
+
 // SEFER RAPORU — çanta boşaltılınca / geçmiş sefer özeti (üreticiye verilecek + sana kalan; PDF & WhatsApp)
 function SeferRaporModal({ sefer, hareketler, onKapat }){
   const har=(hareketler||[]).filter(x=>x.seferId===sefer.id);
@@ -2105,6 +2147,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [alt,setAlt]=useState("komuta");
   const [yeniBolge,setYeniBolge]=useState("");
   const [cantaDoldur,setCantaDoldur]=useState(false);
+  const [gerillaAcik,setGerillaAcik]=useState(false);   // ⚡ seyyar/vur-kaç satış
   const [musteriBag,setMusteriBag]=useState(null);
   const [rapor,setRapor]=useState(null);
   const [islem,setIslem]=useState(null);     // {u,mod,musteri}
@@ -2181,7 +2224,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
   const kulById={}; (kullanicilar||[]).forEach(u=>kulById[u.id]=u);
   const kaleMap={};
-  (hareketler||[]).forEach(x=>{ if(x.tip!=="satis"&&x.tip!=="konsinye") return;
+  (hareketler||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||x.gerilla) return;   // ⚡ gerilla=seyyar → kale kurmaz
     const key = x.musteriId ? ("m:"+x.musteriId) : ("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
     const k = kaleMap[key] || (kaleMap[key]={ key, musteriId:x.musteriId||"", ad:x.yer||"", bolge:x.bolge||"", lat:x.lat||"", lng:x.lng||"", satisAdet:0, satisCiro:0, konsinyeAdet:0, sahipPuan:{} });
     if(x.tip==="satis"){ k.satisAdet+=num(x.adet); k.satisCiro+=num(x.adet)*num(x.satisFiyat); } else k.konsinyeAdet+=num(x.adet);
@@ -2202,7 +2245,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     .sort((a,b)=>b.guc-a.guc);
   // KOMUTANLAR — #9 TÜM ekibin küresel sıralaması (herkes görebilir; rekabet/teşvik)
   const gKaleMap={};
-  (_tumHar||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId) return;
+  (_tumHar||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId||x.gerilla) return;
     if(x.musteriId&&arsivId.has(x.musteriId)) return;
     const key=x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
     const k=gKaleMap[key]||(gKaleMap[key]={satisAdet:0,konsinyeAdet:0,satisCiro:0,puan:{}});
@@ -2219,7 +2262,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     .sort((a,b)=>b.guc-a.guc);
   // DİĞER pazarlamacıların kaleleri — haritada salt-okunur (sadece isim + genel bilgi)
   const digerKaleler = adminGor ? [] : (()=>{ const mp={};
-    _tumHar.forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId||x.kullaniciId===aktif.id) return;
+    _tumHar.forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId||x.kullaniciId===aktif.id||x.gerilla) return;
       const key=x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
       const k=mp[key]||(mp[key]={key,musteriId:x.musteriId||"",ad:x.yer||"",bolge:x.bolge||"",lat:x.lat||"",lng:x.lng||"",satisAdet:0,konsinyeAdet:0,satisCiro:0,sahipId:x.kullaniciId});
       if(x.tip==="satis"){k.satisAdet+=num(x.adet);k.satisCiro+=num(x.adet)*num(x.satisFiyat);} else k.konsinyeAdet+=num(x.adet);
@@ -2246,8 +2289,15 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const sefKons=aktifSefer?(hareketler||[]).filter(x=>x.tip==="konsinye"&&x.seferId===aktifSefer.id):[];
   const sefSatA=sefSatis.reduce((s,x)=>s+num(x.adet),0), sefCiro=sefSatis.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0), sefKonA=sefKons.reduce((s,x)=>s+num(x.adet),0);
   const kaleKey=x=> x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"").toLocaleLowerCase("tr")));
-  const oncekiKeys=new Set(aktifSefer?(hareketler||[]).filter(x=>x.tip==="satis"&&new Date(x.tarih)<new Date(aktifSefer.baslangic)).map(kaleKey):[]);
-  const yeniKaleSayi=new Set(sefSatis.map(kaleKey).filter(k=>!oncekiKeys.has(k))).size;
+  const oncekiKeys=new Set(aktifSefer?(hareketler||[]).filter(x=>x.tip==="satis"&&!x.gerilla&&new Date(x.tarih)<new Date(aktifSefer.baslangic)).map(kaleKey):[]);
+  const yeniKaleSayi=new Set(sefSatis.filter(x=>!x.gerilla).map(kaleKey).filter(k=>!oncekiKeys.has(k))).size;
+  // ⚡ GERİLLA (seyyar / vur-kaç) — anlık peşin nakit; kalıcı kale/güç kurmaz
+  const gerillaSat=satis.filter(x=>x.gerilla);
+  const gerillaGanimet=gerillaSat.reduce((s,x)=>s+num(x.satisFiyat)*num(x.adet),0);
+  const gerillaPay = ciro>0 ? gerillaGanimet/ciro : 0;
+  const vurkacUyari = gerillaGanimet>0 && gerillaPay>=0.4;   // gelirinin çoğu kalıcı olmayan işten
+  const sonGerillaT = gerillaSat.reduce((mx,x)=>Math.max(mx,new Date(x.tarih).getTime()),0);
+  const vurkacModu = sonGerillaT>0 && (Date.now()-sonGerillaT)<48*3600*1000;   // görsel: son 48 saatte vuruş
   async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik",kullaniciId:AKTIF_KUL?AKTIF_KUL.id:""}); }
   async function seferiBitir(){ if(!aktifSefer && !cephane.length) return alert("Aktif sefer yok.");
     if(!confirm("Seferi bitir — kalan cephaneyi atölyeye geri çek?")) return;
@@ -2358,7 +2408,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const diploSay=(hareketler||[]).filter(x=>x.tip==="diplomasi").length;
   const diplo=katOf(DIPLO_TIER,diploSay), diploNext=DIPLO_TIER.find(x=>x[0]>diploSay)||null;
   // —— OYUNCU KARTI (mertebe) — sayfanın en üstünde, tüm sekmelerde görünür ——
-  const komutaKart=()=>h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:14,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
+  const komutaKart=()=>h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:14,boxShadow: vurkacModu?"0 0 22px rgba(245,158,11,.6)":"0 8px 24px rgba(0,0,0,.12)",transition:"box-shadow .3s"}},
       h("div",{style:{background:"linear-gradient(135deg,#7f1d1d,#b45309)",color:"#fff",padding:"18px"}},
         h("div",{style:{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}},
           h("div",{className:"tk-float",style:{fontSize:46}},komutan[2]),
@@ -2370,7 +2420,11 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
               h("div",{style:{fontSize:12,opacity:.92,display:"inline-flex",alignItems:"center",gap:6,background:"rgba(255,255,255,.16)",borderRadius:99,padding:"2px 10px"}},
                 diplo[2]+" "+diplo[1]+" · 🤝 "+diploSay+" diplomasi"+(diploNext?(" · "+(diploNext[0]-diploSay)+" → "+diploNext[2]+" "+diploNext[1]):"")),
               alacakGenel!==0 && h("div",{style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:alacakGenel>0?"rgba(254,202,202,.95)":"rgba(191,219,254,.95)",color:alacakGenel>0?"#991b1b":"#0369a1",borderRadius:99,padding:"2px 10px"}},
-                alacakGenel>0?("🧾 "+tl(alacakGenel)+" alacak"):("💳 "+tl(-alacakGenel)+" avans")))),
+                alacakGenel>0?("🧾 "+tl(alacakGenel)+" alacak"):("💳 "+tl(-alacakGenel)+" avans")),
+              gerillaGanimet>0 && h("div",{title:"Seyyar/vur-kaç geliri — kalıcı kale kurmaz",style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:"rgba(253,224,71,.95)",color:"#78350f",borderRadius:99,padding:"2px 10px"}},
+                "⚡ "+tl(gerillaGanimet)+" ganimet"),
+              vurkacUyari && h("div",{title:"Gelirinin çoğu kalıcı olmayan seyyar satıştan — kale kur!",style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:"rgba(254,215,170,.95)",color:"#9a3412",borderRadius:99,padding:"2px 10px"}},
+                "⚠ vur-kaç ağırlıkta %"+Math.round(gerillaPay*100)))),
           h("div",{style:{textAlign:"center"}},
             h("div",{style:{fontSize:30,fontWeight:800,lineHeight:1}},kaleler.length),
             h("div",{style:{fontSize:11,opacity:.85}},"kale"))),
@@ -2533,7 +2587,16 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                 h("button",{style:{...S.ibtn,color:"#fff",background:C.yesilB,borderColor:C.yesilB,fontWeight:800},onClick:()=>tablaTopla(t)},"✅ Bitir +"+tl(tablaUc)))
             : h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:800,flexShrink:0},onClick:()=>tablaUstlen(t)},"🖐 Üstlen (30dk)")); }))),
     tablaKazanc>0 && h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:10}},"🧹 Toplam tabla ücretin: "+tl(tablaKazanc)),
-    h("div",{style:{fontSize:12,color:C.mut,marginBottom:12}},"🎒 Cephane — ürünlerin. Atölyeden çantana al, sahada sat/konsinye yap."),
+    h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🎒 Cephane — ürünlerin. Atölyeden çantana al, sahada sat/konsinye yap."),
+    // ⚡ GERİLLA VURUŞU (seyyar satış) — anlık nakit, kalıcı kale kurmaz
+    cephane.length>0 && h("button",{onClick:()=>setGerillaAcik(true),
+      style:{width:"100%",marginBottom:12,padding:"11px 14px",borderRadius:12,cursor:"pointer",border:"1px solid #f59e0b",
+        background:"linear-gradient(135deg,#1e293b,#7c2d12)",color:"#fff",display:"flex",alignItems:"center",gap:10,textAlign:"left"}},
+      h("span",{style:{fontSize:24}},"⚡"),
+      h("span",{style:{flex:1,minWidth:0}},
+        h("span",{style:{display:"block",fontWeight:800,fontSize:14}},"Gerilla Vuruşu — seyyar satış"),
+        h("span",{style:{display:"block",fontSize:11,opacity:.85}},"Hızlı peşin nakit · konsinye/alacak yok · kalıcı kale kurmaz")),
+      h("span",{style:{fontSize:12,fontWeight:800,color:"#fbbf24",flexShrink:0}},"Vur & kaç →")),
     !urunListe.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Ürün yok. Stok sekmesinden ekle.")
     : h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))"}},
         urunListe.map(u=>{ const r=adRenk(u.ad); const foto=(u.foto||[])[0];
@@ -2735,6 +2798,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
           (k==="cephane" && tablaBadge) && h("span",{style:{position:"absolute",top:-5,right:-5,minWidth:18,height:18,padding:"0 5px",borderRadius:9,background:"#dc2626",color:"#fff",fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 0 2px "+C.bg,animation:"pulse 1.6s infinite"}},"!")); })),
     (viewMap[alt]||fetihView)(),
     cantaDoldur && h(CantaDoldurModal,{urunler,seferIdAl,onKapat:()=>setCantaDoldur(false)}),
+    gerillaAcik && h(GerillaModal,{bagItems:cephane,bolgeler,aktifSeferId:aktifSefer?aktifSefer.id:null,seferIdAl,onKapat:()=>setGerillaAcik(false)}),
     musteriBag && h(MevkiModal,{musteri:musteriBag,bagItems:cephane,urunler,hareketler,aktifSeferId:aktifSefer?aktifSefer.id:null,onKapat:()=>setMusteriBag(null)}),
     islem && (()=>{ const u=urunListe.find(x=>x.id===islem.u.id)||islem.u;
       return h(PazIslemModal,{u,mod:islem.mod,alisVar:num(u.pazFiyat)||null,bolgeler,musteriler,secMusteri:islem.musteri||null,aktifSeferId:aktifSefer?aktifSefer.id:null,seferIdAl,onKapat:()=>setIslem(null)}); })(),
