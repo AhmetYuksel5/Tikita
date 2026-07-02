@@ -29,6 +29,20 @@
   @keyframes tkshine{to{background-position:200% 0}}
   .tk-shine{background-size:200% auto;animation:tkshine 2.5s linear infinite}
   .tk-pcard{transition:transform .15s ease, box-shadow .15s ease}
+  /* —— cephane üretim bandı —— */
+  @keyframes tkspin{to{transform:rotate(360deg)}}
+  .tk-spin{animation:tkspin 3s linear infinite}
+  .tk-spin-fast{animation:tkspin 1.1s linear infinite}
+  @keyframes tkspark{0%,100%{opacity:.15;transform:scale(.7)}45%{opacity:1;transform:scale(1.35)}70%{opacity:.5;transform:scale(.9)}}
+  .tk-spark{animation:tkspark .7s ease-in-out infinite}
+  @keyframes tkbelt{to{background-position:-40px 0}}
+  .tk-belt{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.10) 0 3px,transparent 3px 20px);animation:tkbelt .55s linear infinite}
+  @keyframes tkbob{0%,100%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg)}50%{transform:translate(-50%,-50%) translateY(-4px) rotate(3deg)}}
+  .tk-bob{animation:tkbob 1.3s ease-in-out infinite}
+  @keyframes tkscan{0%{left:-30%}100%{left:130%}}
+  .tk-scan{animation:tkscan 1.8s linear infinite}
+  @keyframes tkpiston{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
+  .tk-piston{animation:tkpiston .5s ease-in-out infinite}
   .tk-pcard:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(15,23,42,.18)}
   /* —— FETİH: modern + fantastik strateji oyunu haritası (RISK tahtası tarzı) —— */
   .tk-fetih-map{position:relative;box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 6px 18px rgba(15,23,42,.18)}
@@ -3000,6 +3014,65 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
 }
 
 /* ============================================================
+   ⚙️ CEPHANE ÜRETİM BANDI — pazarlamacıya özel animasyonlu üretim hattı
+   (Gantt yerine; her makine bir bant, çalışan işler canlı akıyor)
+   ============================================================ */
+function CephaneBandi({ plan, makineler, now }){
+  const mlist=(makineler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const SIM=["🔩","🛠️","⚙️","🔧","🛡️","⛓️","🔨"];
+  const isler=mk=>(plan||[]).filter(p=>p.makineId===mk.id);
+  const aktifOf=mk=>isler(mk).find(p=>p.basladi && new Date(p.baslangic).getTime()<=now && new Date(p.baslangic).getTime()+num(p.sureDk)*60000>now);
+  const aktifSay=mlist.filter(mk=>aktifOf(mk)).length;
+  return h("div",null,
+    // başlık şeridi
+    h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:16,padding:"14px 16px",borderRadius:14,
+      background:"linear-gradient(135deg,#0b1220,#1e293b)",color:"#fff",boxShadow:"0 8px 24px rgba(2,6,23,.3)"}},
+      h("div",{className:"tk-spin",style:{fontSize:30,lineHeight:1}},"⚙️"),
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:19,fontWeight:800,letterSpacing:.5}},"CEPHANE ÜRETİM BANDI"),
+        h("div",{style:{fontSize:12,opacity:.8}}, mlist.length+" hat · "+aktifSay+" tanesi üretimde")),
+      h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
+        [0,1,2].map(i=>h("span",{key:i,className:"tk-spark",style:{fontSize:14,animationDelay:(i*0.22)+"s",color:"#f59e0b"}},"✦")))),
+    !mlist.length ? h("div",{style:{...S.card,padding:24,textAlign:"center",color:C.mut}},"Üretim hattı yok.")
+    : h("div",{style:{display:"grid",gap:12}},
+        mlist.map((mk,mi)=>{ const p=aktifOf(mk); const ikon=SIM[mi%SIM.length];
+          const bekle=isler(mk).filter(j=>new Date(j.baslangic).getTime()>now).length;
+          let pct=0,kalanDk=0,ad="",adet=0;
+          if(p){ const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000; pct=Math.max(3,Math.min(100,(now-s)/(e-s)*100)); kalanDk=Math.max(0,Math.ceil((e-now)/60000)); ad=p.ad||"Üretim"; adet=num(p.adet||1); }
+          return h("div",{key:mk.id,style:{...S.card,padding:"10px 12px",overflow:"hidden"}},
+            // hat başlığı
+            h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:8}},
+              h("span",{className:p?"tk-spin-fast":"",style:{fontSize:16,opacity:p?1:.35}},"⚙️"),
+              h("div",{style:{fontWeight:800,fontSize:14,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},mk.ad),
+              p ? h("span",{style:{fontSize:11,fontWeight:800,color:"#b45309",background:"#fef3c7",borderRadius:6,padding:"2px 8px"}},"● ÜRETİMDE")
+                : h("span",{style:{fontSize:11,fontWeight:700,color:C.mut,background:"#f1f5f9",borderRadius:6,padding:"2px 8px"}},"BOŞTA")),
+            // bant
+            p
+              ? h("div",{className:"tk-belt",style:{position:"relative",height:66,borderRadius:10,background:"#0b1220",overflow:"hidden"}},
+                  // ilerleme dolgusu (kızgın metal)
+                  h("div",{style:{position:"absolute",top:0,bottom:0,left:0,width:pct+"%",background:"linear-gradient(90deg,rgba(245,158,11,.35),rgba(245,158,11,.08))",borderRight:"2px solid #f59e0b",boxShadow:"0 0 16px rgba(245,158,11,.5)"}}),
+                  // tarama ışığı
+                  h("div",{className:"tk-scan",style:{position:"absolute",top:0,bottom:0,width:"30%",background:"linear-gradient(90deg,transparent,rgba(56,189,248,.20),transparent)"}}),
+                  // üst pistonlar
+                  h("div",{style:{position:"absolute",top:6,left:0,right:0,display:"flex",justifyContent:"space-around",pointerEvents:"none"}},
+                    [0,1,2,3,4,5].map(i=>h("span",{key:i,className:"tk-piston",style:{fontSize:10,opacity:.45,animationDelay:(i*0.1)+"s",color:"#64748b"}},"▮"))),
+                  // hareketli ürün + kıvılcım
+                  h("div",{className:"tk-bob",style:{position:"absolute",top:"52%",left:pct+"%",display:"flex",flexDirection:"column",alignItems:"center",zIndex:2}},
+                    h("span",{className:"tk-spark",style:{fontSize:12,color:"#fde047",marginBottom:-3}},"✦"),
+                    h("div",{style:{fontSize:22,filter:"drop-shadow(0 2px 4px rgba(0,0,0,.6))"}},ikon)),
+                  // sol alt bilgi
+                  h("div",{style:{position:"absolute",left:10,bottom:6}},
+                    h("div",{style:{fontSize:12.5,fontWeight:800,color:"#e2e8f0",textShadow:"0 1px 3px #000",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}, adet+"× "+ad)),
+                  // sağ alt: yüzde + kalan
+                  h("div",{style:{position:"absolute",right:10,bottom:6,textAlign:"right"}},
+                    h("div",{style:{fontSize:14,fontWeight:800,color:"#fbbf24",textShadow:"0 1px 3px #000"}}, Math.round(pct)+"%"),
+                    h("div",{style:{fontSize:10.5,color:"#94a3b8"}}, "⏳ "+fmtSureSaat(kalanDk))))
+              : h("div",{className:"tk-belt",style:{position:"relative",height:66,borderRadius:10,background:"#111827",opacity:.6,display:"flex",alignItems:"center",justifyContent:"center",animationDuration:"1.5s"}},
+                  h("div",{style:{fontSize:12,color:"#64748b",fontWeight:700}}, bekle>0?("⏸ Sırada "+bekle+" iş bekliyor"):"⏸ Boşta")),
+            bekle>0 && p && h("div",{style:{fontSize:11,color:C.mut,marginTop:6}},"⏭ Sırada "+bekle+" iş var")); })));
+}
+
+/* ============================================================
    APP
    ============================================================ */
 function App(){
@@ -3129,15 +3202,23 @@ function App(){
       isAdmin
         ? navListe.map(([k,ad])=>
             h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(gorSekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))
-        // pazarlamacı: bu zaten ana sayfası — tek geçiş butonu (Cephane Üretim ↔ Pazarlama)
-        : h("button",{onClick:()=>setSekme(gorSekme==="plan"?"pazarlama":"plan"),style:{...S.btn(),padding:"10px 18px",fontWeight:700}},
-            gorSekme==="plan"?"← Pazarlama":"🏭 Cephane Üretim")),
+        // pazarlamacı: ana sayfası pazarlama — sağda büyükçe cephane ikonu → üretim bandı
+        : h("button",{onClick:()=>setSekme(gorSekme==="plan"?"pazarlama":"plan"),
+            title: gorSekme==="plan"?"Pazarlamaya dön":"Cephane Üretim Bandı",
+            style:{marginLeft:"auto",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,
+              width:62,height:62,borderRadius:16,cursor:"pointer",flexShrink:0,
+              border:"1px solid "+(gorSekme==="plan"?"#f59e0b":"#334155"),
+              background: gorSekme==="plan"?"linear-gradient(135deg,#b45309,#78350f)":"linear-gradient(135deg,#0b1220,#1e293b)",
+              color:"#fff",boxShadow: gorSekme==="plan"?"0 0 18px rgba(245,158,11,.6)":"0 4px 12px rgba(2,6,23,.3)"}},
+            h("span",{className: gorSekme==="plan"?"tk-spin-fast":"tk-spin",style:{fontSize:25,lineHeight:1}},"⚙️"),
+            h("span",{style:{fontSize:8.5,fontWeight:800,letterSpacing:.3,opacity:.92}}, gorSekme==="plan"?"◄ GERİ":"CEPHANE"))),
     ekipAcik && h(EkipModal,{kullanicilar,aktif,tablaUcret,onKapat:()=>setEkipAcik(false)}),
     gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket}),
     gorSekme==="pazarlama" && (isAdmin
       ? h(PazarlamaTakip,{hareketler:pazHareket,musteriler,kullanicilar,urunler:stokUrun,seferler})
       : h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret})),
-    gorSekme==="plan" && h("div",null,
+    gorSekme==="plan" && !isAdmin && h(CephaneBandi,{plan,makineler:mlist,now}),
+    gorSekme==="plan" && isAdmin && h("div",null,
     // başlık
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}},
       h("div",null,
