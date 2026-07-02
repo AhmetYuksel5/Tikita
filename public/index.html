@@ -1278,6 +1278,45 @@ function MusteriBagModal({ musteri, bagItems, aktifSeferId, onKapat }){
 }
 
 // MEVKİ ZİYARETİ — burada bıraktıkların (sat/iade) + yeni bırak/sat (tek sayfa)
+// Hareket satırına tıklayınca — düzenle / sil
+function HareketDuzenModal({ hareket, onSil, onKapat }){
+  const x=hareket;
+  const [f,setF]=useState(()=>({ adet:x.adet!=null?String(x.adet):"", satisFiyat:x.satisFiyat!=null?String(x.satisFiyat):"",
+    alisFiyat:x.alisFiyat!=null?String(x.alisFiyat):"", tahsil:x.tahsil!=null?String(x.tahsil):"", tutar:x.tutar!=null?String(x.tutar):"",
+    fiyat:x.fiyat!=null?String(x.fiyat):"", kalan:x.kalan!=null?String(x.kalan):"", mod:x.mod||"hediye",
+    tarih: x.tarih? new Date(x.tarih).toISOString().slice(0,10):"" }));
+  const set=(k,v)=>setF(s=>({...s,[k]:v}));
+  async function kaydet(){ const u={id:x.id};
+    if(f.tarih) u.tarih=new Date(f.tarih+"T12:00:00").toISOString();
+    if(x.tip==="satis"){ u.adet=num(f.adet); u.satisFiyat=num(f.satisFiyat); u.alisFiyat=num(f.alisFiyat); u.tahsil=num(f.tahsil); }
+    else if(x.tip==="konsinye"){ u.adet=num(f.adet); u.kalan=num(f.kalan); u.satisFiyat=num(f.satisFiyat); u.alisFiyat=num(f.alisFiyat); }
+    else if(x.tip==="iade"){ u.adet=num(f.adet); }
+    else if(x.tip==="tahsilat"||x.tip==="avans"){ u.tutar=num(f.tutar); }
+    else if(x.tip==="stant"){ u.mod=f.mod; u.fiyat=f.mod==="satis"?num(f.fiyat):0; }
+    await save("pazarlama_hareket",u); onKapat(); }
+  const tipAd={satis:"Satış",konsinye:"Konsinye",iade:"İade",tahsilat:"Tahsilat",avans:"Avans",stant:"Stant",diplomasi:"İletişim",al:"Çantaya al"}[x.tip]||x.tip;
+  const say=x.tip==="satis"||x.tip==="konsinye"||x.tip==="iade";
+  return h(Modal,{ baslik:tipAd+" — düzenle", onKapat,
+    alt:h(React.Fragment,null,
+      h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{ onKapat(); onSil(x); }},"Sil"),
+      h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet},"Kaydet")) },
+    (x.urunAd||x.urunAdlar) && h("div",{style:{fontSize:14,fontWeight:800,marginBottom:12}}, x.urunAd||x.urunAdlar),
+    say && h("div",{style:{display:"grid",gridTemplateColumns: x.tip==="konsinye"?"1fr 1fr":"1fr",gap:10}},
+      h(Field,{label:"Adet"}, h("input",{type:"number",min:0,style:S.input,value:f.adet,onChange:e=>set("adet",e.target.value)})),
+      x.tip==="konsinye" && h(Field,{label:"Kalan"}, h("input",{type:"number",min:0,style:S.input,value:f.kalan,onChange:e=>set("kalan",e.target.value)}))),
+    (x.tip==="satis"||x.tip==="konsinye") && h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      h(Field,{label:"Satış ₺"}, h("input",{type:"number",min:0,style:S.input,value:f.satisFiyat,onChange:e=>set("satisFiyat",e.target.value)})),
+      h(Field,{label:"Alış ₺"}, h("input",{type:"number",min:0,style:S.input,value:f.alisFiyat,onChange:e=>set("alisFiyat",e.target.value)}))),
+    x.tip==="satis" && h(Field,{label:"Alınan ₺ (tahsilat)"}, h("input",{type:"number",min:0,style:S.input,value:f.tahsil,onChange:e=>set("tahsil",e.target.value)})),
+    (x.tip==="tahsilat"||x.tip==="avans") && h(Field,{label:"Tutar ₺"}, h("input",{type:"number",min:0,style:S.input,value:f.tutar,onChange:e=>set("tutar",e.target.value)})),
+    x.tip==="stant" && h(React.Fragment,null,
+      h("div",{style:{display:"flex",gap:6,marginBottom:10}},
+        h("button",{type:"button",onClick:()=>set("mod","hediye"),style:{flex:1,...S.btn(f.mod==="hediye"?"p":"")}},"Hediye"),
+        h("button",{type:"button",onClick:()=>set("mod","satis"),style:{flex:1,...S.btn(f.mod==="satis"?"p":"")}},"Parayla")),
+      f.mod==="satis" && h(Field,{label:"Stant ₺"}, h("input",{type:"number",min:0,style:S.input,value:f.fiyat,onChange:e=>set("fiyat",e.target.value)}))),
+    h(Field,{label:"Tarih"}, h("input",{type:"date",style:S.input,value:f.tarih,onChange:e=>set("tarih",e.target.value)})));
+}
+
 function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKapat }){
   const [s1,setS1]=useState({});      // konsinye çöz adetleri  urunId->adet
   const [lines,setLines]=useState({}); // yeni  urunId->{adet,mod}
@@ -1366,6 +1405,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   const [sec,setSec]=useState({});  // iletişim: seçili ürünler
   const [tahsil,setTahsil]=useState({});  // konsinye satıldı: alınan tutar (urunId->₺)
   const [tahsilGir,setTahsilGir]=useState("");  // Alacak sekmesi: toplu tahsil edilen ₺
+  const [duzenHar,setDuzenHar]=useState(null);  // düzenlenen hareket
   const [tamAlindi,setTamAlindi]=useState(true); const [alinanYeni,setAlinanYeni]=useState(""); // yeni satış tahsilatı
   // GEÇMİŞ İŞLEM GİRİŞİ (geçici yetki) — eski satış/konsinyeleri tarihiyle ekle
   const gecmisYetki = !!(AKTIF_KUL && AKTIF_KUL.gecmisEkle);
@@ -1627,13 +1667,13 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
             : x.tip==="avans" ? ("−"+tl(num(x.tutar)))
             : x.tip==="stant" ? (x.mod==="satis"?("+"+tl(num(x.fiyat))):"🎁")
             : (x.tip==="konsinye"&&num(x.kalan)>0 ? ("kalan "+num(x.kalan)) : "");
-          return h("div",{key:x.id||i,style:{display:"flex",gap:10,alignItems:"center",padding:"9px 0",borderTop:i?"1px solid "+C.line:"none"}},
+          return h("div",{key:x.id||i,onClick:()=>setDuzenHar(x),title:"Düzenle / sil",style:{display:"flex",gap:10,alignItems:"center",padding:"9px 4px",margin:"0 -4px",borderRadius:8,borderTop:i?"1px solid "+C.line:"none",cursor:"pointer"}},
             h("div",{style:{fontSize:18,width:24,textAlign:"center",flexShrink:0}},t.i),
             h("div",{style:{flex:1,minWidth:0}},
               h("div",{style:{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, standEt||(t.ad+(x.urunAd?(" · "+x.urunAd):(x.urunAdlar?(" · "+x.urunAdlar):""))+(num(x.adet)?(" ×"+num(x.adet)):""))),
               h("div",{style:{fontSize:11,color:C.mut}}, fmtTarihSaat(new Date(x.tarih).getTime()))),
             para && h("div",{style:{fontWeight:800,fontSize:13,color:t.renk,flexShrink:0}},para),
-            h("button",{type:"button",title:"Geri al",style:{...S.ibtn,flexShrink:0,padding:"4px 8px",fontSize:13,color:"#b91c1c",borderColor:"#fecaca"},onClick:()=>geriAl(x)},"↩")); }))),
+            h("span",{style:{flexShrink:0,color:C.mut,fontSize:18,fontWeight:700}},"›")); }))),
     // ——— SEKME: İLETİŞİM (diplomasi) ———
     tab==="iletisim" && h("div",null,
       h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10,lineHeight:1.5}},"🤝 Ürünleri seç, fotoğraf ve bilgileriyle WhatsApp'tan gönder. Her gönderim ",h("b",null,"diplomatik ilişki")," sayılır ve seni payelerde yükseltir."),
@@ -1653,7 +1693,8 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     // ——— SEKME: GEÇMİŞ (geçici yetki) ———
     tab==="gecmis" && gecmisYetki && h("div",null,
       h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10,lineHeight:1.5}},"📅 Eski işlemlerini ",h("b",null,"tarihiyle")," ekle. Stok/çantayı etkilemez; sadece bu kalenin geçmişine ve güç hesabına işler."),
-      islemFormu(gec,setGec,gecmisOnayla,true,"📅 Geçmiş işlemi ekle")));
+      islemFormu(gec,setGec,gecmisOnayla,true,"📅 Geçmiş işlemi ekle")),
+    duzenHar && h(HareketDuzenModal,{hareket:duzenHar,onSil:geriAl,onKapat:()=>setDuzenHar(null)}));
 }
 
 // stoktan al / iade / satış / konsinye işlemleri
