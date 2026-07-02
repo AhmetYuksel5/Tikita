@@ -2107,6 +2107,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [cantaDoldur,setCantaDoldur]=useState(false);
   const [gerillaAcik,setGerillaAcik]=useState(false);   // ⚡ seyyar/vur-kaç paneli açık mı
   const [gerillaBolge,setGerillaBolge]=useState("");    // seyyar satış bölgesi
+  const [gerillaLat,setGerillaLat]=useState(""); const [gerillaLng,setGerillaLng]=useState("");
+  const [gerillaFiyat,setGerillaFiyat]=useState({});    // urunId -> anlık seyyar fiyat (değişken)
+  const [konumYuk,setKonumYuk]=useState(false);
   const [musteriBag,setMusteriBag]=useState(null);
   const [rapor,setRapor]=useState(null);
   const [islem,setIslem]=useState(null);     // {u,mod,musteri}
@@ -2261,14 +2264,23 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const gerillaSefSat = aktifSefer ? gerillaSat.filter(x=>x.seferId===aktifSefer.id) : [];
   const gerillaCount={}; gerillaSefSat.forEach(x=>{ gerillaCount[x.urunId]=(gerillaCount[x.urunId]||0)+num(x.adet); });
   const gerillaSefGanimet = gerillaSefSat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+  function gerillaKonumAl(){ if(!navigator.geolocation) return alert("Cihaz konum desteklemiyor.");
+    setKonumYuk(true);
+    navigator.geolocation.getCurrentPosition(async p=>{ const la=p.coords.latitude.toFixed(6), lo=p.coords.longitude.toFixed(6);
+      setGerillaLat(la); setGerillaLng(lo); let nm="";
+      try{ const r=await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=tr&lat="+la+"&lon="+lo); const j=await r.json(); nm=j.name||(j.display_name||"").split(",")[0]||""; }catch(e){}
+      setGerillaBolge(nm || ("Konum "+la+","+lo)); setKonumYuk(false);
+    }, e=>{ setKonumYuk(false); alert("Konum alınamadı: "+e.message); }, {enableHighAccuracy:true,timeout:10000,maximumAge:0}); }
   async function gerillaArti(u){
-    if(!gerillaBolge.trim()) return alert("Önce bölge yaz (nerede seyyar satıyorsun?).");
     if(bagOf(u)<1) return alert(u.ad+": çantanda kalmadı.");
-    if(num(u.satisFiyat)<=0) return alert(u.ad+" için satış fiyatı yok — Cephane'de fiyat gir.");
+    if(!gerillaBolge.trim() && !(gerillaLat&&gerillaLng)) return alert("Önce bölge yaz ya da 📍 ile konumunu al.");
+    // değişken fiyat: satır kutusundaki değer; yoksa ürünün satış fiyatı; o da yoksa sor
+    let f = (gerillaFiyat[u.id]!==undefined && gerillaFiyat[u.id]!=="") ? num(gerillaFiyat[u.id]) : num(u.satisFiyat);
+    if(f<=0){ const v=prompt(u.ad+" — seyyar satış fiyatı (₺):", u.satisFiyat||""); if(v==null) return; f=num(v);
+      if(f<=0) return alert("Geçerli bir fiyat gir."); setGerillaFiyat(s=>({...s,[u.id]:String(f)})); }
     const sid = aktifSefer ? aktifSefer.id : await seferIdAl();
-    const f=num(u.satisFiyat);
     await bagYaz(u, bagOf(u)-1);
-    await harKaydet({tip:"satis",gerilla:true,kaynak:"gerilla",urunId:u.id,urunAd:u.ad,adet:1,alisFiyat:num(u.pazFiyat),satisFiyat:f,tahsil:f,yer:"⚡ Seyyar · "+gerillaBolge.trim(),bolge:gerillaBolge.trim(),musteriId:"",seferId:sid,tarih:new Date().toISOString()});
+    await harKaydet({tip:"satis",gerilla:true,kaynak:"gerilla",urunId:u.id,urunAd:u.ad,adet:1,alisFiyat:num(u.pazFiyat),satisFiyat:f,tahsil:f,yer:"⚡ Seyyar · "+(gerillaBolge.trim()||"Konum"),bolge:gerillaBolge.trim(),lat:gerillaLat||"",lng:gerillaLng||"",musteriId:"",seferId:sid,tarih:new Date().toISOString()});
   }
   async function gerillaEksi(u){   // son seyyar satışı geri al (çantaya döner)
     const sid=aktifSefer?aktifSefer.id:null;
@@ -2443,16 +2455,24 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         h("span",{style:{fontSize:18}}, gerillaAcik?"▾":"▸")),
       gerillaAcik && h("div",{style:{padding:"12px 14px"}},
         h(Field,{label:"📍 Bölge (nerede seyyar satıyorsun?)"}, h(React.Fragment,null,
-          h("input",{style:S.input,list:"gerilla-bolge",value:gerillaBolge,onChange:e=>setGerillaBolge(e.target.value),placeholder:"örn. Kadıköy sahili"}),
-          h("datalist",{id:"gerilla-bolge"},(bolgeler||[]).map(b=>h("option",{key:b.id,value:b.ad}))))),
-        h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:8}},"Her ➕ bir ürünü anında peşin satar ve çantandan düşer. Yanlışsa ➖ ile geri al. Bitince paneli kapat."),
+          h("div",{style:{display:"flex",gap:8}},
+            h("input",{style:{...S.input,flex:1},list:"gerilla-bolge",value:gerillaBolge,onChange:e=>setGerillaBolge(e.target.value),placeholder:"örn. Kadıköy sahili"}),
+            h("button",{type:"button",onClick:gerillaKonumAl,disabled:konumYuk,title:"Konumumu al — bulunduğun yeri iğnele",style:{...S.btn(),flexShrink:0,fontWeight:800,borderColor:"#0369a1",color:"#0369a1"}}, konumYuk?"⏳":"📍 İğne")),
+          h("datalist",{id:"gerilla-bolge"},(bolgeler||[]).map(b=>h("option",{key:b.id,value:b.ad}))),
+          (gerillaLat&&gerillaLng) && h("div",{style:{fontSize:10.5,color:"#0369a1",marginTop:3,fontWeight:700}},"📍 konum alındı ("+gerillaLat+", "+gerillaLng+")"))),
+        h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:8}},"Fiyatı kutucuktan istediğin an değiştir (aynı ürünü farklı fiyata satabilirsin). ➕ o fiyattan anında peşin satar; ➖ geri alır."),
         h("div",{style:{display:"grid",gap:8}},
-          cephane.map(u=>{ const sold=num(gerillaCount[u.id]); const f=num(u.satisFiyat); const bos=bagOf(u)<1;
-            return h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"#fafbfc",border:"1px solid "+C.line,borderRadius:10}},
+          cephane.map(u=>{ const sold=num(gerillaCount[u.id]); const bos=bagOf(u)<1;
+            return h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"#fafbfc",border:"1px solid "+C.line,borderRadius:10}},
               h("div",{style:{flex:1,minWidth:0}},
                 h("div",{style:{fontWeight:700,fontSize:13.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
-                h("div",{style:{fontSize:11,color:C.mut}}, "çantanda "+bagOf(u)+(f>0?(" · "+tl(f)):" · ⚠ fiyat yok")+(sold>0?(" · sattın "+sold):""))),
-              h("div",{style:{display:"flex",alignItems:"center",gap:8,flexShrink:0}},
+                h("div",{style:{fontSize:11,color:C.mut}}, "çantanda "+bagOf(u)+(sold>0?(" · sattın "+sold):""))),
+              h("input",{type:"number",min:0,title:"seyyar satış fiyatı (₺) — istediğin an değiştir",
+                placeholder:(num(u.satisFiyat)>0?String(num(u.satisFiyat)):"₺"),
+                value: gerillaFiyat[u.id]!==undefined?gerillaFiyat[u.id]:(num(u.satisFiyat)>0?u.satisFiyat:""),
+                onChange:e=>setGerillaFiyat(s=>({...s,[u.id]:e.target.value})),
+                style:{...S.input,width:62,padding:"6px 6px",textAlign:"center",fontWeight:700,flexShrink:0}}),
+              h("div",{style:{display:"flex",alignItems:"center",gap:6,flexShrink:0}},
                 h("button",{onClick:()=>gerillaEksi(u),disabled:sold<1,style:{width:34,height:34,borderRadius:9,border:"1px solid "+C.line,background:"#fff",color:"#b45309",fontSize:20,fontWeight:800,cursor:sold<1?"default":"pointer",opacity:sold<1?.4:1,lineHeight:1}},"−"),
                 h("div",{style:{minWidth:22,textAlign:"center",fontWeight:800,fontSize:16,color:"#b45309"}},sold),
                 h("button",{onClick:()=>gerillaArti(u),disabled:bos,style:{width:34,height:34,borderRadius:9,border:"none",background: bos?"#cbd5e1":"#b45309",color:"#fff",fontSize:20,fontWeight:800,cursor:bos?"default":"pointer",lineHeight:1}},"+"))); })),
