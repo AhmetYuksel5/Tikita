@@ -958,15 +958,23 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
   const [merkez,setMerkez]=useState(()=> (lat&&lng) ? {lat:+lat,lng:+lng} : {lat:41.0082,lng:28.9784}); // varsayılan: İstanbul
   const [link,setLink]=useState(""); const [cozuluyor,setCozuluyor]=useState(false);
   const touched=useRef(false);
+  const mapDiv=useRef(null), mapObj=useRef(null), markerRef=useRef(null);
+  // koordinatı seç: ters-geocode ile ad+ilçe doldur (harita/pin & GPS ortak)
+  async function konumSec2(la, lo){ la=(+la).toFixed(6); lo=(+lo).toFixed(6); let nm=q||ad||"", bolge="";
+    try{ const r=await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&accept-language=tr&lat="+la+"&lon="+lo); const j=await r.json(); nm=j.name||(j.display_name||"").split(",")[0]||nm; bolge=ilceOf(j.address); }catch(e){}
+    onChange({ad:nm,lat:la,lng:lo,bolge}); setQ(nm); setSonuc([]); }
   // açılışta cihaz konumunu (sessizce) al → aramaları yakına göre öncele
   useEffect(()=>{ if(!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(p=>setMerkez({lat:p.coords.latitude,lng:p.coords.longitude}),()=>{},{enableHighAccuracy:true,timeout:8000,maximumAge:300000});
   },[]);
   async function aramaYap(t){ t=(t||"").trim(); if(t.length<2) return; setAra(true);
     try{ let j;
-      if(sade){ // yalnız İstanbul içinde ara
-        const r=await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&countrycodes=tr&accept-language=tr&viewbox="+IST_VB+"&bounded=1&q="+encodeURIComponent(t+", İstanbul"));
+      if(sade){ // İstanbul öncelikli ara — bulunamazsa İstanbul kutusuna göre süz (POI'leri kaçırmasın)
+        const base="https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=12&countrycodes=tr&accept-language=tr";
+        const r=await fetch(base+"&viewbox="+IST_VB+"&bounded=1&q="+encodeURIComponent(t));
         j=await r.json();
+        if(!j.length){ const r2=await fetch(base+"&viewbox="+IST_VB+"&q="+encodeURIComponent(t)); const j2=await r2.json();
+          j=j2.filter(x=>+x.lat>=40.80 && +x.lat<=41.70 && +x.lon>=28.0 && +x.lon<=29.95); }
       } else {
         const d=0.6, vb=(merkez.lng-d)+","+(merkez.lat+d)+","+(merkez.lng+d)+","+(merkez.lat-d);
         const r=await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&countrycodes=tr&accept-language=tr&viewbox="+vb+"&bounded=1&q="+encodeURIComponent(t));
@@ -981,6 +989,22 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
     if(t.length<2){ setSonuc([]); return; }
     const id=setTimeout(()=>aramaYap(t),450); return ()=>clearTimeout(id);
   },[q,merkez]);
+  // sade modda pinleme haritası (Leaflet) — dokun/sürükle ile iğnele
+  useEffect(()=>{ if(!sade || !window.L || !mapDiv.current || mapObj.current) return;
+    const L=window.L, c=(lat&&lng)?[+lat,+lng]:[41.0082,28.9784];
+    const map=L.map(mapDiv.current,{attributionControl:false}).setView(c,(lat&&lng)?15:11);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
+    const pin=L.divIcon({className:"",iconSize:[30,30],iconAnchor:[15,28],html:"<div style='color:#dc2626'><svg width='30' height='30' viewBox='0 0 24 24' fill='currentColor'><path d='M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z'/></svg></div>"});
+    const mk=L.marker(c,{draggable:true,icon:pin}).addTo(map);
+    markerRef.current=mk; mapObj.current=map;
+    map.on("click",e=>{ mk.setLatLng(e.latlng); konumSec2(e.latlng.lat,e.latlng.lng); });
+    mk.on("dragend",()=>{ const p=mk.getLatLng(); konumSec2(p.lat,p.lng); });
+    setTimeout(()=>{ try{ map.invalidateSize(); }catch(e){} },250);
+  },[sade]);
+  // dış lat/lng değişince (arama/GPS) marker & merkezi güncelle
+  useEffect(()=>{ if(!sade||!mapObj.current||!markerRef.current||!(lat&&lng)) return;
+    const ll=[+lat,+lng]; markerRef.current.setLatLng(ll); mapObj.current.setView(ll,16);
+  },[lat,lng,sade]);
   function sec(r){ const kisa=(r.display_name||"").split(",")[0]||q; onChange({ad:kisa,lat:(+r.lat).toFixed(6),lng:(+r.lon).toFixed(6),tam:r.display_name,bolge:ilceOf(r.address)}); setQ(kisa); setSonuc([]); touched.current=false; }
   function gps(){ if(!navigator.geolocation) return alert("Cihaz konum desteklemiyor.");
     navigator.geolocation.getCurrentPosition(async p=>{ const la=p.coords.latitude.toFixed(6),lo=p.coords.longitude.toFixed(6); setMerkez({lat:+la,lng:+lo}); let nm=q||ad||"", bolge="";
@@ -1021,9 +1045,12 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
     h("div",{style:{display:"flex",gap:6}},
       h("input",{style:{...S.input,flex:1},value:q,onChange:e=>{ touched.current=true; setQ(e.target.value); },
         onKeyDown:e=>{ if(e.key==="Enter"){ e.preventDefault(); aramaYap(q); } },placeholder:"Konum ara (İstanbul)"}),
-      h("button",{type:"button",style:S.btn(),onClick:gps,title:"Konumumu al"}, MINIMAL?mi("my_location",20):"📍")),
+      h("button",{type:"button",style:{...S.btn(),display:"inline-flex",alignItems:"center",gap:5},onClick:gps,title:"Konumumu al"}, MINIMAL?mi("my_location",20):"📍")),
     sonucKutu,
-    (lat&&lng) && h("div",{style:{fontSize:12,color:"#047857",fontWeight:700,marginTop:6}}, (MINIMAL?"":"📍 ")+"Konum seçildi"));
+    // pinleme haritası — dokun ya da iğneyi sürükle
+    h("div",{ref:mapDiv,style:{width:"100%",height:210,borderRadius:12,overflow:"hidden",marginTop:8,border:"1px solid "+C.line,background:"#e8edf2"}}),
+    h("div",{style:{fontSize:11.5,color:(lat&&lng)?"#047857":C.mut,fontWeight:600,marginTop:5}},
+      (lat&&lng)?"Konum seçildi — iğneyi sürükleyerek düzeltebilirsin":"Haritaya dokun ya da yukarıdan ara"));
   return h("div",null,
     h("div",{style:{display:"flex",gap:6}},
       h("input",{style:{...S.input,flex:1},value:q,onChange:e=>{ touched.current=true; setQ(e.target.value); },
@@ -1176,14 +1203,15 @@ function MusteriModal({ kayit, bolgeler, musteriler, onKapat }){
   const inp={...S.input,marginBottom:10};
   return h(Modal,{ baslik:yeni?"Yeni Müşteri":"Müşteri", onKapat,
     alt:h(React.Fragment,null,
-      h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet},"Kaydet"),
+      h("button",{style:S.btn(),onClick:onKapat},"Vazgeç"),
       !yeni&&(kayit.arsiv
         ? h("button",{style:{...S.btn(),color:"#047857",borderColor:"#047857"},onClick:()=>arsivle(true)},"Geri aç")
         : h("button",{style:{...S.btn(),color:"#b45309",borderColor:"#b45309"},onClick:()=>{if(confirm(f.ad+" arşivlensin mi?"))arsivle(false);}},"Arşivle")),
       !yeni&&h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{if(confirm(f.ad+" silinsin mi?")){remove("musteri",kayit.id);onKapat();}}},"Sil"),
-      h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
-    h("input",{style:inp,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Müşteri adı",autoFocus:yeni}),
-    h("input",{type:"tel",style:inp,value:f.telefon,onChange:e=>set("telefon",e.target.value),placeholder:"Telefon"}),
+      h("button",{style:{...S.btn("p"),flex:1},onClick:kaydet},"Kaydet")) },
+    h("div",{style:{display:"flex",gap:10,marginBottom:10}},
+      h("input",{style:{...S.input,flex:2,margin:0},value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Müşteri adı",autoFocus:yeni}),
+      h("input",{type:"tel",style:{...S.input,flex:1,margin:0},value:f.telefon,onChange:e=>set("telefon",e.target.value),placeholder:"Telefon"})),
     h(KonumSec,{sade:true,ad:f.ad,lat:f.lat,lng:f.lng,onChange:o=>{konumRef.current=true; setF(s=>({...s,lat:o.lat,lng:o.lng,adres:o.tam||o.ad||s.adres,bolge:o.bolge||s.bolge,ad:s.ad||o.ad||""}));}}),
     h("input",{style:{...S.input,marginTop:10},value:f.not,onChange:e=>set("not",e.target.value),placeholder:"Not (opsiyonel)"}));
 }
