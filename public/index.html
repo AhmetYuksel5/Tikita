@@ -2116,6 +2116,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [yeniBolge,setYeniBolge]=useState("");
   const [cantaDoldur,setCantaDoldur]=useState(false);
   const [gerillaAcik,setGerillaAcik]=useState(false);   // ⚡ seyyar/vur-kaç paneli açık mı
+  const [brifAcik,setBrifAcik]=useState(false);         // 📋 günlük brifing sayfası açık mı
   const [gerillaBolge,setGerillaBolge]=useState("");    // seyyar satış bölgesi
   const [gerillaLat,setGerillaLat]=useState(""); const [gerillaLng,setGerillaLng]=useState("");
   const [gerillaFiyat,setGerillaFiyat]=useState({});    // urunId -> anlık seyyar fiyat (değişken)
@@ -2234,6 +2235,14 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const bhZiyaret=new Set(bhHar.filter(x=>["satis","konsinye","tahsilat","stant"].includes(x.tip)).map(_kaleKey)).size;
   const bhTahsil=bhHar.filter(x=>x.tip==="tahsilat").reduce((s,x)=>s+num(x.tutar),0);
   const bhYeniFetih=kaleler.filter(k=>k.ilkAkin>=haf0).length;
+  // brifing uyarıları (zil rozeti + brifing sayfası ortak kullanır)
+  const brifUyari=[];
+  if(tehditSay.dus)   brifUyari.push(["🔴",tehditSay.dus+" kale düşmek üzere","30+ gündür akın yok","#dc2626"]);
+  if(tehditSay.tehdit)brifUyari.push(["🟠",tehditSay.tehdit+" kale tehdit altında","14+ gündür akın yok","#ea580c"]);
+  if(tehditSay.huzur) brifUyari.push(["🟡",tehditSay.huzur+" kale huzursuz","7+ gündür akın yok","#ca8a04"]);
+  if(alacakGenel>0)   brifUyari.push(["🧾",tl(alacakGenel)+" tahsil edilecek","açık alacak","#b91c1c"]);
+  if(yaslananKons.length) brifUyari.push(["⏳",yaslananKons.length+" mekanda bekleyen konsinye","21+ gündür satılmadı","#7c3aed"]);
+  const alertCount=brifUyari.length;
   // KOMUTANLAR — #9 TÜM ekibin küresel sıralaması (herkes görebilir; rekabet/teşvik)
   const gKaleMap={};
   (_tumHar||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId||x.gerilla) return;
@@ -2447,59 +2456,45 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                 "⚠ vur-kaç ağırlıkta %"+Math.round(gerillaPay*100)))),
           h("div",{style:{textAlign:"center"}},
             h("div",{style:{fontSize:30,fontWeight:800,lineHeight:1}},kaleler.length),
-            h("div",{style:{fontSize:11,opacity:.85}},"kale"))),
+            h("div",{style:{fontSize:11,opacity:.85}},"kale")),
+          h("button",{onClick:()=>setBrifAcik(true),title:"Günlük brifing",
+            style:{position:"relative",flexShrink:0,width:46,height:46,borderRadius:12,cursor:"pointer",border:"none",background:"rgba(255,255,255,.16)",color:"#fff",fontSize:22,display:"flex",alignItems:"center",justifyContent:"center"}},
+            "🔔",
+            alertCount>0 && h("span",{style:{position:"absolute",top:-6,right:-6,minWidth:21,height:21,padding:"0 5px",borderRadius:11,background:"#dc2626",color:"#fff",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 0 2px #7f1d1d",animation:"pulse 1.4s infinite"}}, alertCount))),
         komutanNext && h(React.Fragment,null,
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11.5,marginTop:12,marginBottom:4,opacity:.9}},
             h("span",null,komutan[2]+" "+komutan[1]), h("span",null,(komutanNext[0]-toplamGuc)+" güç → "+komutanNext[2]+" "+komutanNext[1])),
           h("div",{style:{height:11,background:"rgba(255,255,255,.25)",borderRadius:99,overflow:"hidden"}},
-            h("div",{className:"tk-shine",style:{height:"100%",width:Math.max(4,Math.round((toplamGuc-komutan[0])/(komutanNext[0]-komutan[0])*100))+"%",borderRadius:99,background:"linear-gradient(90deg,#fbbf24,#fff,#fbbf24)"}})))),
-      h("div",{style:{background:"#fff",padding:"10px 14px",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}},
-        h("input",{style:{...S.input,flex:1,minWidth:140},value:yeniBolge,onChange:e=>setYeniBolge(e.target.value),
-          onKeyDown:e=>{ if(e.key==="Enter") bolgeEkle(); },placeholder:"Hedef bölge ekle (örn. Üsküdar)"}),
-        h("button",{style:S.btn("p"),onClick:bolgeEkle},"⚑ Bölge ekle")));
+            h("div",{className:"tk-shine",style:{height:"100%",width:Math.max(4,Math.round((toplamGuc-komutan[0])/(komutanNext[0]-komutan[0])*100))+"%",borderRadius:99,background:"linear-gradient(90deg,#fbbf24,#fff,#fbbf24)"}})))));
 
-  // —— 📋 GÜNLÜK BRİFİNG + 🎯 HAFTALIK GÖREVLER (tehdit döngüsü) ——
-  const brifingKart=()=>{
-    const uyari=[];
-    if(tehditSay.dus)   uyari.push(["🔴",tehditSay.dus+" kale düşmek üzere","30+ gündür akın yok","#dc2626"]);
-    if(tehditSay.tehdit)uyari.push(["🟠",tehditSay.tehdit+" kale tehdit altında","14+ gündür akın yok","#ea580c"]);
-    if(tehditSay.huzur) uyari.push(["🟡",tehditSay.huzur+" kale huzursuz","7+ gündür akın yok","#ca8a04"]);
-    if(alacakGenel>0)   uyari.push(["🧾",tl(alacakGenel)+" tahsil edilecek","açık alacak","#b91c1c"]);
-    if(yaslananKons.length) uyari.push(["⏳",yaslananKons.length+" mekanda bekleyen konsinye","21+ gündür satılmadı","#7c3aed"]);
-    const acil=tehditli.slice(0,4);
-    return h("div",{style:{...S.card,padding:0,overflow:"hidden",marginBottom:14,border:"1px solid "+(uyari.length?"#fdba74":"#bbf7d0")}},
-      h("div",{style:{padding:"11px 14px",background:uyari.length?"linear-gradient(135deg,#7c2d12,#9a3412)":"linear-gradient(135deg,#065f46,#047857)",color:"#fff",display:"flex",alignItems:"center",gap:10}},
-        h("span",{style:{fontSize:22}},uyari.length?"📋":"🛡️"),
-        h("div",{style:{flex:1,minWidth:0}},
-          h("div",{style:{fontSize:15,fontWeight:800}},"Günlük Brifing"),
-          h("div",{style:{fontSize:11.5,opacity:.9}}, uyari.length?(uyari.length+" konu dikkat istiyor"):"Cephede sükûnet — tehdit yok"))),
-      h("div",{style:{padding:"12px 14px"}},
-        uyari.length
-          ? h("div",{style:{display:"grid",gap:7,marginBottom:acil.length?12:4}},
-              uyari.map((u,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:"#fafbfc",border:"1px solid "+C.line,borderRadius:9,borderLeft:"4px solid "+u[3]}},
-                h("span",{style:{fontSize:16}},u[0]),
-                h("div",{style:{flex:1,minWidth:0}},
-                  h("div",{style:{fontSize:13,fontWeight:800,color:u[3]}},u[1]),
-                  h("div",{style:{fontSize:11,color:C.mut}},u[2])))))
-          : h("div",{style:{fontSize:12.5,color:"#047857",fontWeight:700,marginBottom:8}},"✅ Tüm kaleler taze, alacak/konsinye temiz. Böyle devam!"),
-        acil.length>0 && h(React.Fragment,null,
-          h("div",{style:{...S.label,marginBottom:6}},"🚨 En acil kaleler — dokun, akına git"),
-          h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}},
-            acil.map((k,i)=>{ const mus=(musteriler||[]).find(m=>m.id===k.musteriId)||{ad:k.ad,bolge:k.bolge,lat:k.lat,lng:k.lng};
-              return h("button",{key:i,onClick:()=>setMusteriBag(mus),style:{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:99,cursor:"pointer",background:"#fff",border:"1px solid "+k.tehdit[3]}},
-                h("span",{style:{fontSize:13}},k.tehdit[2]),
-                h("span",{style:{fontSize:12.5,fontWeight:800,color:k.tehdit[3],maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad),
-                h("span",{style:{fontSize:10.5,fontWeight:700,color:C.mut}},k.gunGecti+"g")); }))),
-        h("div",{style:{...S.label,marginBottom:8}},"🎯 Bu haftanın görevleri"),
-        h("div",{style:{display:"grid",gap:8}},
-          h(Gorev,{ad:"Kaleye akın (ziyaret)",deg:bhZiyaret,hedef:5,renk:"#b45309"}),
-          h(Gorev,{ad:"Yeni kale fethet",deg:bhYeniFetih,hedef:2,renk:"#7c3aed"}),
-          h(Gorev,{ad:"Tahsilat yap",deg:bhTahsil,hedef:1000,renk:"#047857",birim:"tl"}),
-          h(Gorev,{ad:"Riskteki kaleyi kurtar (0 kalsın)",deg:Math.max(0,tehditli.length===0?1:0),hedef:1,renk:"#dc2626"}))));
+  // —— 📋 GÜNLÜK BRİFİNG — zil'e basınca açılan sayfa (Modal gövdesi) ——
+  const brifingGovde=()=>{ const acil=tehditli.slice(0,6);
+    return h("div",null,
+      brifUyari.length
+        ? h("div",{style:{display:"grid",gap:7,marginBottom:14}},
+            brifUyari.map((u,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:"#fafbfc",border:"1px solid "+C.line,borderRadius:9,borderLeft:"4px solid "+u[3]}},
+              h("span",{style:{fontSize:18}},u[0]),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:13.5,fontWeight:800,color:u[3]}},u[1]),
+                h("div",{style:{fontSize:11.5,color:C.mut}},u[2])))))
+        : h("div",{style:{padding:"14px",textAlign:"center",background:"#ecfdf5",border:"1px solid #bbf7d0",borderRadius:10,color:"#047857",fontWeight:700,marginBottom:14}},"✅ Cephede sükûnet — tüm kaleler taze, alacak/konsinye temiz. Böyle devam!"),
+      acil.length>0 && h(React.Fragment,null,
+        h("div",{style:{...S.label,marginBottom:6}},"🚨 En acil kaleler — dokun, akına git"),
+        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}},
+          acil.map((k,i)=>{ const mus=(musteriler||[]).find(m=>m.id===k.musteriId)||{ad:k.ad,bolge:k.bolge,lat:k.lat,lng:k.lng};
+            return h("button",{key:i,onClick:()=>{ setBrifAcik(false); setMusteriBag(mus); },style:{display:"inline-flex",alignItems:"center",gap:6,padding:"7px 12px",borderRadius:99,cursor:"pointer",background:"#fff",border:"1px solid "+k.tehdit[3]}},
+              h("span",{style:{fontSize:14}},k.tehdit[2]),
+              h("span",{style:{fontSize:13,fontWeight:800,color:k.tehdit[3],maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad),
+              h("span",{style:{fontSize:11,fontWeight:700,color:C.mut}},k.gunGecti+"g")); }))),
+      h("div",{style:{...S.label,marginBottom:8}},"🎯 Bu haftanın görevleri"),
+      h("div",{style:{display:"grid",gap:8}},
+        h(Gorev,{ad:"Kaleye akın (ziyaret)",deg:bhZiyaret,hedef:5,renk:"#b45309"}),
+        h(Gorev,{ad:"Yeni kale fethet",deg:bhYeniFetih,hedef:2,renk:"#7c3aed"}),
+        h(Gorev,{ad:"Tahsilat yap",deg:bhTahsil,hedef:1000,renk:"#047857",birim:"tl"}),
+        h(Gorev,{ad:"Riskteki kaleyi kurtar (0 kalsın)",deg:Math.max(0,tehditli.length===0?1:0),hedef:1,renk:"#dc2626"})));
   };
 
   const fetihView=()=>h("div",null,
-    brifingKart(),
     // —— SEFER / AKIN (çanta) ——
     h("div",{style:{borderRadius:16,overflow:"hidden",marginBottom:14,boxShadow:"0 8px 24px rgba(0,0,0,.12)"}},
       h("div",{style:{background: aktifSefer?"linear-gradient(135deg,#7c2d12,#b45309)":"linear-gradient(135deg,#334155,#0e7490)",color:"#fff",padding:"16px 18px"}},
@@ -2882,6 +2877,8 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
           h("span",{style:{fontSize:10.5,fontWeight:800,letterSpacing:.2,lineHeight:1,color:on?"#fbbf24":C.mut}},ad),
           (k==="cephane" && tablaBadge) && h("span",{style:{position:"absolute",top:-5,right:-5,minWidth:18,height:18,padding:"0 5px",borderRadius:9,background:"#dc2626",color:"#fff",fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 0 2px "+C.bg,animation:"pulse 1.6s infinite"}},"!")); })),
     (viewMap[alt]||fetihView)(),
+    brifAcik && h(Modal,{baslik:"📋 Günlük Brifing"+(alertCount?(" · "+alertCount+" uyarı"):""),onKapat:()=>setBrifAcik(false),
+      alt:h("button",{style:{...S.btn("p"),flex:1},onClick:()=>setBrifAcik(false)},"Kapat")}, brifingGovde()),
     cantaDoldur && h(CantaDoldurModal,{urunler,seferIdAl,onKapat:()=>setCantaDoldur(false)}),
     musteriBag && h(MevkiModal,{musteri:musteriBag,bagItems:cephane,urunler,hareketler,aktifSeferId:aktifSefer?aktifSefer.id:null,onKapat:()=>setMusteriBag(null)}),
     islem && (()=>{ const u=urunListe.find(x=>x.id===islem.u.id)||islem.u;
