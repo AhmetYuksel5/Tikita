@@ -2111,7 +2111,13 @@ function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, onSec }){
       tamEkran?"✕":"⛶"));
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif, tablaUcret }){
+function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif, tablaUcret, ayar }){
+  // ayarlanabilir eşikler / görev hedefleri (admin panelinden)
+  const AY=ayar||{};
+  const esik=[Math.max(1,num(AY.tehdit1)||7), Math.max(2,num(AY.tehdit2)||14), Math.max(3,num(AY.tehdit3)||30)];
+  const TEHDIT_DIN=[[0,"Güvende","🟢","#16a34a"],[esik[0],"Huzursuz","🟡","#ca8a04"],[esik[1],"Tehdit altında","🟠","#ea580c"],[esik[2],"Düşmek üzere","🔴","#dc2626"]];
+  const tehditOfDin=gun=>{ let t=TEHDIT_DIN[0]; for(const x of TEHDIT_DIN) if(gun>=x[0]) t=x; return t; };
+  const gHedef={akin:num(AY.gorevAkin)||5, fetih:num(AY.gorevFetih)||2, tahsil:num(AY.gorevTahsil)||1000, kurtar:num(AY.gorevKurtar)||2};
   const [alt,setAlt]=useState("komuta");
   const [yeniBolge,setYeniBolge]=useState("");
   const [cantaDoldur,setCantaDoldur]=useState(false);
@@ -2224,24 +2230,35 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     if(!sonAkinMap[key]||t>sonAkinMap[key]) sonAkinMap[key]=t;
     if(!ilkAkinMap[key]||t<ilkAkinMap[key]) ilkAkinMap[key]=t; });
   kaleler.forEach(k=>{ k.sonAkin=sonAkinMap[k.key]||0; k.ilkAkin=ilkAkinMap[k.key]||0;
-    k.gunGecti = k.sonAkin ? Math.floor((now-k.sonAkin)/86400000) : 999; k.tehdit=tehditOf(k.gunGecti); });
-  const tehditli = kaleler.filter(k=>k.gunGecti>=7).sort((a,b)=>b.gunGecti-a.gunGecti);
-  const tehditSay = { huzur:kaleler.filter(k=>k.gunGecti>=7&&k.gunGecti<14).length,
-                      tehdit:kaleler.filter(k=>k.gunGecti>=14&&k.gunGecti<30).length,
-                      dus:kaleler.filter(k=>k.gunGecti>=30).length };
+    k.gunGecti = k.sonAkin ? Math.floor((now-k.sonAkin)/86400000) : 999; k.tehdit=tehditOfDin(k.gunGecti); });
+  const tehditli = kaleler.filter(k=>k.gunGecti>=esik[0]).sort((a,b)=>b.gunGecti-a.gunGecti);
+  const tehditSay = { huzur:kaleler.filter(k=>k.gunGecti>=esik[0]&&k.gunGecti<esik[1]).length,
+                      tehdit:kaleler.filter(k=>k.gunGecti>=esik[1]&&k.gunGecti<esik[2]).length,
+                      dus:kaleler.filter(k=>k.gunGecti>=esik[2]).length };
   // yaşlanan konsinye (21+ gün hâlâ açık) + haftalık görev ilerlemesi (gerilla hariç)
   const yaslananKons=(hareketler||[]).filter(x=>x.tip==="konsinye"&&!x.gerilla&&num(x.kalan)>0&&(now-new Date(x.tarih).getTime())>21*86400000);
   const bhHar=(hareketler||[]).filter(x=>!x.gerilla && new Date(x.tarih).getTime()>=haf0);
   const bhZiyaret=new Set(bhHar.filter(x=>["satis","konsinye","tahsilat","stant"].includes(x.tip)).map(_kaleKey)).size;
   const bhTahsil=bhHar.filter(x=>x.tip==="tahsilat").reduce((s,x)=>s+num(x.tutar),0);
   const bhYeniFetih=kaleler.filter(k=>k.ilkAkin>=haf0).length;
+  // 🛡️ KURTARMA — bu hafta, uzun aradan (≥1. eşik) sonra ziyaret edilen kale = kurtarılan
+  const ziyaretMap={};
+  (hareketler||[]).forEach(x=>{ if(x.gerilla) return; if(!["satis","konsinye","iade","tahsilat","stant"].includes(x.tip)) return;
+    const key=_kaleKey(x); const t=new Date(x.tarih).getTime(); if(!t) return; (ziyaretMap[key]=ziyaretMap[key]||[]).push(t); });
+  let bhKurtarma=0;
+  Object.values(ziyaretMap).forEach(arr=>{ arr.sort((a,b)=>a-b); for(let i=1;i<arr.length;i++){ if(arr[i]>=haf0 && (arr[i]-arr[i-1])>=esik[0]*86400000) bhKurtarma++; } });
+  // 🧭 YALNIZ KALELER — bölgesinde tek başına (uzak/kümelenmemiş) → çevrede kale kurma teşviki
+  const bolgeKaleSay={}; kaleler.forEach(k=>{ const b=(k.bolge||"").trim(); if(b) bolgeKaleSay[b]=(bolgeKaleSay[b]||0)+1; });
+  const yalnizKaleler = kaleler.filter(k=>{ const b=(k.bolge||"").trim(); return !b || (bolgeKaleSay[b]||0)<=1; });
+  // 🔥 seri (streak) — pSeri: üst üste satış yapılan gün (aşağıda hesaplı)
   // brifing uyarıları (zil rozeti + brifing sayfası ortak kullanır)
   const brifUyari=[];
-  if(tehditSay.dus)   brifUyari.push(["🔴",tehditSay.dus+" kale düşmek üzere","30+ gündür akın yok","#dc2626"]);
-  if(tehditSay.tehdit)brifUyari.push(["🟠",tehditSay.tehdit+" kale tehdit altında","14+ gündür akın yok","#ea580c"]);
-  if(tehditSay.huzur) brifUyari.push(["🟡",tehditSay.huzur+" kale huzursuz","7+ gündür akın yok","#ca8a04"]);
+  if(tehditSay.dus)   brifUyari.push(["🔴",tehditSay.dus+" kale düşmek üzere",esik[2]+"+ gündür akın yok","#dc2626"]);
+  if(tehditSay.tehdit)brifUyari.push(["🟠",tehditSay.tehdit+" kale tehdit altında",esik[1]+"+ gündür akın yok","#ea580c"]);
+  if(tehditSay.huzur) brifUyari.push(["🟡",tehditSay.huzur+" kale huzursuz",esik[0]+"+ gündür akın yok","#ca8a04"]);
   if(alacakGenel>0)   brifUyari.push(["🧾",tl(alacakGenel)+" tahsil edilecek","açık alacak","#b91c1c"]);
   if(yaslananKons.length) brifUyari.push(["⏳",yaslananKons.length+" mekanda bekleyen konsinye","21+ gündür satılmadı","#7c3aed"]);
+  if(yalnizKaleler.length) brifUyari.push(["🧭",yalnizKaleler.length+" yalnız kale","çevrede kale kur — rota kârlı olsun","#0369a1"]);
   const alertCount=brifUyari.length;
   // KOMUTANLAR — #9 TÜM ekibin küresel sıralaması (herkes görebilir; rekabet/teşvik)
   const gKaleMap={};
@@ -2450,6 +2467,8 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                 diplo[2]+" "+diplo[1]+" · 🤝 "+diploSay+" diplomasi"+(diploNext?(" · "+(diploNext[0]-diploSay)+" → "+diploNext[2]+" "+diploNext[1]):"")),
               alacakGenel!==0 && h("div",{style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:alacakGenel>0?"rgba(254,202,202,.95)":"rgba(191,219,254,.95)",color:alacakGenel>0?"#991b1b":"#0369a1",borderRadius:99,padding:"2px 10px"}},
                 alacakGenel>0?("🧾 "+tl(alacakGenel)+" alacak"):("💳 "+tl(-alacakGenel)+" avans")),
+              pSeri>0 && h("div",{title:"Üst üste satış yapılan gün — seriyi bozma!",style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:"rgba(254,215,170,.95)",color:"#9a3412",borderRadius:99,padding:"2px 10px"}},
+                "🔥 "+pSeri+" gün seri"),
               gerillaGanimet>0 && h("div",{title:"Seyyar/vur-kaç geliri — kalıcı kale kurmaz",style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:"rgba(253,224,71,.95)",color:"#78350f",borderRadius:99,padding:"2px 10px"}},
                 "⚡ "+tl(gerillaGanimet)+" ganimet"),
               vurkacUyari && h("div",{title:"Gelirinin çoğu kalıcı olmayan seyyar satıştan — kale kur!",style:{fontSize:12,fontWeight:800,display:"inline-flex",alignItems:"center",gap:5,background:"rgba(254,215,170,.95)",color:"#9a3412",borderRadius:99,padding:"2px 10px"}},
@@ -2478,6 +2497,14 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                 h("div",{style:{fontSize:13.5,fontWeight:800,color:u[3]}},u[1]),
                 h("div",{style:{fontSize:11.5,color:C.mut}},u[2])))))
         : h("div",{style:{padding:"14px",textAlign:"center",background:"#ecfdf5",border:"1px solid #bbf7d0",borderRadius:10,color:"#047857",fontWeight:700,marginBottom:14}},"✅ Cephede sükûnet — tüm kaleler taze, alacak/konsinye temiz. Böyle devam!"),
+      // durum: seri + bu hafta kurtardığın
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
+        h("div",{style:{flex:"1 1 120px",background:pSeri>0?"#fff7ed":"#f8fafc",border:"1px solid "+(pSeri>0?"#fed7aa":C.line),borderRadius:10,padding:"9px 11px"}},
+          h("div",{style:{fontSize:10.5,color:C.mut,fontWeight:700}},"🔥 Satış serisi"),
+          h("div",{style:{fontSize:18,fontWeight:800,color:pSeri>0?"#c2410c":C.mut}},pSeri+" gün")),
+        h("div",{style:{flex:"1 1 120px",background:bhKurtarma>0?"#ecfdf5":"#f8fafc",border:"1px solid "+(bhKurtarma>0?"#bbf7d0":C.line),borderRadius:10,padding:"9px 11px"}},
+          h("div",{style:{fontSize:10.5,color:C.mut,fontWeight:700}},"🛡️ Bu hafta kurtardığın"),
+          h("div",{style:{fontSize:18,fontWeight:800,color:bhKurtarma>0?"#047857":C.mut}},bhKurtarma+" kale"))),
       acil.length>0 && h(React.Fragment,null,
         h("div",{style:{...S.label,marginBottom:6}},"🚨 En acil kaleler — dokun, akına git"),
         h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}},
@@ -2486,12 +2513,21 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
               h("span",{style:{fontSize:14}},k.tehdit[2]),
               h("span",{style:{fontSize:13,fontWeight:800,color:k.tehdit[3],maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad),
               h("span",{style:{fontSize:11,fontWeight:700,color:C.mut}},k.gunGecti+"g")); }))),
+      yalnizKaleler.length>0 && h(React.Fragment,null,
+        h("div",{style:{...S.label,marginBottom:4}},"🧭 Yalnız kaleler — çevrede kale kur, rota kârlı olsun"),
+        h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:6}},"Uzağa tek ürün taşımak masraflı. Bu mekanların çevresinde yeni kale kur; aynı bölgede küme oluşunca kâr artar."),
+        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}},
+          yalnizKaleler.slice(0,8).map((k,i)=>{ const mus=(musteriler||[]).find(m=>m.id===k.musteriId)||{ad:k.ad,bolge:k.bolge,lat:k.lat,lng:k.lng};
+            return h("button",{key:i,onClick:()=>{ setBrifAcik(false); setMusteriBag(mus); },style:{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:99,cursor:"pointer",background:"#eff6ff",border:"1px solid #bfdbfe"}},
+              h("span",{style:{fontSize:13}},"🧭"),
+              h("span",{style:{fontSize:12.5,fontWeight:800,color:"#0369a1",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad),
+              k.bolge && h("span",{style:{fontSize:10.5,fontWeight:700,color:C.mut}},"📍"+k.bolge)); }))),
       h("div",{style:{...S.label,marginBottom:8}},"🎯 Bu haftanın görevleri"),
       h("div",{style:{display:"grid",gap:8}},
-        h(Gorev,{ad:"Kaleye akın (ziyaret)",deg:bhZiyaret,hedef:5,renk:"#b45309"}),
-        h(Gorev,{ad:"Yeni kale fethet",deg:bhYeniFetih,hedef:2,renk:"#7c3aed"}),
-        h(Gorev,{ad:"Tahsilat yap",deg:bhTahsil,hedef:1000,renk:"#047857",birim:"tl"}),
-        h(Gorev,{ad:"Riskteki kaleyi kurtar (0 kalsın)",deg:Math.max(0,tehditli.length===0?1:0),hedef:1,renk:"#dc2626"})));
+        h(Gorev,{ad:"Kaleye akın (ziyaret)",deg:bhZiyaret,hedef:gHedef.akin,renk:"#b45309"}),
+        h(Gorev,{ad:"Yeni kale fethet",deg:bhYeniFetih,hedef:gHedef.fetih,renk:"#7c3aed"}),
+        h(Gorev,{ad:"Tahsilat yap",deg:bhTahsil,hedef:gHedef.tahsil,renk:"#047857",birim:"tl"}),
+        h(Gorev,{ad:"🛡️ Riskteki kaleyi kurtar",deg:bhKurtarma,hedef:gHedef.kurtar,renk:"#dc2626"})));
   };
 
   const fetihView=()=>h("div",null,
@@ -2934,8 +2970,11 @@ function GirisEkran({ kullanicilar, onGiris }){
           h("button",{style:{...S.btn("p"),width:"100%",marginTop:8},onClick:girisYap},"Giriş yap"))
     ));
 }
-function EkipModal({ kullanicilar, aktif, tablaUcret, onKapat }){
+function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, onKapat }){
+  const ay=ayar||{};
   const [tUcret,setTUcret]=useState(tablaUcret!=null?String(tablaUcret):"5");
+  const [t1,setT1]=useState(String(num(ay.tehdit1)||7)); const [t2,setT2]=useState(String(num(ay.tehdit2)||14)); const [t3,setT3]=useState(String(num(ay.tehdit3)||30));
+  const [gA,setGA]=useState(String(num(ay.gorevAkin)||5)); const [gF,setGF]=useState(String(num(ay.gorevFetih)||2)); const [gT,setGT]=useState(String(num(ay.gorevTahsil)||1000)); const [gK,setGK]=useState(String(num(ay.gorevKurtar)||2));
   const [ad,setAd]=useState(""); const [pin,setPin]=useState(""); const [simge,setSimge]=useState(SIMGELER[0]); const [rol,setRol]=useState("pazarlamaci");
   async function ekle(){ if(!ad.trim()) return alert("İsim gir."); if(pin.length<4) return alert("4+ haneli PIN belirle.");
     await save("kullanici",{ad:ad.trim(),rol,simge,renkH:adRenk(ad).H,...(await yeniKullaniciPin(pin))});
@@ -2944,13 +2983,30 @@ function EkipModal({ kullanicilar, aktif, tablaUcret, onKapat }){
     if(u.rol==="admin"&&adminSay<=1) return alert("Son yönetici silinemez.");
     if(u.id===aktif.id) return alert("Kendini silemezsin.");
     if(!confirm(u.ad+" silinsin mi? (Kalan oyun verileri durur.)")) return; await remove("kullanici",u.id); }
-  async function ucretKaydet(){ await save("ayar",{id:"genel",tablaUcret:num(tUcret)}); alert("💾 Tabla ücreti kaydedildi: "+tl(num(tUcret))+"/baskı"); }
+  async function ayarKaydet(){
+    let e1=Math.max(1,Math.round(num(t1))), e2=Math.max(e1+1,Math.round(num(t2))), e3=Math.max(e2+1,Math.round(num(t3)));
+    await save("ayar",{id:"genel",tablaUcret:num(tUcret),tehdit1:e1,tehdit2:e2,tehdit3:e3,
+      gorevAkin:Math.max(1,Math.round(num(gA))),gorevFetih:Math.max(1,Math.round(num(gF))),gorevTahsil:Math.max(0,Math.round(num(gT))),gorevKurtar:Math.max(1,Math.round(num(gK)))});
+    alert("💾 Ayarlar kaydedildi.");
+  }
+  const miniInput=(v,set,w)=>h("input",{type:"number",min:0,style:{...S.input,width:w||70,padding:"7px 8px",textAlign:"center"},value:v,onChange:e=>set(e.target.value)});
   return h(Modal,{baslik:"👥 Ekip & Ayarlar", onKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:onKapat},"Kapat")},
     h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14,background:"#f8fafc"}},
-      h("div",{style:{...S.label,marginBottom:8}},"⚙ Ayarlar"),
-      h("div",{style:{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}},
-        h(Field,{label:"🧹 Tabla toplama ücreti (baskı başına ₺)"}, h("input",{type:"number",min:0,step:"0.5",style:{...S.input,width:140},value:tUcret,onChange:e=>setTUcret(e.target.value)})),
-        h("button",{style:{...S.btn("p")},onClick:ucretKaydet},"Kaydet"))),
+      h("div",{style:{...S.label,marginBottom:8}},"⚙ Oyun ayarları"),
+      h("div",{style:{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap",marginBottom:12}},
+        h(Field,{label:"🧹 Tabla ücreti (baskı/₺)"}, miniInput(tUcret,setTUcret,120))),
+      h("div",{style:{fontSize:12,fontWeight:800,color:C.mut,marginBottom:5}},"🛡️ Tehdit eşiği (gün) — huzursuz / tehdit / düşmek üzere"),
+      h("div",{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:12}},
+        h("span",{style:{fontSize:14}},"🟡"), miniInput(t1,setT1),
+        h("span",{style:{fontSize:14}},"🟠"), miniInput(t2,setT2),
+        h("span",{style:{fontSize:14}},"🔴"), miniInput(t3,setT3)),
+      h("div",{style:{fontSize:12,fontWeight:800,color:C.mut,marginBottom:5}},"🎯 Haftalık görev hedefleri"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:8,marginBottom:12}},
+        h(Field,{label:"🐎 Kaleye akın"}, miniInput(gA,setGA,"100%")),
+        h(Field,{label:"🏰 Yeni fetih"}, miniInput(gF,setGF,"100%")),
+        h(Field,{label:"🧾 Tahsilat (₺)"}, miniInput(gT,setGT,"100%")),
+        h(Field,{label:"🛡️ Kale kurtar"}, miniInput(gK,setGK,"100%"))),
+      h("button",{style:{...S.btn("p"),width:"100%"},onClick:ayarKaydet},"💾 Ayarları kaydet")),
     h("div",{style:{display:"grid",gap:8,marginBottom:14}},
       kullanicilar.slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>
         h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:10,border:"1px solid "+C.line,borderRadius:10,padding:"8px 10px"}},
@@ -3359,11 +3415,11 @@ function App(){
     isAdmin && h("div",{style:{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}},
       navListe.map(([k,ad])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{...S.btn(gorSekme===k?"p":""),padding:"10px 18px",fontWeight:700}},ad))),
-    ekipAcik && h(EkipModal,{kullanicilar,aktif,tablaUcret,onKapat:()=>setEkipAcik(false)}),
+    ekipAcik && h(EkipModal,{kullanicilar,aktif,tablaUcret,ayar,onKapat:()=>setEkipAcik(false)}),
     gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket}),
     gorSekme==="pazarlama" && (isAdmin
       ? h(PazarlamaTakip,{hareketler:pazHareket,musteriler,kullanicilar,urunler:stokUrun,seferler})
-      : h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret})),
+      : h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret,ayar})),
     gorSekme==="plan" && !isAdmin && h(CephaneBandi,{plan,makineler:mlist,now}),
     gorSekme==="plan" && isAdmin && h("div",null,
     // başlık
