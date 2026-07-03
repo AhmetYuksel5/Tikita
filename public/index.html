@@ -3753,6 +3753,17 @@ function App(){
   const toplamGecikmeSayi = mlist.reduce((s,mk)=>s+(timelines[mk.id]?.gecikmeSayi||0),0);
   const yuzde = t => kapasiteMs ? (Math.round(t/kapasiteMs*1000)/10) : 0;
 
+  // 🧵 bu (görüntülenen) hafta harcanacak filament (gram) — plan uygulandıkça 'kalan' canlı düşer
+  let gramHaftaPlan=0, gramHaftaKalan=0;
+  (plan||[]).forEach(p=>{ const g=num(p.gram); if(g<=0) return;
+    const s=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000, e=s+dur;
+    if(dur<=0){ if(s>=baslaMs && s<bitMs){ gramHaftaPlan+=g; if(s>now) gramHaftaKalan+=g; } return; }
+    const ovS=Math.max(s,baslaMs), ovE=Math.min(e,bitMs); if(ovE<=ovS) return;
+    gramHaftaPlan += g*(ovE-ovS)/dur;                                   // pencereye düşen pay
+    const remS=Math.max(ovS,now); if(ovE>remS) gramHaftaKalan += g*(ovE-remS)/dur;   // henüz harcanmamış pay
+  });
+  gramHaftaPlan=Math.round(gramHaftaPlan); gramHaftaKalan=Math.round(gramHaftaKalan);
+
   function haftaKaydir(yon){ setBas(b=>b + yon*gunSayisi*24*3600*1000); }
 
   // gün başlıkları
@@ -3932,6 +3943,10 @@ function App(){
       // makine özeti
       h("div",{style:S.card},
         h("div",{style:S.hdr},"MAKİNE ÖZETİ (HAFTALIK)"),
+        // 🧵 bu hafta harcanacak filament (küçük font, canlı) — baskı bölümünün üzerinde
+        gramHaftaPlan>0 && h("div",{style:{fontSize:10.5,color:C.mut,fontWeight:600,padding:"5px 14px 0",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}},
+          h("span",null,"🧵 Bu hafta ~"+gramHaftaPlan.toLocaleString("tr")+" gr filament"),
+          gramHaftaKalan<gramHaftaPlan && h("span",{style:{color:"#0e7490",fontWeight:700}}, "· kalan ~"+gramHaftaKalan.toLocaleString("tr")+" gr")),
         h("div",{style:{display:"grid",gridTemplateColumns:"1.1fr .9fr .9fr .9fr 78px",gap:6,
           padding:"7px 14px",borderBottom:"1px solid "+C.line,fontSize:11,fontWeight:700,color:C.mut}},
           h("span",null,"MAKİNE"),h("span",null,"BASKI"),h("span",{style:{color:C.kirmiziB}},"KAYIP"),h("span",{style:{color:"#c2410c"}},"GECİKME"),h("span",null,"DOLULUK")),
