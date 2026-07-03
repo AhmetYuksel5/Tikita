@@ -753,6 +753,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   const [edit,setEdit]=useState(null);
   const [aks,setAks]=useState(null);   // kutucuk komut penceresi {u,stage}
   const [acik,setAcik]=useState({});   // ürün kartında baskı listesi açık mı
+  const [projAcik,setProjAcik]=useState({});   // teslim planı ayrıntısı açık mı
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
   const hafBas0 = haftaBasi(Date.now()).getTime(), hafBit0 = hafBas0 + 7*86400000;   // bu haftanın penceresi
   const filById = useMemo(()=>{ const m={}; (filamentler||[]).forEach(f=>m[f.id]=f); return m; },[filamentler]);
@@ -1001,22 +1002,23 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
               asamaChip("📥","Stok",u.stokta,"#0369a1",()=>setAks({u,stage:"stokta"})),
               asamaChip("🏬","Konsinye",(konsSaha[u.id]?konsSaha[u.id].toplam:0),"#7c3aed",()=>setAks({u,stage:"konsinye"})),
               asamaChip("💰","Satıldı",(satSaha[u.id]?satSaha[u.id].toplam:0),C.yesilB,()=>setAks({u,stage:"satildi"}))),
-            // 📦 teslim projeksiyonu — her baskı bitiş tarihinde elde en fazla kaç adet olabilir
-            proj && h("div",{style:{fontSize:11.5,background:"#ecfeff",border:"1px solid #a5f3fc",borderRadius:9,padding:"8px 10px",lineHeight:1.45}},
-              proj.kilometreler.length>1
-                ? h("div",null,
-                    h("div",{style:{fontWeight:800,color:"#0e7490",marginBottom:4}},"📦 Teslim planı"),
-                    h("div",{style:{display:"flex",flexDirection:"column",gap:3}},
-                      proj.kilometreler.map((mk,ix)=>h("div",{key:ix,style:{display:"flex",justifyContent:"space-between",gap:8}},
-                        h("span",{style:{color:C.txt}}, teslimGunu(mk.tarih)),
-                        h("b",{style:{color:"#0e7490",flexShrink:0}}, "en fazla "+mk.adet+" adet")))))
-                : h("div",null,
-                    h("span",{style:{fontWeight:800,color:"#0e7490"}}, "📦 "+teslimGunu(proj.tarih)),
+            // 📦 teslim projeksiyonu — özet; ayrıntı (tarih tarih) tıklayınca açılır
+            proj && (()=>{ const ac=!!projAcik[u.id]; const cokAsama=proj.kilometreler.length>1 || proj.artis>0;
+              return h("div",{style:{fontSize:11.5,background:"#ecfeff",border:"1px solid #a5f3fc",borderRadius:9,padding:"8px 10px",lineHeight:1.45}},
+                h("div",{onClick: cokAsama?()=>setProjAcik(s=>({...s,[u.id]:!s[u.id]})):undefined,
+                  style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,cursor:cokAsama?"pointer":"default"}},
+                  h("span",null,
+                    h("b",{style:{color:"#0e7490"}}, "📦 "+teslimGunu(proj.tarih)),
                     h("span",null, ": en fazla "),
-                    h("b",{style:{color:"#0e7490"}}, proj.enfazla+" adet"),
-                    h("span",null, " teslim edilebilir")),
-              proj.artis>0 && h("div",{style:{fontSize:10.5,color:C.mut,marginTop:4,borderTop:"1px dashed #a5f3fc",paddingTop:4}},
-                "Şu an "+proj.simdiki+" hazır · tüm baskı+montaj sonrası +"+proj.artis)),
+                    h("b",{style:{color:"#0e7490"}}, proj.enfazla+" adet")),
+                  cokAsama && h("span",{style:{color:"#0e7490",flexShrink:0,fontWeight:800}}, ac?"▾":"▸")),
+                ac && cokAsama && h("div",{style:{marginTop:6}},
+                  proj.kilometreler.length>1 && h("div",{style:{display:"flex",flexDirection:"column",gap:3,marginBottom:proj.artis>0?4:0}},
+                    proj.kilometreler.map((mk,ix)=>h("div",{key:ix,style:{display:"flex",justifyContent:"space-between",gap:8}},
+                      h("span",{style:{color:C.txt}}, teslimGunu(mk.tarih)),
+                      h("b",{style:{color:"#0e7490",flexShrink:0}}, "en fazla "+mk.adet+" adet")))),
+                  proj.artis>0 && h("div",{style:{fontSize:10.5,color:C.mut,borderTop:"1px dashed #a5f3fc",paddingTop:4}},
+                    "Şu an "+proj.simdiki+" hazır · tüm baskı+montaj sonrası +"+proj.artis))); })(),
             // 🖨 bu hafta basılacak — parçalıda parça parça, teklide toplam adet
             (parcali ? Object.values(buHaftaParca||{}).some(v=>v>0) : buHaftaBaski>0) && h("div",{style:{fontSize:11.5,background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:9,padding:"8px 10px"}},
               h("div",{style:{fontWeight:800,color:"#6d28d9",marginBottom:parcali?4:0}}, "🖨 Bu hafta basılacak"),
