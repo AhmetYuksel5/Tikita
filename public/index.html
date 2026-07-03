@@ -802,29 +802,33 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   async function stoktaAyarla(u,hedef){ await save("stok_urun",{id:u.id,stokta:Math.max(0,Math.round(num(hedef)))}); }
 
   // —— 📦 TESLİM PROJEKSİYONU ——
-  // Bekleyen (basımda + planlı) baskılar bitip montajlanınca bu üründen EN FAZLA kaç adet hazır olabilir ve en geç hangi tarihte.
+  // Bekleyen (basımda + ileri tarihli planlı) baskılar sırayla bitip montajlanınca, HER bitiş tarihinde
+  // elde EN FAZLA kaç adet hazır olabileceğini kronolojik olarak verir.
   function teslimProjeksiyon(u){
     const now=Date.now();
     // henüz bitmemiş baskılar = basımda (başlamış, bitişi ileride) veya planlı/onay bekleyen (başlamamış)
     const bekleyen=(baskiMap[u.id]||[]).filter(p=>{ const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000; return !(p.basladi && e<=now); });
     if(!bekleyen.length) return null;
-    // en geç biten baskının tahmini bitişi (başlamamışsa en erken şimdi başlar varsayımı)
-    let sonBitis=0; bekleyen.forEach(p=>{ const s=new Date(p.baslangic).getTime(); const bas=p.basladi?s:Math.max(s,now); const e=bas+num(p.sureDk)*60000; if(e>sonBitis) sonBitis=e; });
     const parcalar=u.parcalar||[];
     const simdiki=num(u.stokta)+montajdaOf(u);   // şu an teslim edilebilecek (stok + montajlanabilir havuz)
-    let enfazla;
-    if(parcalar.length){
-      const gelen={}; parcalar.forEach(p=>gelen[p]=0);
-      bekleyen.forEach(p=>{ const ad=num(p.adet||1);
-        if(p.parcaAd && parcalar.includes(p.parcaAd)) gelen[p.parcaAd]+=ad;
-        else parcalar.forEach(pt=>gelen[pt]+=ad); });   // "takım/tümü" baskısı → her parçaya
-      const takim=Math.min.apply(null, parcalar.map(p=>Math.floor((parcaAvail(u,p)+gelen[p])/gereken(u,p))));
-      enfazla=num(u.stokta)+Math.max(0,takim);
-    } else {
-      const gelen=bekleyen.reduce((s,p)=>s+num(p.adet||1),0);
-      enfazla=num(u.stokta)+montajdaOf(u)+gelen;
-    }
-    return { tarih:sonBitis, enfazla, simdiki, bekleyen:bekleyen.length, basimda:num(basimMap[u.id])>0, artis:Math.max(0,enfazla-simdiki) };
+    // her baskının tahmini bitişi (planlıysa kendi başlangıcı+süresi; başlamamış ama tarihi geçmişse en erken şimdi)
+    const uclar=bekleyen.map(p=>{ const s=new Date(p.baslangic).getTime(); const bas=p.basladi?s:Math.max(s,now); return {p, e:bas+num(p.sureDk)*60000}; })
+      .sort((a,b)=>a.e-b.e);
+    // kronolojik yürüt: her (gün bazlı) bitiş noktasında kümülatif hazır adet
+    const avail={}; if(parcalar.length) parcalar.forEach(pt=>avail[pt]=parcaAvail(u,pt));
+    let tekliRun=0; const noktalar=[]; let i=0;
+    while(i<uclar.length){ const gun=gunBasi(uclar[i].e).getTime(); let j=i;
+      while(j<uclar.length && gunBasi(uclar[j].e).getTime()===gun){ const p=uclar[j].p, ad=num(p.adet||1);
+        if(parcalar.length){ if(p.parcaAd && parcalar.includes(p.parcaAd)) avail[p.parcaAd]+=ad; else parcalar.forEach(pt=>avail[pt]+=ad); }
+        else tekliRun+=ad; j++; }
+      const adet = parcalar.length
+        ? num(u.stokta)+Math.max(0, Math.min.apply(null, parcalar.map(pt=>Math.floor(avail[pt]/gereken(u,pt)))))
+        : num(u.stokta)+montajdaOf(u)+tekliRun;
+      noktalar.push({tarih:uclar[j-1].e, adet}); i=j; }
+    // yalnız adedin ARTTIĞI kilometre taşlarını tut (aynı adede daha geç ulaşmak bilgi katmaz)
+    const kilometreler=[]; noktalar.forEach(m=>{ const o=kilometreler[kilometreler.length-1]; if(!o || m.adet>o.adet) kilometreler.push(m); });
+    const son=kilometreler[kilometreler.length-1];
+    return { kilometreler, enfazla:son.adet, tarih:son.tarih, simdiki, bekleyen:bekleyen.length, basimda:num(basimMap[u.id])>0, artis:Math.max(0,son.adet-simdiki) };
   }
 
   // pazarlamacıların sahada bıraktığı AÇIK konsinye (pazarlama_hareket, kalan>0) — ürün başına yer dağılımı
@@ -954,15 +958,22 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
               asamaChip("📥","Stok",u.stokta,"#0369a1",()=>setAks({u,stage:"stokta"})),
               asamaChip("🏬","Konsinye",(konsSaha[u.id]?konsSaha[u.id].toplam:0),"#7c3aed",()=>setAks({u,stage:"konsinye"})),
               asamaChip("💰","Satıldı",(satSaha[u.id]?satSaha[u.id].toplam:0),C.yesilB,()=>setAks({u,stage:"satildi"}))),
-            // 📦 teslim projeksiyonu — bekleyen baskılar bitip montajlanınca en fazla kaç adet, hangi tarihte
+            // 📦 teslim projeksiyonu — her baskı bitiş tarihinde elde en fazla kaç adet olabilir
             proj && h("div",{style:{fontSize:11.5,background:"#ecfeff",border:"1px solid #a5f3fc",borderRadius:9,padding:"8px 10px",lineHeight:1.45}},
-              h("div",null,
-                h("span",{style:{fontWeight:800,color:"#0e7490"}}, "📦 "+teslimGunu(proj.tarih)),
-                h("span",null, ": en fazla "),
-                h("b",{style:{color:"#0e7490"}}, proj.enfazla+" adet"),
-                h("span",null, " teslim edilebilir")),
-              proj.artis>0 && h("div",{style:{fontSize:10.5,color:C.mut,marginTop:2}},
-                "Şu an "+proj.simdiki+" hazır · basım+montaj sonrası +"+proj.artis)),
+              proj.kilometreler.length>1
+                ? h("div",null,
+                    h("div",{style:{fontWeight:800,color:"#0e7490",marginBottom:4}},"📦 Teslim planı"),
+                    h("div",{style:{display:"flex",flexDirection:"column",gap:3}},
+                      proj.kilometreler.map((mk,ix)=>h("div",{key:ix,style:{display:"flex",justifyContent:"space-between",gap:8}},
+                        h("span",{style:{color:C.txt}}, teslimGunu(mk.tarih)),
+                        h("b",{style:{color:"#0e7490",flexShrink:0}}, "en fazla "+mk.adet+" adet")))))
+                : h("div",null,
+                    h("span",{style:{fontWeight:800,color:"#0e7490"}}, "📦 "+teslimGunu(proj.tarih)),
+                    h("span",null, ": en fazla "),
+                    h("b",{style:{color:"#0e7490"}}, proj.enfazla+" adet"),
+                    h("span",null, " teslim edilebilir")),
+              proj.artis>0 && h("div",{style:{fontSize:10.5,color:C.mut,marginTop:4,borderTop:"1px dashed #a5f3fc",paddingTop:4}},
+                "Şu an "+proj.simdiki+" hazır · tüm baskı+montaj sonrası +"+proj.artis)),
             num(u.zayiat)>0 && h("div",{style:{fontSize:10.5,color:C.kirmiziB,fontWeight:700}},"⚠ Zayiat: "+num(u.zayiat)),
             // parça stoğu — yalnızca parçalı üründe, sade
             parcali && (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p));
