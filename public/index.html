@@ -301,7 +301,7 @@ function OncekiSatir({ label, alt, onSec, onSil }){
 /* ============================================================
    İŞ (plan kaydı) modalı
    ============================================================ */
-function IsModal({ kayit, makineler, plan, urunler, filamentler, onSnap, onKapat }){
+function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, haftaBit, onSnap, onKapat }){
   const yeni = !kayit.id;
   const [f,setF] = useState(()=>({
     makineId: kayit.makineId || (makineler[0]&&makineler[0].id) || "",
@@ -379,6 +379,35 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, onSnap, onKapat
       // yeni iş / makine değişti → çakışmasız diz
       await planKaydir(f.makineId, plan, { id, s:sMs, dk:num(f.sureDk) });
     }
+    onKapat();
+  }
+  // 🗓 seçili baskıyla haftanın boş zamanlarını arka arkaya doldur (bu makine ya da tüm makineler)
+  async function haftayiDoldur(hepsi){
+    if(!f.ad.trim()) return alert("Önce iş/ürün adı seç ya da gir.");
+    const dur=num(f.sureDk)*60000; if(dur<=0) return alert("Süre (dk) gir.");
+    const makIds = hepsi ? makineler.map(m=>m.id) : [f.makineId];
+    if(!makIds.length || !makIds[0]) return alert("Makine seç.");
+    const now=Date.now();
+    // gelecek zamanı doldur: hafta başı / seçilen başlangıç / şu an — en büyüğünden başla
+    const basla=Math.max(new Date(f.baslangic).getTime(), num(haftaBas)||0, now);
+    const eklenecek=[];
+    makIds.forEach(mid=>{
+      const busy=(plan||[]).filter(p=>p.makineId===mid).map(p=>{ const s=new Date(p.baslangic).getTime(); return [s,s+num(p.sureDk)*60000]; }).sort((a,b)=>a[0]-b[0]);
+      let cursor=basla, guard=0;
+      while(cursor+dur<=haftaBit && guard++<2000){
+        let carpti=true; while(carpti){ carpti=false; for(const iv of busy){ if(cursor<iv[1] && cursor+dur>iv[0]){ cursor=iv[1]; carpti=true; break; } } }
+        if(cursor+dur>haftaBit) break;
+        eklenecek.push({makineId:mid, s:cursor}); busy.push([cursor,cursor+dur]); busy.sort((a,b)=>a[0]-b[0]); cursor+=dur;
+      }
+    });
+    if(!eklenecek.length) return alert("Bu hafta için boş zaman bulunamadı.");
+    if(!confirm(eklenecek.length+" baskı eklenecek — "+f.ad.trim()+" · her biri "+fmtSureSaat(f.sureDk)+(hepsi?" · tüm makineler":" · bu makine")+".\nHaftayı doldurmak istiyor musun?")) return;
+    onSnap&&onSnap();
+    for(const it of eklenecek){ const iso=new Date(it.s).toISOString();
+      await save("plan",{ makineId:it.makineId, ad:f.ad.trim(), adet:num(f.adet),
+        urunId:(urunMod==="urun"?f.urunId:"")||"", parcaAd:(urunMod==="urun"?f.parcaAd:"")||"",
+        baslangic:iso, sureDk:num(f.sureDk), planSureDk:num(f.sureDk), gram:num(f.gram), filamentId:f.filamentId||"", ams:!!f.ams, not:f.not,
+        basladi:false, gercekBaslangic:null }); }
     onKapat();
   }
   const bitis = new Date(f.baslangic).getTime() + num(f.sureDk)*60000;
@@ -482,7 +511,13 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, onSnap, onKapat
           yeni && new Date(f.baslangic).getTime()<=Date.now() && h("div",{style:{fontSize:12,marginTop:-6,marginBottom:12,
             color:C.yesilT,background:C.yesil,border:"1px solid "+C.yesilB,borderRadius:8,padding:"6px 10px",fontWeight:700}},
             "✓ Geçmiş zaman — bu iş tamamlanmış (başladı) olarak eklenecek."),
-          h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not,onChange:e=>set("not",e.target.value)}))));
+          h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not,onChange:e=>set("not",e.target.value)}))),
+    yeni && num(f.sureDk)>0 && h("div",{style:{marginTop:6,padding:"10px 12px",background:"#f0f9ff",border:"1px dashed #7dd3fc",borderRadius:10}},
+      h("div",{style:{fontSize:12.5,fontWeight:800,color:"#0369a1"}},"🗓 Haftayı bu baskıyla doldur"),
+      h("div",{style:{fontSize:11,color:C.mut,margin:"2px 0 8px"}},"Bu baskı, haftanın boş zamanlarına arka arkaya eklenir (planlı olarak)."),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+        h("button",{type:"button",style:{...S.ibtn,fontWeight:700},onClick:()=>haftayiDoldur(false)},"Bu makinede doldur"),
+        h("button",{type:"button",style:{...S.ibtn,fontWeight:700},onClick:()=>haftayiDoldur(true)},"Tüm makinelerde doldur"))));
 }
 
 /* ============================================================
@@ -3926,7 +3961,7 @@ function App(){
 
     h("div",{style:{textAlign:"right",fontSize:12,color:C.mut,marginTop:12}},"Güncelleme: "+fmtTarihSaat(now)),
 
-    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,urunler:stokUrun,filamentler,onSnap:snapAl,onKapat:()=>setIsModal(null)}),
+    isModal && h(IsModal,{kayit:isModal,makineler:mlist,plan,urunler:stokUrun,filamentler,haftaBas:baslaMs,haftaBit:bitMs,onSnap:snapAl,onKapat:()=>setIsModal(null)}),
     makineAcik && h(MakineYonetim,{makineler:mlist,onKapat:()=>setMakineAcik(false)}),
     filamentAcik && h(FilamentYonetim,{filamentler,onKapat:()=>setFilamentAcik(false)})
   ),
