@@ -150,6 +150,13 @@ const fmtTarih = d => { const t=new Date(d); return pad(t.getDate())+"."+pad(t.g
 const fmtTarihSaat = d => fmtTarih(d)+" "+fmtSaat(d);
 const GUNLER = ["PAZAR","PAZARTESİ","SALI","ÇARŞAMBA","PERŞEMBE","CUMA","CUMARTESİ"];
 const AYLAR = ["OCAK","ŞUBAT","MART","NİSAN","MAYIS","HAZİRAN","TEMMUZ","AĞUSTOS","EYLÜL","EKİM","KASIM","ARALIK"];
+const AYLAR_T = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+const GUNLER_T = ["Pazar","Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
+// teslim tarihi — "Bugün" / "Yarın" / "4 Temmuz Cumartesi"
+function teslimGunu(ts){ const d=new Date(ts); const bugun=gunBasi(Date.now()).getTime(), gun=gunBasi(ts).getTime();
+  const fark=Math.round((gun-bugun)/86400000);
+  if(fark<=0) return "Bugün"; if(fark===1) return "Yarın";
+  return d.getDate()+" "+AYLAR_T[d.getMonth()]+" "+GUNLER_T[d.getDay()]; }
 const SAAT_MALIYET = 12;   // makine çalışma maliyeti (₺/saat)
 function tl(n){ return num(n).toLocaleString("tr",{minimumFractionDigits:0,maximumFractionDigits:2})+" ₺"; }
 // görseli küçült → data URL (Firestore'a sığsın)
@@ -794,6 +801,32 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   // stok adedini elle doğrudan belirle
   async function stoktaAyarla(u,hedef){ await save("stok_urun",{id:u.id,stokta:Math.max(0,Math.round(num(hedef)))}); }
 
+  // —— 📦 TESLİM PROJEKSİYONU ——
+  // Bekleyen (basımda + planlı) baskılar bitip montajlanınca bu üründen EN FAZLA kaç adet hazır olabilir ve en geç hangi tarihte.
+  function teslimProjeksiyon(u){
+    const now=Date.now();
+    // henüz bitmemiş baskılar = basımda (başlamış, bitişi ileride) veya planlı/onay bekleyen (başlamamış)
+    const bekleyen=(baskiMap[u.id]||[]).filter(p=>{ const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000; return !(p.basladi && e<=now); });
+    if(!bekleyen.length) return null;
+    // en geç biten baskının tahmini bitişi (başlamamışsa en erken şimdi başlar varsayımı)
+    let sonBitis=0; bekleyen.forEach(p=>{ const s=new Date(p.baslangic).getTime(); const bas=p.basladi?s:Math.max(s,now); const e=bas+num(p.sureDk)*60000; if(e>sonBitis) sonBitis=e; });
+    const parcalar=u.parcalar||[];
+    const simdiki=num(u.stokta)+montajdaOf(u);   // şu an teslim edilebilecek (stok + montajlanabilir havuz)
+    let enfazla;
+    if(parcalar.length){
+      const gelen={}; parcalar.forEach(p=>gelen[p]=0);
+      bekleyen.forEach(p=>{ const ad=num(p.adet||1);
+        if(p.parcaAd && parcalar.includes(p.parcaAd)) gelen[p.parcaAd]+=ad;
+        else parcalar.forEach(pt=>gelen[pt]+=ad); });   // "takım/tümü" baskısı → her parçaya
+      const takim=Math.min.apply(null, parcalar.map(p=>Math.floor((parcaAvail(u,p)+gelen[p])/gereken(u,p))));
+      enfazla=num(u.stokta)+Math.max(0,takim);
+    } else {
+      const gelen=bekleyen.reduce((s,p)=>s+num(p.adet||1),0);
+      enfazla=num(u.stokta)+montajdaOf(u)+gelen;
+    }
+    return { tarih:sonBitis, enfazla, simdiki, bekleyen:bekleyen.length, basimda:num(basimMap[u.id])>0, artis:Math.max(0,enfazla-simdiki) };
+  }
+
   // pazarlamacıların sahada bıraktığı AÇIK konsinye (pazarlama_hareket, kalan>0) — ürün başına yer dağılımı
   const konsSaha = useMemo(()=>{
     const m={};   // urunId -> { toplam, yer:{ yerAdı:{adet, paz:Set} } }
@@ -893,7 +926,12 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
           const parcali=(u.parcalar||[]).length>0;
           const takim = parcali ? montajdaOf(u) : null;
           const r=adRenk(u.ad), foto=(u.foto||[])[0], m=maliyetOf(u);
-          return h("div",{key:u.id,className:"tk-pcard",style:{...S.card,borderTop:"4px solid "+r.ana,padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}},
+          const proj=teslimProjeksiyon(u);
+          return h("div",{key:u.id,className:"tk-pcard",style:{...S.card,position:"relative",borderTop:"4px solid "+r.ana,padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}},
+            // 🔔 bildirim işareti — basımda / planlı baskı varsa
+            proj && h("span",{title:(proj.basimda?"Basımda + ":"")+"bekleyen "+proj.bekleyen+" baskı",
+              style:{position:"absolute",top:-7,right:-7,minWidth:20,height:20,padding:"0 5px",borderRadius:10,background:proj.basimda?"#0e7490":"#c2410c",color:"#fff",fontSize:11.5,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 0 2px #fff",animation:proj.basimda?"pulse 1.6s infinite":"none"}},
+              (proj.basimda?"🖨":"🗓")+proj.bekleyen),
             // başlık: görsel + ad + (parçalı · maliyet) + düzenle/sil
             h("div",{style:{display:"flex",alignItems:"center",gap:10}},
               foto ? h("img",{src:foto,style:{width:38,height:38,borderRadius:9,objectFit:"cover",flexShrink:0}})
@@ -916,6 +954,15 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
               asamaChip("📥","Stok",u.stokta,"#0369a1",()=>setAks({u,stage:"stokta"})),
               asamaChip("🏬","Konsinye",(konsSaha[u.id]?konsSaha[u.id].toplam:0),"#7c3aed",()=>setAks({u,stage:"konsinye"})),
               asamaChip("💰","Satıldı",(satSaha[u.id]?satSaha[u.id].toplam:0),C.yesilB,()=>setAks({u,stage:"satildi"}))),
+            // 📦 teslim projeksiyonu — bekleyen baskılar bitip montajlanınca en fazla kaç adet, hangi tarihte
+            proj && h("div",{style:{fontSize:11.5,background:"#ecfeff",border:"1px solid #a5f3fc",borderRadius:9,padding:"8px 10px",lineHeight:1.45}},
+              h("div",null,
+                h("span",{style:{fontWeight:800,color:"#0e7490"}}, "📦 "+teslimGunu(proj.tarih)),
+                h("span",null, ": en fazla "),
+                h("b",{style:{color:"#0e7490"}}, proj.enfazla+" adet"),
+                h("span",null, " teslim edilebilir")),
+              proj.artis>0 && h("div",{style:{fontSize:10.5,color:C.mut,marginTop:2}},
+                "Şu an "+proj.simdiki+" hazır · basım+montaj sonrası +"+proj.artis)),
             num(u.zayiat)>0 && h("div",{style:{fontSize:10.5,color:C.kirmiziB,fontWeight:700}},"⚠ Zayiat: "+num(u.zayiat)),
             // parça stoğu — yalnızca parçalı üründe, sade
             parcali && (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p));
