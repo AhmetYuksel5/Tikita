@@ -3753,16 +3753,15 @@ function App(){
   const toplamGecikmeSayi = mlist.reduce((s,mk)=>s+(timelines[mk.id]?.gecikmeSayi||0),0);
   const yuzde = t => kapasiteMs ? (Math.round(t/kapasiteMs*1000)/10) : 0;
 
-  // 🧵 bu (görüntülenen) hafta harcanacak filament (gram) — plan uygulandıkça 'kalan' canlı düşer
-  let gramHaftaPlan=0, gramHaftaKalan=0;
+  // 🧵 bu (görüntülenen) hafta harcanacak filament (gram) — makine başına + toplam (pencereye düşen pay)
+  const gramMak={}; let gramTop=0;
   (plan||[]).forEach(p=>{ const g=num(p.gram); if(g<=0) return;
     const s=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000, e=s+dur;
-    if(dur<=0){ if(s>=baslaMs && s<bitMs){ gramHaftaPlan+=g; if(s>now) gramHaftaKalan+=g; } return; }
-    const ovS=Math.max(s,baslaMs), ovE=Math.min(e,bitMs); if(ovE<=ovS) return;
-    gramHaftaPlan += g*(ovE-ovS)/dur;                                   // pencereye düşen pay
-    const remS=Math.max(ovS,now); if(ovE>remS) gramHaftaKalan += g*(ovE-remS)/dur;   // henüz harcanmamış pay
+    let pay=0;
+    if(dur<=0){ if(s>=baslaMs && s<bitMs) pay=g; }
+    else { const ovS=Math.max(s,baslaMs), ovE=Math.min(e,bitMs); if(ovE>ovS) pay=g*(ovE-ovS)/dur; }
+    if(pay>0){ gramMak[p.makineId]=(gramMak[p.makineId]||0)+pay; gramTop+=pay; }
   });
-  gramHaftaPlan=Math.round(gramHaftaPlan); gramHaftaKalan=Math.round(gramHaftaKalan);
 
   function haftaKaydir(yon){ setBas(b=>b + yon*gunSayisi*24*3600*1000); }
 
@@ -3842,7 +3841,9 @@ function App(){
         h("div",{style:{minWidth:LABEL_W+toplamW}},
           // gün başlık satırı
           h("div",{style:{display:"flex",borderBottom:"1px solid "+C.line,background:"#f3f6fb"}},
-            h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 10px",fontWeight:800,fontSize:13,position:"sticky",left:0,background:"#f3f6fb",zIndex:3,borderRight:"1px solid "+C.line}},"MAKİNE"),
+            h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 10px",position:"sticky",left:0,background:"#f3f6fb",zIndex:3,borderRight:"1px solid "+C.line}},
+              h("div",{style:{fontWeight:800,fontSize:13}},"MAKİNE"),
+              gramTop>0 && h("div",{style:{fontSize:10.5,fontWeight:700,color:C.mut,marginTop:2}}, Math.round(gramTop).toLocaleString("tr")+" gr")),
             gunler.map((g,i)=>h("div",{key:i,style:{width:GUN_W,flexShrink:0,borderLeft:i?"1px solid "+C.line:"none",padding:"6px 4px",textAlign:"center"}},
               h("div",{style:{fontWeight:800,fontSize:13}},pad(g.getDate())+" "+AYLAR[g.getMonth()]),
               h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},GUNLER[g.getDay()]),
@@ -3860,6 +3861,7 @@ function App(){
               return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+C.line,minHeight:ROW_H}},
                 h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 10px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+C.line,display:"flex",flexDirection:"column",justifyContent:"center"}},
                   h("div",{style:{fontWeight:800,fontSize:14}},mk.ad),
+                  gramMak[mk.id]>0 && h("div",{style:{fontSize:10.5,fontWeight:700,color:C.mut}}, Math.round(gramMak[mk.id]).toLocaleString("tr")+" gr"),
                   mk.tur && h("div",{style:{fontSize:11,color:C.mut}},mk.tur),
                   tablaIs && isAdmin && (()=>{ const rez = tablaIs.rezerveId && num(tablaIs.rezerveBitis)>now;
                     const kalanDk = rez ? Math.max(0,Math.ceil((num(tablaIs.rezerveBitis)-now)/60000)) : 0;
@@ -3943,10 +3945,6 @@ function App(){
       // makine özeti
       h("div",{style:S.card},
         h("div",{style:S.hdr},"MAKİNE ÖZETİ (HAFTALIK)"),
-        // 🧵 bu hafta harcanacak filament (küçük font, canlı) — baskı bölümünün üzerinde
-        gramHaftaPlan>0 && h("div",{style:{fontSize:10.5,color:C.mut,fontWeight:600,padding:"5px 14px 0",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}},
-          h("span",null,"🧵 Bu hafta ~"+gramHaftaPlan.toLocaleString("tr")+" gr filament"),
-          gramHaftaKalan<gramHaftaPlan && h("span",{style:{color:"#0e7490",fontWeight:700}}, "· kalan ~"+gramHaftaKalan.toLocaleString("tr")+" gr")),
         h("div",{style:{display:"grid",gridTemplateColumns:"1.1fr .9fr .9fr .9fr 78px",gap:6,
           padding:"7px 14px",borderBottom:"1px solid "+C.line,fontSize:11,fontWeight:700,color:C.mut}},
           h("span",null,"MAKİNE"),h("span",null,"BASKI"),h("span",{style:{color:C.kirmiziB}},"KAYIP"),h("span",{style:{color:"#c2410c"}},"GECİKME"),h("span",null,"DOLULUK")),
