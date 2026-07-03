@@ -180,6 +180,37 @@ async function paylasWhats(u, fiyat){
   }catch(e){ if(e&&e.name==="AbortError") return; }
   window.open("https://wa.me/?text="+encodeURIComponent(text),"_blank");
 }
+// —— ürün KARTINI tek bir resme (JPEG) çiz: solda ürün fotoğrafı, sağda bilgileri ——
+function _resimYukle(src){ return new Promise((res,rej)=>{ const img=new Image(); img.crossOrigin="anonymous"; img.onload=()=>res(img); img.onerror=rej; img.src=src; }); }
+function _kapla(ctx,img,dx,dy,dw,dh){ const ir=img.width/img.height, dr=dw/dh; let sx,sy,sw,sh;
+  if(ir>dr){ sh=img.height; sw=sh*dr; sx=(img.width-sw)/2; sy=0; } else { sw=img.width; sh=sw/dr; sx=0; sy=(img.height-sh)/2; }
+  ctx.drawImage(img,sx,sy,sw,sh,dx,dy,dw,dh); }
+function _sar(ctx,metin,x,y,maxW,satirY){ const kelime=String(metin).split(/\s+/); let satir="";
+  for(const w of kelime){ const t=satir?satir+" "+w:w; if(ctx.measureText(t).width>maxW && satir){ ctx.fillText(satir,x,y); y+=satirY; satir=w; } else satir=t; }
+  if(satir){ ctx.fillText(satir,x,y); y+=satirY; } return y; }
+async function urunKartiResmi(u){
+  try{
+    const W=1080, H=720, FG="system-ui,-apple-system,Segoe UI,Roboto,Arial";
+    const cv=document.createElement("canvas"); cv.width=W; cv.height=H; const ctx=cv.getContext("2d");
+    ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,W,H);
+    const imgW=Math.round(W*0.46); const foto=(u.foto||[])[0]; let cizildi=false;
+    if(foto){ try{ const img=await _resimYukle(foto); _kapla(ctx,img,0,0,imgW,H); cizildi=true; }catch(e){} }
+    if(!cizildi){ ctx.fillStyle="#0b1220"; ctx.fillRect(0,0,imgW,H);
+      ctx.fillStyle="rgba(255,255,255,.92)"; ctx.font="bold 240px "+FG; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText((u.ad||"?").charAt(0).toLocaleUpperCase("tr"), imgW/2, H/2); }
+    // sağ blok — üst renk şeridi + bilgiler
+    ctx.fillStyle="#b45309"; ctx.fillRect(imgW,0,W-imgW,10);
+    const pad=52; let x=imgW+pad, y=pad+56;
+    ctx.textAlign="left"; ctx.textBaseline="alphabetic";
+    ctx.fillStyle="#0f172a"; ctx.font="bold 54px "+FG; y=_sar(ctx,u.ad||"",x,y,W-x-pad,64);
+    if(u.aciklama){ ctx.fillStyle="#475569"; ctx.font="30px "+FG; y+=22; y=_sar(ctx,u.aciklama,x,y,W-x-pad,42); }
+    const sat=num(u.satisFiyat);
+    if(sat>0){ y+=54; ctx.fillStyle="#ecfdf5"; const pw=W-x-pad; ctx.fillRect(x-14,y-56,Math.min(pw+28,360),82);
+      ctx.fillStyle="#047857"; ctx.font="bold 64px "+FG; ctx.fillText(tl(sat), x, y); }
+    ctx.fillStyle="#94a3b8"; ctx.font="bold 30px "+FG; ctx.textAlign="right"; ctx.fillText("Tikita", W-pad, H-pad);
+    return await new Promise(res=>cv.toBlob(res,"image/jpeg",0.92));
+  }catch(e){ return null; }
+}
 function fmtSureSaat(dk){ dk=Math.max(0,Math.round(num(dk))); return Math.floor(dk/60)+" sa "+pad(dk%60)+" dk"; }
 function toInput(d){ const t=new Date(d); return t.getFullYear()+"-"+pad(t.getMonth()+1)+"-"+pad(t.getDate())+"T"+pad(t.getHours())+":"+pad(t.getMinutes()); }
 function gunBasi(d){ const t=new Date(d); t.setHours(0,0,0,0); return t; }
@@ -2241,13 +2272,24 @@ function KartGonderModal({ urun, musteriler, onKapat }){
   const liste=(musteriler||[]).filter(m=>!m.arsiv && (m.telefon||"").replace(/\D/g,"").length>=7)
     .filter(m=>{ const s=q.trim().toLocaleLowerCase("tr"); return !s || (m.ad||"").toLocaleLowerCase("tr").includes(s) || (m.bolge||"").toLocaleLowerCase("tr").includes(s); })
     .sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const [mesgul,setMesgul]=useState("");   // hangi müşteriye kart hazırlanıyor
   const kartMetni=()=>{ const sat=num(u.satisFiyat); const foto=(u.foto||[])[0];
     return [u.ad, u.aciklama||"", sat>0?("Fiyat: "+tl(sat)):"", (foto&&/^https?:/.test(foto)?foto:"")].filter(Boolean).join("\n"); };
   async function gonder(m){ const tel=(m.telefon||"").replace(/\D/g,""); if(!tel) return;
+    setMesgul(m.id);
+    // ürün kartını tek bir resme çiz
+    const blob=await urunKartiResmi(u);
+    const file=blob? new File([blob],(u.ad||"urun").replace(/[^\w-]+/g,"_")+".jpg",{type:"image/jpeg"}) : null;
+    const text=kartMetni();
     // 🤝 diplomasi kaydı → oyun payeleri (Ulak/Elçi/Sefir…) ve temas olarak sayılır (tehdit sıfırlar)
     await harKaydet({tip:"diplomasi",musteriId:m.id||"",yer:m.ad||"",bolge:m.bolge||"",urunAdlar:u.ad||"",adet:1,tarih:new Date().toISOString()});
-    setGonderilen(s=>({...s,[m.id]:true}));
-    window.open("https://wa.me/9"+tel+"?text="+encodeURIComponent(kartMetni()),"_blank"); }
+    setGonderilen(s=>({...s,[m.id]:true})); setMesgul("");
+    // mobil: resmi doğrudan WhatsApp'a paylaş (görsel satır içi gider)
+    if(file && navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file],text}); return; }catch(e){ if(e&&e.name==="AbortError") return; } }
+    // yedek (masaüstü / paylaşım yok): kart resmini indir + numaraya WhatsApp metnini aç
+    if(blob){ const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=file?file.name:"kart.jpg"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000); }
+    window.open("https://wa.me/9"+tel+"?text="+encodeURIComponent(text),"_blank"); }
   return h(Modal,{ baslik:"📲 Kart gönder · "+(u.ad||""), onKapat,
       alt:h("button",{style:{...S.btn("p"),flex:1},onClick:onKapat},"Kapat") },
     h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"Telefonu kayıtlı müşteriler. Birine dokun → WhatsApp'tan ürün kartı gider, iletişim payene sayılır."),
@@ -2259,7 +2301,7 @@ function KartGonderModal({ urun, musteriler, onKapat }){
             h("div",{style:{flex:1,minWidth:0}},
               h("div",{style:{fontWeight:800,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad),
               h("div",{style:{fontSize:11.5,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (m.bolge?("📍 "+m.bolge+" · "):"")+"📞 "+m.telefon)),
-            h("button",{onClick:()=>gonder(m),style:{flexShrink:0,background:yollandi?"#e2e8f0":"#16a34a",color:yollandi?"#334155":"#fff",border:"none",borderRadius:9,padding:"8px 13px",cursor:"pointer",fontWeight:800,fontSize:13}}, yollandi?"✓ Tekrar":"📲 Gönder")); })));
+            h("button",{disabled:mesgul===m.id,onClick:()=>gonder(m),style:{flexShrink:0,background:yollandi?"#e2e8f0":"#16a34a",color:yollandi?"#334155":"#fff",border:"none",borderRadius:9,padding:"8px 13px",cursor:mesgul===m.id?"default":"pointer",fontWeight:800,fontSize:13,opacity:mesgul===m.id?0.7:1}}, mesgul===m.id?"⏳ Hazırlanıyor":yollandi?"✓ Tekrar":"📲 Gönder")); })));
 }
 
 function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif, tablaUcret, ayar }){
