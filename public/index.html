@@ -3745,9 +3745,22 @@ function App(){
     if(!confirm((num(p.adet)?num(p.adet)+" x ":"")+p.ad+" baskısı başladı mı?\n(Onaylayınca 'çalışıyor' görünecek; başlangıç şu an olarak güncellenecek.)")) return;
     snapAl();
     const simdi = Date.now(), iso = new Date(simdi).toISOString();
+    const pPs = new Date(p.baslangic).getTime();   // p'nin ESKİ planlı başlangıcı (save'den önce al)
+    // p'yi ŞİMDİ başlat
     await save("plan",{ id:p.id, basladi:true, baslangic:iso, gercekBaslangic:iso,
       planSureDk: p.planSureDk!=null?p.planSureDk:num(p.sureDk) });
-    await planKaydir(p.makineId, plan, { id:p.id, s:simdi, dk:num(p.sureDk) });
+    // p'den SONRAKİ (sırada) başlamamış işleri p'nin bitişinden itibaren çakışmasız yeniden diz.
+    // Gecikmede aradaki boş süre KAYIP olur; gerçekten ileride olan (boşluklu) işlerin araları korunur.
+    const sonrakiler = plan.filter(q=>q.makineId===p.makineId && q.id!==p.id && !q.basladi
+        && new Date(q.baslangic).getTime() > pPs)
+      .map(q=>({ id:q.id, ps:new Date(q.baslangic).getTime(), dk:num(q.sureDk) }))
+      .sort((a,b)=>a.ps-b.ps);
+    let cursor = simdi + num(p.sureDk)*60000;   // p'nin yeni bitişi
+    for(const j of sonrakiler){
+      const s = Math.max(j.ps, cursor);          // ileri boşluk korunur, geç kalan sıkışır
+      if(s !== j.ps) await save("plan",{ id:j.id, baslangic:new Date(s).toISOString() });
+      cursor = s + j.dk*60000;
+    }
   }
 
   // geri al — değişiklik öncesi plan anlık görüntüsü
