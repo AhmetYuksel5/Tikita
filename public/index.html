@@ -614,10 +614,23 @@ function tickStep(gunW){ // saat aralığı — zoom'a göre detay
   return 24;
 }
 function makineTimeline(makineId, plan, baslaMs, bitMs, now){
-  const js = plan.filter(p=>p.makineId===makineId)
-    .map(p=>({ p, s:new Date(p.baslangic).getTime(), e:new Date(p.baslangic).getTime()+num(p.sureDk)*60000 }))
-    .filter(x=>x.e>baslaMs && x.s<bitMs)
-    .sort((a,b)=>a.s-b.s);
+  now = now || Date.now();
+  // makinenin tüm işleri, PLANLANAN başlangıca göre sırala
+  const all = plan.filter(p=>p.makineId===makineId)
+    .map(p=>({ p, ps:new Date(p.baslangic).getTime(), dk:num(p.sureDk) }))
+    .sort((a,b)=>a.ps-b.ps);
+  // EFEKTİF zaman: başlamamış (onay bekleyen) ve tarihi geçmiş baskı kendiliğinden başlamış SAYILMAZ →
+  // gerçek başlama anı en erken "şimdi"dir; sonraki (başlamamış) işler de zincirleme öne kayar.
+  // Başlamış (çalışan/bitmiş) işler gerçek saatinde kalır.
+  let cursor = -Infinity;
+  const eff = all.map(({p,ps,dk})=>{
+    let s;
+    if(p.basladi){ s = ps; }                                  // başlamış → gerçek başlangıç
+    else { s = Math.max(ps, cursor); if(ps < now) s = Math.max(now, cursor); }   // gecikmiş/başlamamış → şimdiye çek
+    const e = s + dk*60000; cursor = Math.max(cursor, e);
+    return { p, s, e, kaymis: s!==ps };
+  });
+  const js = eff.filter(x=>x.e>baslaMs && x.s<bitMs).sort((a,b)=>a.s-b.s);
   let printMs=0;
   js.forEach(x=>{ printMs += Math.min(bitMs,x.e)-Math.max(baslaMs,x.s); });
   const bos=[]; let cur=baslaMs;
