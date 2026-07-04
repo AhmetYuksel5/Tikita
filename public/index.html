@@ -668,12 +668,19 @@ function StokModal({ kayit, onKapat }){
   const yeni=!kayit.id;
   const [f,setF]=useState(()=>({ ad:kayit.ad||"", parcaStr:(kayit.parcalar||[]).join(", "),
     parcaAdet:{...(kayit.parcaAdet||{})}, stokta:kayit.stokta||0, konsinye:kayit.konsinye||0, maliyet:kayit.maliyet||"", pazFiyat:kayit.pazFiyat||"", not:kayit.not||"" }));
+  const [foto,setFoto]=useState(kayit.foto||[]);
+  const [fotoYuk,setFotoYuk]=useState(false);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
   const parcalar = f.parcaStr.split(",").map(x=>x.trim()).filter(Boolean);
+  async function fotoEkle(e){
+    const fs=Array.from(e.target.files||[]); if(!fs.length) return; setFotoYuk(true);
+    try{ const yeniF=[]; for(const dosya of fs){ yeniF.push(await resizeImg(dosya,1000)); } setFoto(s=>[...s,...yeniF].slice(0,6)); }
+    catch(err){ alert("Görsel yüklenemedi."); } finally{ setFotoYuk(false); e.target.value=""; }
+  }
   async function kaydet(){
     if(!f.ad.trim()) return alert("Ad gir.");
     const pa={}; parcalar.forEach(p=>pa[p]=Math.max(1,Math.round(num(f.parcaAdet[p]||1))));
-    await save("stok_urun",{ id:kayit.id, ad:f.ad.trim(), parcalar, parcaAdet:pa,
+    await save("stok_urun",{ id:kayit.id, ad:f.ad.trim(), parcalar, parcaAdet:pa, foto,
       stokta:num(f.stokta), konsinye:num(f.konsinye), maliyet:num(f.maliyet), pazFiyat:num(f.pazFiyat), not:f.not });
     onKapat();
   }
@@ -683,6 +690,16 @@ function StokModal({ kayit, onKapat }){
       !yeni&&h("button",{style:{...S.btn(),color:C.kirmiziB,borderColor:C.kirmiziB},onClick:()=>{if(confirm("Silinsin mi?")){remove("stok_urun",kayit.id);onKapat();}}},"Sil"),
       h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
     h(Field,{label:"Ürün adı"}, h("input",{style:S.input,value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"Ejderha"})),
+    h(Field,{label:"📷 Fotoğraflar"}, h("div",null,
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}},
+        foto.map((src,i)=>h("div",{key:i,style:{position:"relative",width:64,height:64}},
+          h("img",{src,style:{width:64,height:64,borderRadius:9,objectFit:"cover",border:"1px solid "+C.line}}),
+          h("button",{type:"button",title:"Kaldır",onClick:()=>setFoto(s=>s.filter((_,j)=>j!==i)),
+            style:{position:"absolute",top:-6,right:-6,width:20,height:20,borderRadius:10,border:"none",background:C.kirmiziB,color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}},"✕"))),
+        foto.length<6 && h("label",{style:{width:64,height:64,borderRadius:9,border:"2px dashed "+C.line,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:22,color:C.mut,background:"#f8fafc"}},
+          fotoYuk?"⏳":"+",
+          h("input",{type:"file",accept:"image/*",multiple:true,style:{display:"none"},onChange:fotoEkle}))),
+      h("div",{style:{fontSize:11,color:C.mut}},"En fazla 6 fotoğraf · ilk fotoğraf kartta ve pazarlamacı cephanesinde görünür."))),
     h(Field,{label:"Parçalar (virgülle ayır — boşsa tek parça)"}, h("input",{style:S.input,value:f.parcaStr,onChange:e=>set("parcaStr",e.target.value),placeholder:"alt, üst, göz"})),
     parcalar.length>0 && h("div",{style:{marginBottom:12}},
       h("div",{style:{...S.label,marginBottom:6}},"Bir üründe kaç adet gerekli? (örn. göz: 2)"),
