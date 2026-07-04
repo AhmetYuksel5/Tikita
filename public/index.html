@@ -2516,7 +2516,10 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const mevcutMusId=new Set((_tumMus||[]).map(m=>m.id));   // silinen müşterileri (kaydı yok) tespit için
   const urunListe=(urunler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   const konsKalan={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye" && num(x.kalan)>0) konsKalan[x.urunId]=num(konsKalan[x.urunId])+num(x.kalan); });
-  const now=Date.now(), gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
+  // dakikada bir kendini yenile → baskı bitince tabla uyarısı/tehdit sayaçları etkileşim beklemeden güncellenir
+  const [nowTick,setNowTick]=useState(Date.now());
+  useEffect(()=>{ const t=setInterval(()=>setNowTick(Date.now()),60000); return ()=>clearInterval(t); },[]);
+  const now=nowTick, gun0=gunBasi(now).getTime(), haf0=haftaBasi(now).getTime(), ay0=ayBasi(now);
   // ÜRETİM metrikleri
   const biten=(plan||[]).filter(p=>p.basladi && new Date(p.baslangic).getTime()+num(p.sureDk)*60000<=now);
   const uAdet=biten.reduce((s,p)=>s+num(p.adet||1),0);
@@ -3210,7 +3213,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   // (Sadece en son baskıya bakılır → toplanınca eski/bayat baskılar tekrar listelenmez, makine çalışıyorsa gizli.)
   const toplanacak=[]; (makineler||[]).forEach(mk=>{ const mjobs=(plan||[]).filter(p=>p.makineId===mk.id && p.basladi);
     if(!mjobs.length) return;
-    const son=mjobs.slice().sort((a,b)=>(new Date(b.baslangic).getTime()+num(b.sureDk)*60000)-(new Date(a.baslangic).getTime()+num(a.sureDk)*60000))[0];
+    const son=mjobs.slice().sort((a,b)=>new Date(b.gercekBaslangic||b.baslangic).getTime()-new Date(a.gercekBaslangic||a.baslangic).getTime())[0];   // tabla = EN SON BAŞLATILAN baskının
     const bitti=new Date(son.baslangic).getTime()+num(son.sureDk)*60000<=nowT;
     if(bitti && !son.tablaAlindi) toplanacak.push({makine:mk,is:son}); });
   const tablaUc=tablaUcret!=null?num(tablaUcret):5;
@@ -4074,7 +4077,7 @@ function App(){
               // tabla uyarısı: makinenin EN SON başlayan baskısı bitmiş ve toplanmamışsa → tablayı topla.
               // (Sadece en son baskıya bakılır; toplanınca eski/bayat baskılar tekrar ortaya çıkmaz.)
               const mjobs = plan.filter(p=>p.makineId===mk.id && p.basladi);
-              const sonBaski = mjobs.slice().sort((a,b)=>(new Date(b.baslangic).getTime()+num(b.sureDk)*60000)-(new Date(a.baslangic).getTime()+num(a.sureDk)*60000))[0] || null;
+              const sonBaski = mjobs.slice().sort((a,b)=>new Date(b.gercekBaslangic||b.baslangic).getTime()-new Date(a.gercekBaslangic||a.baslangic).getTime())[0] || null;   // tabla = EN SON BAŞLATILAN baskının
               const tablaIs = (sonBaski && !sonBaski.tablaAlindi && new Date(sonBaski.baslangic).getTime()+num(sonBaski.sureDk)*60000<=now) ? sonBaski : null;
               return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+C.line,minHeight:ROW_H}},
                 h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 10px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+C.line,display:"flex",flexDirection:"column",justifyContent:"center"}},
