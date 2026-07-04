@@ -658,7 +658,7 @@ function makineTimeline(makineId, plan, baslaMs, bitMs, now){
   js.forEach(x=>{ const base=x.p.planSureDk!=null?num(x.p.planSureDk):num(x.p.sureDk);
     const g=(num(x.p.sureDk)-base)*60000; if(g>0){ gecikmeMs+=g; gecikmeSayi++; } });
   const bosMs=(bitMs-baslaMs)-printMs;
-  return { js, bos, printMs, bosMs, kayipMs, bosGelecekMs: bosMs-kayipMs, gecikmeMs, gecikmeSayi };
+  return { js, eff, bos, printMs, bosMs, kayipMs, bosGelecekMs: bosMs-kayipMs, gecikmeMs, gecikmeSayi };
 }
 
 /* ============================================================
@@ -3949,15 +3949,14 @@ function App(){
     for(const p of snap){ await restoreDoc("plan",p); }                     // eski hâli yükle
     undoRef.current=null; setUndoVar(false);
   }
-  // boş kalacak makineler — art arda planlı işlerde SON bitiş saatini baz al (makine başına tek satır)
+  // boş kalacak makineler — Gantt'la aynı EFEKTİF zaman çizelgesinden (öne kaydırma/plan değişikliği anında yansır)
   const bosListe = [];
   mlist.forEach(mk=>{
-    const jobs = plan.filter(p=>p.makineId===mk.id)
-      .map(p=>new Date(p.baslangic).getTime()+num(p.sureDk)*60000)
-      .filter(e=>e>baslaMs);
+    const eff=(timelines[mk.id]||{}).eff||[];
+    const uclar=eff.filter(x=>!x.geride && x.e>baslaMs).map(x=>x.e);   // geride kalan (atlanmış) işler sayılmaz
     let start;
-    if(!jobs.length){ start = Math.max(baslaMs, now); }       // hiç işi yok → şu an boşta
-    else { const son = Math.max.apply(null, jobs); if(son>=bitMs) return; start = Math.max(son, now); } // son iş bitti → boştaysa şu andan başlat
+    if(!uclar.length){ start = Math.max(baslaMs, now); }       // hiç işi yok → şu an boşta
+    else { const son = Math.max.apply(null, uclar); if(son>=bitMs) return; start = Math.max(son, now); } // son iş bitince boşa düşer
     bosListe.push({ makine:mk, start });
   });
   bosListe.sort((a,b)=>a.start-b.start);
