@@ -619,16 +619,23 @@ function makineTimeline(makineId, plan, baslaMs, bitMs, now){
   const all = plan.filter(p=>p.makineId===makineId)
     .map(p=>({ p, ps:new Date(p.baslangic).getTime(), dk:num(p.sureDk) }))
     .sort((a,b)=>a.ps-b.ps);
-  // EFEKTİF zaman: başlamamış (onay bekleyen) ve tarihi geçmiş baskı kendiliğinden başlamış SAYILMAZ →
-  // gerçek başlama anı en erken "şimdi"dir; sonraki (başlamamış) işler de zincirleme öne kayar.
-  // Başlamış (çalışan/bitmiş) işler gerçek saatinde kalır.
+  // fiilen başlatılmış en son işin başlama anı — bundan ÖNCE planlı ama başlamamış işler "geride kaldı"
+  let sonBaslamaMs = -Infinity;
+  all.forEach(({p,ps})=>{ if(p.basladi){ const gs=p.gercekBaslangic?new Date(p.gercekBaslangic).getTime():ps; if(gs>sonBaslamaMs) sonBaslamaMs=gs; } });
+  // EFEKTİF zaman:
+  //  • Başlamış (çalışan/bitmiş) → gerçek saatinde kalır.
+  //  • Başlamamış ama üzerine daha sonra başka iş BAŞLATILMIŞ → geride kaldı, planlı (geçmiş) yerinde durur, öne çekilmez.
+  //  • Başlamamış ve İLERİYE dönük (henüz atlanmamış) → en erken "şimdi"ye çekilir; sonrakiler zincirleme öne kayar.
   let cursor = -Infinity;
   const eff = all.map(({p,ps,dk})=>{
+    const geride = !p.basladi && ps < sonBaslamaMs;           // daha sonra başka iş başlatılmış → atlanmış iş
     let s;
-    if(p.basladi){ s = ps; }                                  // başlamış → gerçek başlangıç
-    else { s = Math.max(ps, cursor); if(ps < now) s = Math.max(now, cursor); }   // gecikmiş/başlamamış → şimdiye çek
-    const e = s + dk*60000; cursor = Math.max(cursor, e);
-    return { p, s, e, kaymis: s!==ps };
+    if(p.basladi){ s = ps; }
+    else if(geride){ s = ps; }                                // geride kalan → planlı yerinde bırak (öne çekme)
+    else { s = Math.max(ps, cursor); if(ps < now) s = Math.max(now, cursor); }
+    const e = s + dk*60000;
+    if(!geride) cursor = Math.max(cursor, e);                 // yalnız aktif zincir cursor'ı ilerletir
+    return { p, s, e, kaymis: s!==ps, geride };
   });
   const js = eff.filter(x=>x.e>baslaMs && x.s<bitMs).sort((a,b)=>a.s-b.s);
   let printMs=0;
