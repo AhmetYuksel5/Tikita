@@ -2378,14 +2378,37 @@ function Madalya({ sira, ad, deg, renk, max }){
         h("div",{style:{height:"100%",width:p+"%",background:renk,borderRadius:99}}))));
 }
 
-// 🧭 KEŞİF — Overpass (OpenStreetMap): kalelerin çevresinde benzer mekanları tara (anahtarsız, ücretsiz)
+// 🧭 KEŞİF — Overpass (OpenStreetMap, ücretsiz) VEYA Google Places (anahtar girilirse: puan/yorum/telefon)
 const KESIF_KAT=[
-  {k:"market",    ad:"Market/Bakkal",  ik:"🛒", test:/market|bakkal|şarküteri|büfe|gross/,   q:'["shop"~"^(convenience|supermarket|grocery|general)$"]'},
-  {k:"tekel",     ad:"Tekel",          ik:"🍾", test:/tekel|içki/,                            q:'["shop"~"^(alcohol|beverages)$"]'},
-  {k:"kafe",      ad:"Kafe",           ik:"☕", test:/kafe|cafe|coffee|kahve/,                q:'["amenity"="cafe"]'},
-  {k:"kirtasiye", ad:"Kırtasiye",      ik:"✏️", test:/kırtasiye|kirtasiye/,                   q:'["shop"="stationery"]'},
-  {k:"hediyelik", ad:"Oyuncak/Hediye", ik:"🧸", test:/oyuncak|hediyelik|gift/,                q:'["shop"~"^(toys|gift)$"]'},
+  {k:"market",    ad:"Market/Bakkal",  ik:"🛒", test:/market|bakkal|şarküteri|büfe|gross/,   q:'["shop"~"^(convenience|supermarket|grocery|general)$"]', gt:["supermarket","convenience_store","grocery_store"]},
+  {k:"tekel",     ad:"Tekel",          ik:"🍾", test:/tekel|içki/,                            q:'["shop"~"^(alcohol|beverages)$"]', gt:["liquor_store"]},
+  {k:"kafe",      ad:"Kafe",           ik:"☕", test:/kafe|cafe|coffee|kahve/,                q:'["amenity"="cafe"]', gt:["cafe","coffee_shop"]},
+  {k:"kirtasiye", ad:"Kırtasiye",      ik:"✏️", test:/kırtasiye|kirtasiye/,                   q:'["shop"="stationery"]', gt:["book_store"]},
+  {k:"hediyelik", ad:"Oyuncak/Hediye", ik:"🧸", test:/oyuncak|hediyelik|gift/,                q:'["shop"~"^(toys|gift)$"]', gt:["gift_shop","toy_store"]},
 ];
+function kesifKatFromGTypes(types){ const ts=new Set(types||[]); const c=KESIF_KAT.find(x=>(x.gt||[]).some(g=>ts.has(g))); return c?c.k:"diger"; }
+// Google Places (New) — searchNearby: kale merkezleri çevresinde mekan + puan + yorum + telefon
+async function kesifGoogle(merkezler, katlar, metre, key){
+  const includedTypes=Array.from(new Set(katlar.flatMap(c=>c.gt||[])));
+  const gor=new Set(), out=[];
+  for(const m of merkezler){
+    const body={ includedTypes, maxResultCount:20, rankPreference:"POPULARITY",
+      locationRestriction:{ circle:{ center:{latitude:+m.lat,longitude:+m.lng}, radius:Math.min(50000,metre) } } };
+    const r=await fetch("https://places.googleapis.com/v1/places:searchNearby",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,
+        "X-Goog-FieldMask":"places.id,places.displayName,places.location,places.types,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.currentOpeningHours.weekdayDescriptions"},
+      body:JSON.stringify(body)});
+    if(!r.ok){ let e=""; try{ e=(await r.json()).error.message; }catch(x){} throw new Error("Google "+r.status+(e?(" — "+e):"")); }
+    const j=await r.json();
+    (j.places||[]).forEach(p=>{ const ad=p.displayName&&p.displayName.text; if(!ad||!p.location) return;
+      if(gor.has(p.id)) return; gor.add(p.id);
+      const tel=(p.nationalPhoneNumber||"").replace(/[^0-9+]/g,"").replace(/^\+?90/,"0");
+      out.push({ad, lat:p.location.latitude, lng:p.location.longitude, kat:kesifKatFromGTypes(p.types),
+        tel, saat:(p.currentOpeningHours&&(p.currentOpeningHours.weekdayDescriptions||[])[0])||"",
+        puanG:(p.rating!=null?p.rating:null), yorum:(p.userRatingCount!=null?num(p.userRatingCount):0)}); });
+  }
+  return out;
+}
 function kesifKatBul(t){ const s=t.shop||"", a=t.amenity||"";
   if(/^(convenience|supermarket|grocery|general)$/.test(s)) return "market";
   if(/^(alcohol|beverages)$/.test(s)) return "tekel";
@@ -3464,19 +3487,22 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const merkez=(konumluKaleler.length?konumluKaleler.slice().sort((a,b)=>b.guc-a.guc):(musteriler||[]).filter(m=>m.lat&&m.lng)).slice(0,8);
     if(!merkez.length) return alert("Önce konumlu bir kale ya da gözcü ekle.");
     const katlar=KESIF_KAT.filter(c=>kesifSec.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
+    const gKey=(AY.googleKey||"").trim();
     setKesifYuk(true);
     try{
-      const ham=await kesifOverpass(merkez,katlar,Math.round(kesifR*1000));
+      const ham = gKey
+        ? await kesifGoogle(merkez,katlar,Math.round(kesifR*1000),gKey)
+        : await kesifOverpass(merkez,katlar,Math.round(kesifR*1000));
       const mevcutNokta=[...(musteriler||[]).filter(m=>m.lat&&m.lng), ...konumluKaleler];
       const temiz=ham
-        .filter(r=> !mevcutAdSet.has(adNorm(r.ad)) && !mevcutNokta.some(m=>haversineKm(r.lat,r.lng,+m.lat,+m.lng)<0.06))
+        .filter(r=> r.lat!=null && r.lng!=null && !mevcutAdSet.has(adNorm(r.ad)) && !mevcutNokta.some(m=>haversineKm(r.lat,r.lng,+m.lat,+m.lng)<0.06))
         .map(r=>{ let mn=Infinity,yakin=null; konumluKaleler.forEach(k=>{ const d=haversineKm(r.lat,r.lng,+k.lat,+k.lng); if(d<mn){ mn=d; yakin=k; } });
-          return {ad:r.ad, lat:r.lat, lng:r.lng, kat:r.kat, tel:r.tel||"", saat:r.saat||"", web:r.web||"", mesafe:mn===Infinity?null:mn, yakinAd:yakin?yakin.ad:"", yakinBolge:(yakin&&yakin.bolge)||""}; })
-        .sort((a,b)=>(a.mesafe!=null?a.mesafe:9e9)-(b.mesafe!=null?b.mesafe:9e9)).slice(0,40);
+          return {ad:r.ad, lat:r.lat, lng:r.lng, kat:r.kat, tel:r.tel||"", saat:r.saat||"", web:r.web||"", puanG:(r.puanG!=null?r.puanG:null), yorum:num(r.yorum), mesafe:mn===Infinity?null:mn, yakinAd:yakin?yakin.ad:"", yakinBolge:(yakin&&yakin.bolge)||""}; })
+        .sort((a,b)=>(a.mesafe!=null?a.mesafe:9e9)-(b.mesafe!=null?b.mesafe:9e9)).slice(0,60);
       setKesifSonuc(temiz);
       // 💾 önbellek — sekme her açıldığında son tarama hazır gelsin
-      if(aktif) save("kesif_cache",{id:aktif.id,sonuc:temiz,tarih:new Date().toISOString()});
-    }catch(e){ alert("Keşif yapılamadı — harita sunucusu yoğun olabilir, birazdan tekrar dene."); }
+      if(aktif) save("kesif_cache",{id:aktif.id,sonuc:temiz,tarih:new Date().toISOString(),kaynak:gKey?"google":"osm"});
+    }catch(e){ alert((AY.googleKey?"Google Keşif hatası: "+(e.message||e)+"\n\nAnahtarı, 'Places API (New)' etkin mi ve faturalandırma açık mı diye kontrol et.":"Keşif yapılamadı — harita sunucusu yoğun olabilir, birazdan tekrar dene.")); }
     setKesifYuk(false);
   }
   // görünen liste: canlı tarama > önbellek; redde ve sonradan eklenen müşterilere göre süzülür
@@ -3504,15 +3530,20 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
       Math.max(0,40-(r.mesafe!=null?r.mesafe:9)*10) +
       num(katCiro[r.kat])/maxKatCiro*25 +
       num(bolgeGucM[r.yakinBolge])/maxBolgeGuc*15 +
-      Math.min(20,kume*5));
+      Math.min(20,kume*5) +
+      (r.puanG!=null ? (r.puanG/5)*20 : 0) +                         // ⭐ Google puanı (varsa)
+      (r.yorum ? Math.min(10, Math.log10(r.yorum+1)*5) : 0));        // 🗳 yorum sayısı (log)
     const disari=hullPts ? !pointInPoly([+r.lat,+r.lng],hullPts) : false;   // hâkimiyet alanının dışı = yayılma adayı
     const yon=merkezLat!=null ? Math.round(pusulaYon(merkezLat,merkezLng,+r.lat,+r.lng)/45)%8 : null;   // kale merkezine göre yön
     return {...r,puan,kume,disari,yon,sicak:puan>=55};
   }).sort((a,b)=>
       kesifSira==="tel" ? ((b.tel?1:0)-(a.tel?1:0)) || (b.puan-a.puan) :
       kesifSira==="mesafe" ? ((a.mesafe!=null?a.mesafe:9e9)-(b.mesafe!=null?b.mesafe:9e9)) :
+      kesifSira==="gpuan" ? ((b.puanG!=null?b.puanG:-1)-(a.puanG!=null?a.puanG:-1)) || (b.yorum-a.yorum) :
+      kesifSira==="yorum" ? (num(b.yorum)-num(a.yorum)) :
       (b.puan-a.puan)) : null;
   const kesifTelSay=(kesifListe||[]).filter(r=>r.tel).length;
+  const kesifGoogleVar=(kesifListe||[]).some(r=>r.puanG!=null);
   const disariAday=(kesifListe||[]).filter(r=>r.disari);
   const disariBolgeler=Array.from(new Set(disariAday.map(r=>r.yakinBolge).filter(Boolean))).slice(0,3);
   // —— 🛤️ YAYILMA HATLARI — adayları yöne göre grupla; hat seç → liste/harita/rota o koridora odaklanır ——
@@ -3557,11 +3588,12 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     kesifListe && (kesifListe.length
       ? h(React.Fragment,null,
           h("div",{style:{fontSize:11.5,color:C.mut,margin:"10px 0 6px"}},
-            kesifListe.length+" aday"+(kesifTelSay>0?(" · ☎ "+kesifTelSay+" tanesinde telefon var"):"")+"."
+            kesifListe.length+" aday"+(kesifGoogleVar?" · ⭐ Google verisi":" · OSM")+(kesifTelSay>0?(" · ☎ "+kesifTelSay+" telefonlu"):"")+"."
             +((!kesifSonuc&&kesifCacheDoc&&kesifCacheDoc.tarih)?(" Son tarama: "+fmtTarihSaat(new Date(kesifCacheDoc.tarih).getTime())):"")),
           // sıralama seçenekleri
           h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
-            [["puan","🏆 Puan"],["tel","☎ Telefonlu önce"],["mesafe","📍 En yakın"]].map(([k,ad])=>
+            [["puan","🏆 Puan"],["tel","☎ Telefonlu"],["mesafe","📍 En yakın"]]
+              .concat(kesifGoogleVar?[["gpuan","⭐ Google puanı"],["yorum","🗳 Yorum sayısı"]]:[]).map(([k,ad])=>
               h("button",{key:k,type:"button",onClick:()=>setKesifSira(k),
                 style:{...S.ibtn,fontSize:12,fontWeight:700,...(kesifSira===k?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}},ad))),
           disariAday.length>0 && h("div",{style:{fontSize:11.5,fontWeight:700,color:"#0369a1",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"6px 10px",marginBottom:6}},
@@ -3585,7 +3617,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                   h("div",{style:{fontWeight:800,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
                     (r.sicak?"🔥 ":"")+(r.disari?"🌍 ":"")+r.ad),
                   h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-                    ((r.mesafe!=null&&r.yakinAd)?(Math.round(r.mesafe*1000)+" m · "+r.yakinAd):"")+(r.kume>0?(" · "+r.kume+" komşu aday"):"")),
+                    (r.puanG!=null?("⭐ "+r.puanG.toFixed(1)+(r.yorum?(" ("+r.yorum+")"):"")+" · "):"")+((r.mesafe!=null&&r.yakinAd)?(Math.round(r.mesafe*1000)+" m · "+r.yakinAd):"")+(r.kume>0?(" · "+r.kume+" komşu"):"")),
                   r.tel && h("div",{style:{fontSize:11,color:"#16a34a",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, "☎ "+r.tel+(r.saat?(" · 🕒 "+r.saat):""))),
                 h("span",{title:"Aday puanı",style:{flexShrink:0,fontSize:11,fontWeight:800,color:r.sicak?"#b45309":C.mut,background:r.sicak?"#fef3c7":"#f3f6fb",borderRadius:7,padding:"3px 7px"}},r.puan),
                 r.tel && h("a",{href:"tel:"+r.tel,title:"Ara",style:{fontSize:14,textDecoration:"none",flexShrink:0}},"📞"),
@@ -3807,6 +3839,7 @@ function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, plan, onKapat }){
   const [t1,setT1]=useState(String(num(ay.tehdit1)||10)); const [t2,setT2]=useState(String(num(ay.tehdit2)||20)); const [t3,setT3]=useState(String(num(ay.tehdit3)||30));
   const [tTerk,setTTerk]=useState(String(num(ay.terkEsik)||40)); const [uKm,setUKm]=useState(String(num(ay.uzakKm)||10));
   const [gA,setGA]=useState(String(num(ay.gorevAkin)||5)); const [gF,setGF]=useState(String(num(ay.gorevFetih)||2)); const [gT,setGT]=useState(String(num(ay.gorevTahsil)||1000)); const [gK,setGK]=useState(String(num(ay.gorevKurtar)||2));
+  const [gKey,setGKey]=useState(ay.googleKey||"");
   const [ad,setAd]=useState(""); const [pin,setPin]=useState(""); const [simge,setSimge]=useState(SIMGELER[0]); const [rol,setRol]=useState("pazarlamaci");
   async function ekle(){ if(!ad.trim()) return alert("İsim gir."); if(pin.length<4) return alert("4+ haneli PIN belirle.");
     await save("kullanici",{ad:ad.trim(),rol,simge,renkH:adRenk(ad).H,...(await yeniKullaniciPin(pin))});
@@ -3818,8 +3851,9 @@ function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, plan, onKapat }){
   async function ayarKaydet(){
     let e1=Math.max(1,Math.round(num(t1))), e2=Math.max(e1+1,Math.round(num(t2))), e3=Math.max(e2+1,Math.round(num(t3))), et=Math.max(e3+1,Math.round(num(tTerk)));
     await save("ayar",{id:"genel",tablaUcret:num(tUcret),tehdit1:e1,tehdit2:e2,tehdit3:e3,terkEsik:et,uzakKm:Math.max(1,num(uKm)),
-      gorevAkin:Math.max(1,Math.round(num(gA))),gorevFetih:Math.max(1,Math.round(num(gF))),gorevTahsil:Math.max(0,Math.round(num(gT))),gorevKurtar:Math.max(1,Math.round(num(gK)))});
-    alert("💾 Ayarlar kaydedildi.");
+      gorevAkin:Math.max(1,Math.round(num(gA))),gorevFetih:Math.max(1,Math.round(num(gF))),gorevTahsil:Math.max(0,Math.round(num(gT))),gorevKurtar:Math.max(1,Math.round(num(gK))),
+      googleKey:gKey.trim()});
+    alert("💾 Ayarlar kaydedildi."+(gKey.trim()?"\n🗺️ Keşif artık Google Places kullanacak (puan/yorum/telefon).":""));
   }
   const miniInput=(v,set,w)=>h("input",{type:"number",min:0,style:{...S.input,width:w||70,padding:"7px 8px",textAlign:"center"},value:v,onChange:e=>set(e.target.value)});
   return h(Modal,{baslik:"👥 Ekip & Ayarlar", onKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:onKapat},"Kapat")},
@@ -3846,6 +3880,9 @@ function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, plan, onKapat }){
         h(Field,{label:"🏰 Yeni fetih"}, miniInput(gF,setGF,"100%")),
         h(Field,{label:"🧾 Tahsilat (₺)"}, miniInput(gT,setGT,"100%")),
         h(Field,{label:"🛡️ Kale kurtar"}, miniInput(gK,setGK,"100%"))),
+      h("div",{style:{fontSize:12,fontWeight:800,color:C.mut,marginBottom:5}},"🗺️ Google Places API anahtarı (Keşif) — boşsa ücretsiz OpenStreetMap kullanılır"),
+      h("input",{style:{...S.input,marginBottom:4},value:gKey,onChange:e=>setGKey(e.target.value),placeholder:"AIza… (boş bırakırsan OSM)",spellCheck:false,autoComplete:"off"}),
+      h("div",{style:{fontSize:10.5,color:C.mut,marginBottom:12,lineHeight:1.4}},"Anahtar girilince Keşif; mekan puanı ⭐, yorum sayısı ve telefonu Google'dan çeker. Google Cloud'da 'Places API (New)' etkin olmalı ve faturalandırmaya harcama limiti koymanı öneririz (aşımda ücretlenir)."),
       h("button",{style:{...S.btn("p"),width:"100%"},onClick:ayarKaydet},"💾 Ayarları kaydet")),
     h("div",{style:{display:"grid",gap:8,marginBottom:14}},
       kullanicilar.slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>
