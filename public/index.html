@@ -1465,6 +1465,7 @@ function MusteriModal({ kayit, bolgeler, musteriler, onKapat }){
       if(benzer && !confirm("\""+f.ad.trim()+"\" zaten var. Yine de ekle?")) return; }
     const ekstra={}; if(yeni&&AKTIF_KUL) ekstra.kullaniciId=AKTIF_KUL.id;
     if(konumRef.current) ekstra.konumYaklasik=false;
+    if(kayit.kesif) ekstra.kesif=true;   // 🧭 keşiften eklendi → keşif görevi/fetih bonusu sayar
     await save("musteri",{id:kayit.id,...f,ad:f.ad.trim(),...ekstra}); onKapat(); }
   async function arsivle(geriAc){ await save("musteri",{id:kayit.id,arsiv:!geriAc}); onKapat(); }
   const inp={...S.input,marginBottom:10};
@@ -2418,6 +2419,12 @@ function convexHull(pts){
   lo.pop(); up.pop();
   return lo.concat(up).map(p=>[p[1],p[0]]);
 }
+// nokta poligonun içinde mi? (ray casting) — pt=[lat,lng], poly=[[lat,lng],...]
+function pointInPoly(pt,poly){ const x=pt[1],y=pt[0]; let ic=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][1], yi=poly[i][0], xj=poly[j][1], yj=poly[j][0];
+    if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) ic=!ic; }
+  return ic; }
 // İstanbul haritası (Leaflet, anahtarsız) — kaleler + hedef mevkiler + hakimiyet alanı
 function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, kesifler, onSec, onKesif }){
   const ref=useRef(null), mapRef=useRef(null), lgRef=useRef(null), fitRef=useRef(false);
@@ -2577,6 +2584,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [kesifR,setKesifR]=useState(2);                 // 🧭 keşif yarıçapı (km)
   const [kesifSonuc,setKesifSonuc]=useState(null);      // 🧭 son tarama sonuçları
   const [kesifYuk,setKesifYuk]=useState(false);         // 🧭 taranıyor mu
+  const [rotaSecim,setRotaSecim]=useState({});          // 🗺️ rotaya seçilen adaylar (ad -> true)
   const [gerillaBolge,setGerillaBolge]=useState("");    // seyyar satış bölgesi
   const [gerillaLat,setGerillaLat]=useState(""); const [gerillaLng,setGerillaLng]=useState("");
   const [gerillaFiyat,setGerillaFiyat]=useState({});    // urunId -> anlık seyyar fiyat (değişken)
@@ -2728,16 +2736,22 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   if(uzakKaleler.length) nazikUyari.push(["🧭",uzakKaleler.length+" uzak kale","en yakını "+Math.round(uzakKaleler[0].enYakinKm)+" km — çevrede kale kur","#0369a1"]);
   const alertCount=acilUyari.length;
   // 🏅 ÖDÜL — yapılan adımları kutla (ceza/ödül dengesi)
+  // 🧭 keşiften eklenen müşteriler — ziyaretleri ayrı görev, fetihleri bonus sayılır
+  const kesifMusId=new Set((musteriler||[]).filter(m=>m.kesif).map(m=>m.id));
+  const bhKesifZiyaret=new Set(bhHar.filter(x=>x.musteriId&&kesifMusId.has(x.musteriId)&&["satis","konsinye","tahsilat","stant","diplomasi"].includes(x.tip)).map(x=>x.musteriId)).size;
   const gorevler=[
     {ad:"Kaleye akın (ziyaret)",deg:bhZiyaret,hedef:gHedef.akin,renk:"#b45309"},
     {ad:"Yeni kale fethet",deg:bhYeniFetih,hedef:gHedef.fetih,renk:"#7c3aed"},
     {ad:"Tahsilat yap",deg:bhTahsil,hedef:gHedef.tahsil,renk:"#047857",birim:"tl"},
     {ad:"Riskteki kaleyi kurtar",deg:bhKurtarma,hedef:gHedef.kurtar,renk:"#dc2626"} ];
+  if(kesifMusId.size>0) gorevler.push({ad:"Keşif adayını ziyaret et",deg:bhKesifZiyaret,hedef:Math.max(1,Math.round(num(AY.gorevKesif))||2),renk:"#0369a1"});
   const basarilar=[];
   gorevler.filter(g=>g.deg>=g.hedef).forEach(g=>basarilar.push("✅ "+g.ad+" tamam 🎁"));
   if(pSeri>=3) basarilar.push("🔥 "+pSeri+" gün satış serisi");
   if(bhKurtarma>0) basarilar.push("🛡️ Bu hafta "+bhKurtarma+" kale kurtardın");
   if(bhYeniFetih>0) basarilar.push("🏰 Bu hafta "+bhYeniFetih+" yeni fetih");
+  const bhKesifFetih=kaleler.filter(k=>k.ilkAkin>=haf0 && k.musteriId && kesifMusId.has(k.musteriId)).length;
+  if(bhKesifFetih>0) basarilar.push("🧭 "+bhKesifFetih+" keşif fethi — yeni toprak!");
   // KOMUTANLAR — #9 TÜM ekibin küresel sıralaması (herkes görebilir; rekabet/teşvik)
   const gKaleMap={};
   (_tumHar||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||!x.kullaniciId||x.gerilla) return;
@@ -3445,6 +3459,40 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     setKesifSonuc(s=>s?s.filter(x=>x!==r):s);
     await save("kesif_red",{adNorm:adNorm(r.ad),ad:r.ad,lat:r.lat,lng:r.lng,tarih:new Date().toISOString()});
   }
+  // —— 🔥 AKILLI PUANLAMA + 🌍 BOŞLUK ANALİZİ ——
+  //  puan = mesafe (40) + kategori başarın (25) + bölge hâkimiyetin (15) + aday kümesi (20)
+  const katCiro={}; kaleler.forEach(k=>{ const t=(k.ad||"").toLocaleLowerCase("tr"); const c=KESIF_KAT.find(x=>x.test.test(t)); if(c) katCiro[c.k]=num(katCiro[c.k])+k.satisCiro; });
+  const maxKatCiro=Math.max(1,Math.max.apply(null,Object.values(katCiro).map(num).concat([0])));
+  const bolgeGucM={}; kaleler.forEach(k=>{ if(k.bolge) bolgeGucM[k.bolge]=num(bolgeGucM[k.bolge])+k.guc; });
+  const maxBolgeGuc=Math.max(1,Math.max.apply(null,Object.values(bolgeGucM).map(num).concat([0])));
+  const hullPts=konumluKaleler.length>=3 ? convexHull(konumluKaleler.map(k=>[+k.lat,+k.lng])) : null;
+  const kesifListe = kesifGorunen ? kesifGorunen.map(r=>{
+    const kume=kesifGorunen.filter(o=>o!==r && haversineKm(r.lat,r.lng,o.lat,o.lng)<0.4).length;   // 400 m içindeki diğer adaylar
+    const puan=Math.round(
+      Math.max(0,40-(r.mesafe!=null?r.mesafe:9)*10) +
+      num(katCiro[r.kat])/maxKatCiro*25 +
+      num(bolgeGucM[r.yakinBolge])/maxBolgeGuc*15 +
+      Math.min(20,kume*5));
+    const disari=hullPts ? !pointInPoly([+r.lat,+r.lng],hullPts) : false;   // hâkimiyet alanının dışı = yayılma adayı
+    return {...r,puan,kume,disari,sicak:puan>=55};
+  }).sort((a,b)=>b.puan-a.puan) : null;
+  const disariAday=(kesifListe||[]).filter(r=>r.disari);
+  const disariBolgeler=Array.from(new Set(disariAday.map(r=>r.yakinBolge).filter(Boolean))).slice(0,3);
+  // —— 🗺️ ROTA — seçili adaylar + tehditteki kaleler, en yakın komşu sırasıyla Google Maps ——
+  const rotaSayi=(kesifListe||[]).filter(r=>rotaSecim[r.ad]).length;
+  function rotaAc(){
+    const secili=(kesifListe||[]).filter(r=>rotaSecim[r.ad]).slice(0,7);
+    if(!secili.length) return alert("Rota için aday seç (satırdaki kutucuk).");
+    const tehditNokta=tehditli.filter(k=>k.lat&&k.lng&&k.gunGecti>=esik[1]&&k.gunGecti<terkEsik).slice(0,2);
+    const kalanlar=[...secili.map(r=>({lat:+r.lat,lng:+r.lng})),...tehditNokta.map(k=>({lat:+k.lat,lng:+k.lng}))];
+    const sirali=[kalanlar.shift()];
+    while(kalanlar.length){ const son=sirali[sirali.length-1]; let bi=0,bd=Infinity;
+      kalanlar.forEach((p,i)=>{ const d=haversineKm(son.lat,son.lng,p.lat,p.lng); if(d<bd){ bd=d; bi=i; } });
+      sirali.push(kalanlar.splice(bi,1)[0]); }
+    const hedef=sirali[sirali.length-1];
+    const ara=sirali.slice(0,-1).map(p=>p.lat+","+p.lng).join("|");
+    window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+hedef.lat+","+hedef.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank");
+  }
   const kesifKart=()=>h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
     h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:8,flexWrap:"wrap"}},
       h("span",{style:{fontWeight:800,fontSize:14}},"🧭 Keşif"),
@@ -3456,22 +3504,29 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
       h("select",{style:{...S.input,width:100},value:kesifR,onChange:e=>setKesifR(num(e.target.value))},
         [1,2,3,5].map(r=>h("option",{key:r,value:r},r+" km"))),
-      h("button",{disabled:kesifYuk,style:{...S.btn("p"),flex:1},onClick:kesifTara}, kesifYuk?"⏳ Taranıyor…":(kesifGorunen?"🔄 Yeniden tara":"🧭 Çevreyi tara"))),
-    kesifGorunen && (kesifGorunen.length
+      h("button",{disabled:kesifYuk,style:{...S.btn("p"),flex:1},onClick:kesifTara}, kesifYuk?"⏳ Taranıyor…":(kesifListe?"🔄 Yeniden tara":"🧭 Çevreyi tara")),
+      rotaSayi>0 && h("button",{style:{...S.btn(),borderColor:"#0369a1",color:"#0369a1",fontWeight:800},onClick:rotaAc},"🗺️ Rota ("+rotaSayi+")")),
+    kesifListe && (kesifListe.length
       ? h(React.Fragment,null,
           h("div",{style:{fontSize:11.5,color:C.mut,margin:"10px 0 6px"}},
-            kesifGorunen.length+" aday — en yakın kalene göre sıralı, haritada 🧭 ile işaretli."
+            kesifListe.length+" aday — puana göre sıralı (mesafe + kategori başarın + bölge hâkimiyetin + küme). Kutucukla seç → 🗺️ Rota."
             +((!kesifSonuc&&kesifCacheDoc&&kesifCacheDoc.tarih)?(" Son tarama: "+fmtTarihSaat(new Date(kesifCacheDoc.tarih).getTime())):"")),
+          disariAday.length>0 && h("div",{style:{fontSize:11.5,fontWeight:700,color:"#0369a1",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"6px 10px",marginBottom:6}},
+            "🌍 "+disariAday.length+" aday hâkimiyet alanının DIŞINDA"+(disariBolgeler.length?(" — "+disariBolgeler.join(", ")+" yönünde yayılma fırsatı"):"")),
           h("div",{style:{display:"grid",gap:7,maxHeight:340,overflowY:"auto"}},
-            kesifGorunen.map((r,i)=>{ const c=KESIF_KAT.find(x=>x.k===r.kat);
-              return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",border:"1px solid "+C.line,borderRadius:9}},
+            kesifListe.map((r,i)=>{ const c=KESIF_KAT.find(x=>x.k===r.kat);
+              return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",border:"1px solid "+(r.sicak?"#fcd34d":C.line),borderRadius:9,background:r.sicak?"#fffbeb":"#fff"}},
+                h("input",{type:"checkbox",checked:!!rotaSecim[r.ad],onChange:()=>setRotaSecim(s=>({...s,[r.ad]:!s[r.ad]})),style:{flexShrink:0,width:16,height:16,cursor:"pointer"}}),
                 h("span",{style:{fontSize:16,flexShrink:0}}, c?c.ik:"📍"),
                 h("div",{style:{flex:1,minWidth:0}},
-                  h("div",{style:{fontWeight:800,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.ad),
-                  h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (r.mesafe!=null&&r.yakinAd)?(Math.round(r.mesafe*1000)+" m · "+r.yakinAd):"")),
+                  h("div",{style:{fontWeight:800,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                    (r.sicak?"🔥 ":"")+(r.disari?"🌍 ":"")+r.ad),
+                  h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                    ((r.mesafe!=null&&r.yakinAd)?(Math.round(r.mesafe*1000)+" m · "+r.yakinAd):"")+(r.kume>0?(" · "+r.kume+" komşu aday"):""))),
+                h("span",{title:"Aday puanı",style:{flexShrink:0,fontSize:11,fontWeight:800,color:r.sicak?"#b45309":C.mut,background:r.sicak?"#fef3c7":"#f3f6fb",borderRadius:7,padding:"3px 7px"}},r.puan),
                 h("a",{href:"https://www.google.com/maps/search/?api=1&query="+r.lat+","+r.lng,target:"_blank",title:"Haritada gör",style:{fontSize:14,textDecoration:"none",flexShrink:0}},"🗺️"),
                 h("button",{title:"Olmaz — bir daha önerme",style:{...S.ibtn,padding:"6px 9px",color:C.kirmiziB,borderColor:"#fecaca",flexShrink:0},onClick:()=>kesifReddet(r)},"✕"),
-                h("button",{style:{...S.ibtn,fontWeight:700,flexShrink:0},onClick:()=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||""})},"➕ Ekle")); })))
+                h("button",{style:{...S.ibtn,fontWeight:700,flexShrink:0},onClick:()=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||"",kesif:true})},"➕ Ekle")); })))
       : h("div",{style:{marginTop:10,fontSize:12.5,color:C.mut,textAlign:"center"}},"Yeni aday bulunamadı — yarıçapı büyüt ya da kategori ekle.")));
   // —— 🔭 GÖZCÜ (telefonu alınmış ama satış yapılmamış adaylar) ——
   const gozcuView=()=>{ const liste=(musteriler||[]).filter(m=>!m.arsiv && (m.telefon||"").trim() && !kaleler.some(k=>k.musteriId===m.id||k.ad===m.ad)).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
@@ -3479,9 +3534,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🔭 Gözcü — telefonunu/bilgisini aldığın ama henüz satış yapmadığın kişi ve mekanlar. Haritada 🔭 ile görünür; satış/konsinye yapınca kaleye dönüşür."),
       h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Gözcü ekle"),
       kesifKart(),
-      (gozculer.length>0||haritaliKale.length>0||digerKaleler.length>0||(kesifGorunen&&kesifGorunen.length>0)) && h("div",{style:{marginBottom:14}},
-        h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,digerKaleler,kesifler:kesifGorunen||[],
-          onKesif:(r)=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||""}),
+      (gozculer.length>0||haritaliKale.length>0||digerKaleler.length>0||(kesifListe&&kesifListe.length>0)) && h("div",{style:{marginBottom:14}},
+        h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,digerKaleler,kesifler:kesifListe||[],
+          onKesif:(r)=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||"",kesif:true}),
           onSec:(item)=>{ const mus = item.id ? item : ((item.musteriId&&musById[item.musteriId]) || {ad:item.ad,bolge:item.bolge,lat:item.lat,lng:item.lng}); setMusteriBag(mus); }})),
       !liste.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Gözcü yok. + ile telefonunu aldığın kişileri/mekanları ekle — konumunu da seç.")
       : h("div",{style:{display:"grid",gap:14,gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))"}},
