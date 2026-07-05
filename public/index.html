@@ -235,7 +235,8 @@ function urunBirimMaliyet(u, prints, filById){
   const birim=p=>{ const fl=filById[p.filamentId];
     if(!(num(p.sureDk)>0 && num(p.gram)>0 && fl && num(fl.kgFiyat)>0)) return null;
     const ad=Math.max(1,num(p.adet||1)); return (num(p.sureDk)/ad/60)*SAAT_MALIYET + (num(p.gram)/ad/1000)*num(fl.kgFiyat); };
-  const ort=arr=>{ const cs=arr.map(birim).filter(x=>x!=null); return cs.length?cs.reduce((a,b)=>a+b,0)/cs.length:null; };
+  // ADET-AĞIRLIKLI ortalama: toplam maliyet ÷ toplam adet (çok basılan baskı fiyatı daha çok belirler)
+  const ort=arr=>{ let tM=0,tA=0; arr.forEach(p=>{ const b=birim(p); if(b==null) return; const a=Math.max(1,num(p.adet||1)); tM+=b*a; tA+=a; }); return tA>0?tM/tA:null; };
   const parts=u.parcalar||[];
   if(parts.length){ let tot=0; for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(c==null) return ort(prints.filter(p=>!p.parcaAd));
     tot+=c*Math.max(1,Math.round(num((u.parcaAdet||{})[part]||1))); } return tot; }
@@ -844,11 +845,14 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
     const gram=num(p.gram)/adet, dk=num(p.sureDk)/adet;
     return { gram, dk, maliyet:(dk/60)*SAAT_MALIYET + (gram/1000)*num(fl.kgFiyat) };
   }
-  // ürünün adet başına detayı — parçalıda her parçanın ortalaması toplanır (1 takım)
+  // ürünün adet başına detayı — parçalıda her parçanın maliyeti ayrı bulunur, gereken adetle toplanır (1 takım)
+  //  ORTALAMA ADET-AĞIRLIKLI: çok basılan baskı fiyatı daha çok belirler (toplam maliyet ÷ toplam adet)
   function urunDetay(u){
     const prints=baskiMap[u.id]||[]; const parts=u.parcalar||[];
-    const ort=arr=>{ const cs=arr.map(birimDetay).filter(Boolean); if(!cs.length) return null; const n=cs.length;
-      return { gram:cs.reduce((a,b)=>a+b.gram,0)/n, dk:cs.reduce((a,b)=>a+b.dk,0)/n, maliyet:cs.reduce((a,b)=>a+b.maliyet,0)/n }; };
+    const ort=arr=>{ let tG=0,tD=0,tM=0,tA=0;
+      arr.forEach(p=>{ const d=birimDetay(p); if(!d) return; const a=Math.max(1,num(p.adet||1));
+        tG+=d.gram*a; tD+=d.dk*a; tM+=d.maliyet*a; tA+=a; });
+      return tA>0 ? { gram:tG/tA, dk:tD/tA, maliyet:tM/tA } : null; };
     if(parts.length){
       const tot={gram:0,dk:0,maliyet:0};
       for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(!c) return ort(prints.filter(p=>!p.parcaAd));
