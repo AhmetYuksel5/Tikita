@@ -799,7 +799,34 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   const [acik,setAcik]=useState({});   // ürün kartında baskı listesi açık mı
   const [projAcik,setProjAcik]=useState({});   // teslim planı ayrıntısı açık mı
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
-  const hafBas0 = haftaBasi(Date.now()).getTime(), hafBit0 = hafBas0 + 7*86400000;   // bu haftanın penceresi
+  // dakikada bir tazele → plan değişikliği + zaman geçişi haftalık değer/adetlere anında yansır
+  const [nowS,setNowS]=useState(Date.now());
+  useEffect(()=>{ const t=setInterval(()=>setNowS(Date.now()),60000); return ()=>clearInterval(t); },[]);
+  const hafBas0 = haftaBasi(nowS).getTime(), hafBit0 = hafBas0 + 7*86400000;   // bu haftanın penceresi
+  // EFEKTİF başlangıçlar — Gantt ile aynı mantık: geciken başlamamış iş 'şimdi'ye kayar,
+  // atlanmış (üzerine başka iş başlatılmış) işler geride kalır ve sayılmaz
+  const effBas = useMemo(()=>{
+    const m={}, byMak={};
+    (plan||[]).forEach(p=>{ (byMak[p.makineId||"?"]=byMak[p.makineId||"?"]||[]).push(p); });
+    Object.values(byMak).forEach(arr=>{
+      arr.sort((a,b)=>new Date(a.baslangic)-new Date(b.baslangic));
+      let sonBas=-Infinity;
+      arr.forEach(p=>{ if(p.basladi){ const gs=new Date(p.gercekBaslangic||p.baslangic).getTime(); if(gs>sonBas) sonBas=gs; } });
+      let cursor=-Infinity;
+      arr.forEach(p=>{ const ps=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000;
+        const geride=!p.basladi && ps<sonBas;
+        let s;
+        if(p.basladi || geride) s=ps;
+        else { s=Math.max(ps,cursor); if(ps<nowS) s=Math.max(nowS,cursor); }
+        if(!geride) cursor=Math.max(cursor,s+dur);
+        if(p.id) m[p.id]={s,geride};
+      });
+    });
+    return m;
+  },[plan,nowS]);
+  // bu haftaya düşen (efektif) baskı mı?
+  const haftaIci=p=>{ const st=effBas[p.id]||{}; if(st.geride) return false;
+    const s=st.s!=null?st.s:new Date(p.baslangic).getTime(); return s>=hafBas0 && s<hafBit0; };
   const filById = useMemo(()=>{ const m={}; (filamentler||[]).forEach(f=>m[f.id]=f); return m; },[filamentler]);
   // her ürünün TÜM baskıları (urunId'ye göre) — aynı ürünün baskıları tek kartta toplanır
   const baskiMap = useMemo(()=>{
@@ -1015,7 +1042,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   // —— 💵 stok & bu hafta üretim değeri (pazarlamacıya veriliş fiyatı = pazFiyat) ——
   let stokDeger=0, planDeger=0; const fiyatEksik=[];
   liste.forEach(u=>{ const pf=num(u.pazFiyat), stk=num(u.stokta);
-    const haftaAdet=(baskiMap[u.id]||[]).filter(p=>{ const s=new Date(p.baslangic).getTime(); return s>=hafBas0 && s<hafBit0; }).reduce((a,p)=>a+num(p.adet||1),0);
+    const haftaAdet=(baskiMap[u.id]||[]).filter(haftaIci).reduce((a,p)=>a+num(p.adet||1),0);
     if(pf>0){ stokDeger += stk*pf; planDeger += haftaAdet*pf; }
     else if(stk>0 || haftaAdet>0){ fiyatEksik.push(u.ad); }
   });
@@ -1046,7 +1073,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
           const takim = parcali ? montajdaOf(u) : null;
           const r=adRenk(u.ad), foto=(u.foto||[])[0], m=maliyetOf(u);
           const proj=teslimProjeksiyon(u);
-          const buHaftaBaskilar=(baskiMap[u.id]||[]).filter(p=>{ const s=new Date(p.baslangic).getTime(); return s>=hafBas0 && s<hafBit0; });
+          const buHaftaBaskilar=(baskiMap[u.id]||[]).filter(haftaIci);
           const buHaftaBaski=buHaftaBaskilar.reduce((sm,p)=>sm+num(p.adet||1),0);
           let buHaftaParca=null;
           if(parcali){ buHaftaParca={}; u.parcalar.forEach(pt=>buHaftaParca[pt]=0);
