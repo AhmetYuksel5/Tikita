@@ -2399,11 +2399,14 @@ async function kesifOverpass(merkezler, katlar, metre){
   const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});
   if(!r.ok) throw new Error("Overpass "+r.status);
   const j=await r.json(); const gor=new Set(), out=[];
+  const telNorm=t=>{ let s=(t||"").replace(/[^0-9+]/g,""); if(!s) return ""; s=s.replace(/^\+?90/,"0"); if(s[0]!=="0"&&s.length===10) s="0"+s; return s; };
   (j.elements||[]).forEach(el=>{ const t=el.tags||{}; const ad=t.name; if(!ad) return;
     const la=el.lat!=null?el.lat:(el.center&&el.center.lat), lo=el.lon!=null?el.lon:(el.center&&el.center.lon);
     if(la==null||lo==null) return;
     const key=el.type+"/"+el.id; if(gor.has(key)) return; gor.add(key);
-    out.push({ad, lat:la, lng:lo, kat:kesifKatBul(t)}); });
+    // OSM'de varsa telefon / çalışma saati / web sitesi çek (Google puanı OSM'de yoktur)
+    const tel=telNorm(t.phone||t["contact:phone"]||t["contact:mobile"]||t.mobile||"");
+    out.push({ad, lat:la, lng:lo, kat:kesifKatBul(t), tel, saat:t.opening_hours||"", web:t.website||t["contact:website"]||""}); });
   return out;
 }
 // FETİH — kale / asker / silah sistemi
@@ -2606,6 +2609,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [kesifYuk,setKesifYuk]=useState(false);         // 🧭 taranıyor mu
   const [rotaSecim,setRotaSecim]=useState({});          // 🗺️ rotaya seçilen adaylar (ad -> true)
   const [kesifYon,setKesifYon]=useState(null);          // 🧭 seçili yayılma hattı (null = tümü, 0-7 = yön)
+  const [kesifSira,setKesifSira]=useState("puan");      // 🧭 sıralama: puan | tel | mesafe
   const [gerillaBolge,setGerillaBolge]=useState("");    // seyyar satış bölgesi
   const [gerillaLat,setGerillaLat]=useState(""); const [gerillaLng,setGerillaLng]=useState("");
   const [gerillaFiyat,setGerillaFiyat]=useState({});    // urunId -> anlık seyyar fiyat (değişken)
@@ -3467,7 +3471,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
       const temiz=ham
         .filter(r=> !mevcutAdSet.has(adNorm(r.ad)) && !mevcutNokta.some(m=>haversineKm(r.lat,r.lng,+m.lat,+m.lng)<0.06))
         .map(r=>{ let mn=Infinity,yakin=null; konumluKaleler.forEach(k=>{ const d=haversineKm(r.lat,r.lng,+k.lat,+k.lng); if(d<mn){ mn=d; yakin=k; } });
-          return {ad:r.ad, lat:r.lat, lng:r.lng, kat:r.kat, mesafe:mn===Infinity?null:mn, yakinAd:yakin?yakin.ad:"", yakinBolge:(yakin&&yakin.bolge)||""}; })
+          return {ad:r.ad, lat:r.lat, lng:r.lng, kat:r.kat, tel:r.tel||"", saat:r.saat||"", web:r.web||"", mesafe:mn===Infinity?null:mn, yakinAd:yakin?yakin.ad:"", yakinBolge:(yakin&&yakin.bolge)||""}; })
         .sort((a,b)=>(a.mesafe!=null?a.mesafe:9e9)-(b.mesafe!=null?b.mesafe:9e9)).slice(0,40);
       setKesifSonuc(temiz);
       // 💾 önbellek — sekme her açıldığında son tarama hazır gelsin
@@ -3504,7 +3508,11 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const disari=hullPts ? !pointInPoly([+r.lat,+r.lng],hullPts) : false;   // hâkimiyet alanının dışı = yayılma adayı
     const yon=merkezLat!=null ? Math.round(pusulaYon(merkezLat,merkezLng,+r.lat,+r.lng)/45)%8 : null;   // kale merkezine göre yön
     return {...r,puan,kume,disari,yon,sicak:puan>=55};
-  }).sort((a,b)=>b.puan-a.puan) : null;
+  }).sort((a,b)=>
+      kesifSira==="tel" ? ((b.tel?1:0)-(a.tel?1:0)) || (b.puan-a.puan) :
+      kesifSira==="mesafe" ? ((a.mesafe!=null?a.mesafe:9e9)-(b.mesafe!=null?b.mesafe:9e9)) :
+      (b.puan-a.puan)) : null;
+  const kesifTelSay=(kesifListe||[]).filter(r=>r.tel).length;
   const disariAday=(kesifListe||[]).filter(r=>r.disari);
   const disariBolgeler=Array.from(new Set(disariAday.map(r=>r.yakinBolge).filter(Boolean))).slice(0,3);
   // —— 🛤️ YAYILMA HATLARI — adayları yöne göre grupla; hat seç → liste/harita/rota o koridora odaklanır ——
@@ -3549,8 +3557,13 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     kesifListe && (kesifListe.length
       ? h(React.Fragment,null,
           h("div",{style:{fontSize:11.5,color:C.mut,margin:"10px 0 6px"}},
-            kesifListe.length+" aday — puana göre sıralı (mesafe + kategori başarın + bölge hâkimiyetin + küme). Kutucukla seç → 🗺️ Rota."
+            kesifListe.length+" aday"+(kesifTelSay>0?(" · ☎ "+kesifTelSay+" tanesinde telefon var"):"")+"."
             +((!kesifSonuc&&kesifCacheDoc&&kesifCacheDoc.tarih)?(" Son tarama: "+fmtTarihSaat(new Date(kesifCacheDoc.tarih).getTime())):"")),
+          // sıralama seçenekleri
+          h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
+            [["puan","🏆 Puan"],["tel","☎ Telefonlu önce"],["mesafe","📍 En yakın"]].map(([k,ad])=>
+              h("button",{key:k,type:"button",onClick:()=>setKesifSira(k),
+                style:{...S.ibtn,fontSize:12,fontWeight:700,...(kesifSira===k?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}},ad))),
           disariAday.length>0 && h("div",{style:{fontSize:11.5,fontWeight:700,color:"#0369a1",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"6px 10px",marginBottom:6}},
             "🌍 "+disariAday.length+" aday hâkimiyet alanının DIŞINDA"+(disariBolgeler.length?(" — "+disariBolgeler.join(", ")+" yönünde yayılma fırsatı"):"")),
           // 🛤️ hangi hatta ilerlemek istiyorsun? — yön çipleri (hat seç → liste/harita/rota o koridora odaklanır)
@@ -3572,11 +3585,13 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                   h("div",{style:{fontWeight:800,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
                     (r.sicak?"🔥 ":"")+(r.disari?"🌍 ":"")+r.ad),
                   h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-                    ((r.mesafe!=null&&r.yakinAd)?(Math.round(r.mesafe*1000)+" m · "+r.yakinAd):"")+(r.kume>0?(" · "+r.kume+" komşu aday"):""))),
+                    ((r.mesafe!=null&&r.yakinAd)?(Math.round(r.mesafe*1000)+" m · "+r.yakinAd):"")+(r.kume>0?(" · "+r.kume+" komşu aday"):"")),
+                  r.tel && h("div",{style:{fontSize:11,color:"#16a34a",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, "☎ "+r.tel+(r.saat?(" · 🕒 "+r.saat):""))),
                 h("span",{title:"Aday puanı",style:{flexShrink:0,fontSize:11,fontWeight:800,color:r.sicak?"#b45309":C.mut,background:r.sicak?"#fef3c7":"#f3f6fb",borderRadius:7,padding:"3px 7px"}},r.puan),
+                r.tel && h("a",{href:"tel:"+r.tel,title:"Ara",style:{fontSize:14,textDecoration:"none",flexShrink:0}},"📞"),
                 h("a",{href:"https://www.google.com/maps/search/?api=1&query="+r.lat+","+r.lng,target:"_blank",title:"Haritada gör",style:{fontSize:14,textDecoration:"none",flexShrink:0}},"🗺️"),
                 h("button",{title:"Olmaz — bir daha önerme",style:{...S.ibtn,padding:"6px 9px",color:C.kirmiziB,borderColor:"#fecaca",flexShrink:0},onClick:()=>kesifReddet(r)},"✕"),
-                h("button",{style:{...S.ibtn,fontWeight:700,flexShrink:0},onClick:()=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||"",kesif:true})},"➕ Ekle")); })))
+                h("button",{title:r.tel?"Telefonuyla gözcü olarak ekle":"Aday olarak ekle",style:{...S.ibtn,fontWeight:700,flexShrink:0,...(r.tel?{color:"#fff",background:"#16a34a",borderColor:"#16a34a"}:{})},onClick:()=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||"",telefon:r.tel||"",not:r.saat?("🕒 "+r.saat):"",kesif:true})},r.tel?"➕ Gözcü":"➕ Ekle")); })))
       : h("div",{style:{marginTop:10,fontSize:12.5,color:C.mut,textAlign:"center"}},"Yeni aday bulunamadı — yarıçapı büyüt ya da kategori ekle.")));
   // —— 🔭 GÖZCÜ (telefonu alınmış ama satış yapılmamış adaylar) ——
   const gozcuView=()=>{ const liste=(musteriler||[]).filter(m=>!m.arsiv && (m.telefon||"").trim() && !kaleler.some(k=>k.musteriId===m.id||k.ad===m.ad)).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
