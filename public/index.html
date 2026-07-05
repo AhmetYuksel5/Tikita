@@ -2318,6 +2318,34 @@ function Madalya({ sira, ad, deg, renk, max }){
         h("div",{style:{height:"100%",width:p+"%",background:renk,borderRadius:99}}))));
 }
 
+// 🧭 KEŞİF — Overpass (OpenStreetMap): kalelerin çevresinde benzer mekanları tara (anahtarsız, ücretsiz)
+const KESIF_KAT=[
+  {k:"market",    ad:"Market/Bakkal",  ik:"🛒", test:/market|bakkal|şarküteri|büfe|gross/,   q:'["shop"~"^(convenience|supermarket|grocery|general)$"]'},
+  {k:"tekel",     ad:"Tekel",          ik:"🍾", test:/tekel|içki/,                            q:'["shop"~"^(alcohol|beverages)$"]'},
+  {k:"kafe",      ad:"Kafe",           ik:"☕", test:/kafe|cafe|coffee|kahve/,                q:'["amenity"="cafe"]'},
+  {k:"kirtasiye", ad:"Kırtasiye",      ik:"✏️", test:/kırtasiye|kirtasiye/,                   q:'["shop"="stationery"]'},
+  {k:"hediyelik", ad:"Oyuncak/Hediye", ik:"🧸", test:/oyuncak|hediyelik|gift/,                q:'["shop"~"^(toys|gift)$"]'},
+];
+function kesifKatBul(t){ const s=t.shop||"", a=t.amenity||"";
+  if(/^(convenience|supermarket|grocery|general)$/.test(s)) return "market";
+  if(/^(alcohol|beverages)$/.test(s)) return "tekel";
+  if(a==="cafe") return "kafe";
+  if(s==="stationery") return "kirtasiye";
+  if(/^(toys|gift)$/.test(s)) return "hediyelik";
+  return "diger"; }
+async function kesifOverpass(merkezler, katlar, metre){
+  const govde=katlar.map(c=>merkezler.map(m=>"nwr"+c.q+"(around:"+metre+","+(+m.lat)+","+(+m.lng)+");").join("")).join("");
+  const q="[out:json][timeout:25];("+govde+");out center 300;";
+  const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});
+  if(!r.ok) throw new Error("Overpass "+r.status);
+  const j=await r.json(); const gor=new Set(), out=[];
+  (j.elements||[]).forEach(el=>{ const t=el.tags||{}; const ad=t.name; if(!ad) return;
+    const la=el.lat!=null?el.lat:(el.center&&el.center.lat), lo=el.lon!=null?el.lon:(el.center&&el.center.lon);
+    if(la==null||lo==null) return;
+    const key=el.type+"/"+el.id; if(gor.has(key)) return; gor.add(key);
+    out.push({ad, lat:la, lng:lo, kat:kesifKatBul(t)}); });
+  return out;
+}
 // FETİH — kale / asker / silah sistemi
 const ASKER_TIER=[[0,"Acemi","👤",1],[50,"Piyade","🪖",2],[100,"Okçu","🏹",3],[250,"Süvari","🐎",5],[1000,"Yeniçeri","🛡️",9]];
 const SILAH_TIER=[[0,"Sopa","🪵",1],[500,"Kılıç","🗡️",2],[1000,"Mızrak","🔱",3],[2500,"Top","💣",5],[5000,"Ateşli Silah","🔫",9]];
@@ -2493,6 +2521,10 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [brifAcik,setBrifAcik]=useState(false);         // 📋 günlük brifing sayfası açık mı
   const [kaleDetayAcik,setKaleDetayAcik]=useState(false); // 🏰 kale detay listesi (savaş kartları) açık mı
   const [kartGonder,setKartGonder]=useState(null);      // 📲 kartı gönderilecek ürün (müşteri seçme modalı)
+  const [kesifKat,setKesifKat]=useState(null);          // 🧭 keşif kategorileri (null = kale adlarından otomatik)
+  const [kesifR,setKesifR]=useState(2);                 // 🧭 keşif yarıçapı (km)
+  const [kesifSonuc,setKesifSonuc]=useState(null);      // 🧭 son tarama sonuçları
+  const [kesifYuk,setKesifYuk]=useState(false);         // 🧭 taranıyor mu
   const [gerillaBolge,setGerillaBolge]=useState("");    // seyyar satış bölgesi
   const [gerillaLat,setGerillaLat]=useState(""); const [gerillaLng,setGerillaLng]=useState("");
   const [gerillaFiyat,setGerillaFiyat]=useState({});    // urunId -> anlık seyyar fiyat (değişken)
@@ -3323,11 +3355,60 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         h("button",{style:{...S.btn(),fontWeight:700},onClick:()=>setArsivAcik(a=>!a)}, (arsivAcik?"▾":"▸")+" 📦 Arşiv ("+arsivMus.length+")"),
         arsivAcik && h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",marginTop:12}}, arsivMus.map(kaleKart)))); };
 
+  // —— 🧭 KEŞİF — kalelerin çevresinde benzer mekan önerileri (Overpass/OSM) ——
+  const adNorm=s=>(s||"").toLocaleLowerCase("tr").replace(/[^a-zçğıöşü0-9]+/gi," ").trim();
+  const kesifAuto=(()=>{ const tum=kaleler.map(k=>k.ad).concat((musteriler||[]).map(m=>m.ad||"")).join(" ").toLocaleLowerCase("tr");
+    const a=KESIF_KAT.filter(c=>c.test.test(tum)).map(c=>c.k); return a.length?a:["market"]; })();
+  const kesifSec = kesifKat || kesifAuto;
+  async function kesifTara(){
+    const merkez=(konumluKaleler.length?konumluKaleler.slice().sort((a,b)=>b.guc-a.guc):(musteriler||[]).filter(m=>m.lat&&m.lng)).slice(0,8);
+    if(!merkez.length) return alert("Önce konumlu bir kale ya da gözcü ekle.");
+    const katlar=KESIF_KAT.filter(c=>kesifSec.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
+    setKesifYuk(true);
+    try{
+      const ham=await kesifOverpass(merkez,katlar,Math.round(kesifR*1000));
+      const mevcutNokta=[...(musteriler||[]).filter(m=>m.lat&&m.lng), ...konumluKaleler];
+      const mevcutAd=new Set(kaleler.map(k=>adNorm(k.ad)).concat((musteriler||[]).map(m=>adNorm(m.ad))).filter(Boolean));
+      const temiz=ham
+        .filter(r=> !mevcutAd.has(adNorm(r.ad)) && !mevcutNokta.some(m=>haversineKm(r.lat,r.lng,+m.lat,+m.lng)<0.06))
+        .map(r=>{ let mn=Infinity,yakin=null; konumluKaleler.forEach(k=>{ const d=haversineKm(r.lat,r.lng,+k.lat,+k.lng); if(d<mn){ mn=d; yakin=k; } });
+          return {...r, mesafe:mn===Infinity?null:mn, yakin}; })
+        .sort((a,b)=>(a.mesafe!=null?a.mesafe:9e9)-(b.mesafe!=null?b.mesafe:9e9)).slice(0,40);
+      setKesifSonuc(temiz);
+    }catch(e){ alert("Keşif yapılamadı — harita sunucusu yoğun olabilir, birazdan tekrar dene."); }
+    setKesifYuk(false);
+  }
+  const kesifKart=()=>h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
+    h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:8,flexWrap:"wrap"}},
+      h("span",{style:{fontWeight:800,fontSize:14}},"🧭 Keşif"),
+      !MINIMAL && h("span",{style:{fontSize:11.5,color:C.mut}},"kalelerinin çevresinde benzer mekanlar")),
+    h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
+      KESIF_KAT.map(c=>{ const on=kesifSec.includes(c.k);
+        return h("button",{key:c.k,type:"button",onClick:()=>{ const s=new Set(kesifSec); if(on) s.delete(c.k); else s.add(c.k); setKesifKat(Array.from(s)); },
+          style:{...S.ibtn,fontSize:12,fontWeight:700,...(on?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}}, c.ik+" "+c.ad); })),
+    h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+      h("select",{style:{...S.input,width:100},value:kesifR,onChange:e=>setKesifR(num(e.target.value))},
+        [1,2,3,5].map(r=>h("option",{key:r,value:r},r+" km"))),
+      h("button",{disabled:kesifYuk,style:{...S.btn("p"),flex:1},onClick:kesifTara}, kesifYuk?"⏳ Taranıyor…":"🧭 Çevreyi tara")),
+    kesifSonuc && (kesifSonuc.length
+      ? h(React.Fragment,null,
+          h("div",{style:{fontSize:11.5,color:C.mut,margin:"10px 0 6px"}}, kesifSonuc.length+" aday — en yakın kalene göre sıralı. ➕ ile kaydet; telefon eklersen gözcü olur."),
+          h("div",{style:{display:"grid",gap:7,maxHeight:340,overflowY:"auto"}},
+            kesifSonuc.map((r,i)=>{ const c=KESIF_KAT.find(x=>x.k===r.kat);
+              return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:9,padding:"8px 10px",border:"1px solid "+C.line,borderRadius:9}},
+                h("span",{style:{fontSize:16,flexShrink:0}}, c?c.ik:"📍"),
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontWeight:800,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.ad),
+                  h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (r.mesafe!=null&&r.yakin)?(Math.round(r.mesafe*1000)+" m · "+r.yakin.ad):"")),
+                h("a",{href:"https://www.google.com/maps/search/?api=1&query="+r.lat+","+r.lng,target:"_blank",title:"Haritada gör",style:{fontSize:14,textDecoration:"none",flexShrink:0}},"🗺️"),
+                h("button",{style:{...S.ibtn,fontWeight:700,flexShrink:0},onClick:()=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:(r.yakin&&r.yakin.bolge)||""})},"➕ Ekle")); })))
+      : h("div",{style:{marginTop:10,fontSize:12.5,color:C.mut,textAlign:"center"}},"Yeni aday bulunamadı — yarıçapı büyüt ya da kategori ekle.")));
   // —— 🔭 GÖZCÜ (telefonu alınmış ama satış yapılmamış adaylar) ——
   const gozcuView=()=>{ const liste=(musteriler||[]).filter(m=>!m.arsiv && (m.telefon||"").trim() && !kaleler.some(k=>k.musteriId===m.id||k.ad===m.ad)).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
     return h("div",null,
     !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🔭 Gözcü — telefonunu/bilgisini aldığın ama henüz satış yapmadığın kişi ve mekanlar. Haritada 🔭 ile görünür; satış/konsinye yapınca kaleye dönüşür."),
       h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Gözcü ekle"),
+      kesifKart(),
       (gozculer.length>0||haritaliKale.length>0||digerKaleler.length>0) && h("div",{style:{marginBottom:14}},
         h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,digerKaleler,
           onSec:(item)=>{ const mus = item.id ? item : ((item.musteriId&&musById[item.musteriId]) || {ad:item.ad,bolge:item.bolge,lat:item.lat,lng:item.lng}); setMusteriBag(mus); }})),
