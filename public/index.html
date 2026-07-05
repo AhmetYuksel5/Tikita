@@ -2419,6 +2419,11 @@ function convexHull(pts){
   lo.pop(); up.pop();
   return lo.concat(up).map(p=>[p[1],p[0]]);
 }
+// iki nokta arası pusula yönü (0=K, 90=D ...) ve 8'li yön dilimleri
+function pusulaYon(aLat,aLng,bLat,bLng){ const dLon=(bLng-aLng)*Math.PI/180, la1=aLat*Math.PI/180, la2=bLat*Math.PI/180;
+  const y=Math.sin(dLon)*Math.cos(la2), x=Math.cos(la1)*Math.sin(la2)-Math.sin(la1)*Math.cos(la2)*Math.cos(dLon);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360; }
+const YONLER=[["K","⬆"],["KD","↗"],["D","➡"],["GD","↘"],["G","⬇"],["GB","↙"],["B","⬅"],["KB","↖"]];
 // nokta poligonun içinde mi? (ray casting) — pt=[lat,lng], poly=[[lat,lng],...]
 function pointInPoly(pt,poly){ const x=pt[1],y=pt[0]; let ic=false;
   for(let i=0,j=poly.length-1;i<poly.length;j=i++){
@@ -2585,6 +2590,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [kesifSonuc,setKesifSonuc]=useState(null);      // 🧭 son tarama sonuçları
   const [kesifYuk,setKesifYuk]=useState(false);         // 🧭 taranıyor mu
   const [rotaSecim,setRotaSecim]=useState({});          // 🗺️ rotaya seçilen adaylar (ad -> true)
+  const [kesifYon,setKesifYon]=useState(null);          // 🧭 seçili yayılma hattı (null = tümü, 0-7 = yön)
   const [gerillaBolge,setGerillaBolge]=useState("");    // seyyar satış bölgesi
   const [gerillaLat,setGerillaLat]=useState(""); const [gerillaLng,setGerillaLng]=useState("");
   const [gerillaFiyat,setGerillaFiyat]=useState({});    // urunId -> anlık seyyar fiyat (değişken)
@@ -3466,6 +3472,8 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const bolgeGucM={}; kaleler.forEach(k=>{ if(k.bolge) bolgeGucM[k.bolge]=num(bolgeGucM[k.bolge])+k.guc; });
   const maxBolgeGuc=Math.max(1,Math.max.apply(null,Object.values(bolgeGucM).map(num).concat([0])));
   const hullPts=konumluKaleler.length>=3 ? convexHull(konumluKaleler.map(k=>[+k.lat,+k.lng])) : null;
+  const merkezLat=konumluKaleler.length?konumluKaleler.reduce((s,k)=>s+ +k.lat,0)/konumluKaleler.length:null;
+  const merkezLng=konumluKaleler.length?konumluKaleler.reduce((s,k)=>s+ +k.lng,0)/konumluKaleler.length:null;
   const kesifListe = kesifGorunen ? kesifGorunen.map(r=>{
     const kume=kesifGorunen.filter(o=>o!==r && haversineKm(r.lat,r.lng,o.lat,o.lng)<0.4).length;   // 400 m içindeki diğer adaylar
     const puan=Math.round(
@@ -3474,14 +3482,26 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
       num(bolgeGucM[r.yakinBolge])/maxBolgeGuc*15 +
       Math.min(20,kume*5));
     const disari=hullPts ? !pointInPoly([+r.lat,+r.lng],hullPts) : false;   // hâkimiyet alanının dışı = yayılma adayı
-    return {...r,puan,kume,disari,sicak:puan>=55};
+    const yon=merkezLat!=null ? Math.round(pusulaYon(merkezLat,merkezLng,+r.lat,+r.lng)/45)%8 : null;   // kale merkezine göre yön
+    return {...r,puan,kume,disari,yon,sicak:puan>=55};
   }).sort((a,b)=>b.puan-a.puan) : null;
   const disariAday=(kesifListe||[]).filter(r=>r.disari);
   const disariBolgeler=Array.from(new Set(disariAday.map(r=>r.yakinBolge).filter(Boolean))).slice(0,3);
+  // —— 🛤️ YAYILMA HATLARI — adayları yöne göre grupla; hat seç → liste/harita/rota o koridora odaklanır ——
+  const hatlar=[];
+  if(kesifListe && merkezLat!=null){
+    for(let y=0;y<8;y++){ const grup=kesifListe.filter(r=>r.yon===y); if(!grup.length) continue;
+      const dis=grup.filter(r=>r.disari).length;
+      const bolSay={}; grup.forEach(r=>{ if(r.yakinBolge) bolSay[r.yakinBolge]=(bolSay[r.yakinBolge]||0)+1; });
+      const bol=Object.keys(bolSay).sort((a,b)=>bolSay[b]-bolSay[a])[0]||"";
+      hatlar.push({y, ok:YONLER[y][1], ad:bol||YONLER[y][0], say:grup.length, dis}); }
+    hatlar.sort((a,b)=>b.dis-a.dis || b.say-a.say);
+  }
+  const kesifFiltre = kesifListe ? (kesifYon==null ? kesifListe : kesifListe.filter(r=>r.yon===kesifYon)) : null;
   // —— 🗺️ ROTA — seçili adaylar + tehditteki kaleler, en yakın komşu sırasıyla Google Maps ——
-  const rotaSayi=(kesifListe||[]).filter(r=>rotaSecim[r.ad]).length;
+  const rotaSayi=(kesifFiltre||[]).filter(r=>rotaSecim[r.ad]).length;
   function rotaAc(){
-    const secili=(kesifListe||[]).filter(r=>rotaSecim[r.ad]).slice(0,7);
+    const secili=(kesifFiltre||[]).filter(r=>rotaSecim[r.ad]).slice(0,7);
     if(!secili.length) return alert("Rota için aday seç (satırdaki kutucuk).");
     const tehditNokta=tehditli.filter(k=>k.lat&&k.lng&&k.gunGecti>=esik[1]&&k.gunGecti<terkEsik).slice(0,2);
     const kalanlar=[...secili.map(r=>({lat:+r.lat,lng:+r.lng})),...tehditNokta.map(k=>({lat:+k.lat,lng:+k.lng}))];
@@ -3513,8 +3533,18 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
             +((!kesifSonuc&&kesifCacheDoc&&kesifCacheDoc.tarih)?(" Son tarama: "+fmtTarihSaat(new Date(kesifCacheDoc.tarih).getTime())):"")),
           disariAday.length>0 && h("div",{style:{fontSize:11.5,fontWeight:700,color:"#0369a1",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"6px 10px",marginBottom:6}},
             "🌍 "+disariAday.length+" aday hâkimiyet alanının DIŞINDA"+(disariBolgeler.length?(" — "+disariBolgeler.join(", ")+" yönünde yayılma fırsatı"):"")),
+          // 🛤️ hangi hatta ilerlemek istiyorsun? — yön çipleri (hat seç → liste/harita/rota o koridora odaklanır)
+          hatlar.length>1 && h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
+            h("button",{type:"button",onClick:()=>setKesifYon(null),
+              style:{...S.ibtn,fontSize:12,fontWeight:700,...(kesifYon==null?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}},"Tüm hatlar"),
+            hatlar.map(ht=>h("button",{key:ht.y,type:"button",onClick:()=>setKesifYon(kesifYon===ht.y?null:ht.y),
+              title:ht.dis?(ht.dis+" aday hâkimiyet alanının dışında — yayılma hattı"):"",
+              style:{...S.ibtn,fontSize:12,fontWeight:700,...(kesifYon===ht.y?{background:"#0369a1",color:"#fff",borderColor:"#0369a1"}:(ht.dis?{borderColor:"#7dd3fc",color:"#0369a1"}:{}))}},
+              ht.ok+" "+ht.ad+" ("+ht.say+")"+(ht.dis?" 🌍":"")))),
+          kesifYon!=null && kesifFiltre && h("div",{style:{fontSize:11.5,fontWeight:700,color:"#0369a1",marginBottom:6}},
+            "🛤️ Seçili hat: "+(hatlar.find(x=>x.y===kesifYon)||{}).ok+" "+((hatlar.find(x=>x.y===kesifYon)||{}).ad||"")+" — "+kesifFiltre.length+" aday"),
           h("div",{style:{display:"grid",gap:7,maxHeight:340,overflowY:"auto"}},
-            kesifListe.map((r,i)=>{ const c=KESIF_KAT.find(x=>x.k===r.kat);
+            (kesifFiltre||[]).map((r,i)=>{ const c=KESIF_KAT.find(x=>x.k===r.kat);
               return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",border:"1px solid "+(r.sicak?"#fcd34d":C.line),borderRadius:9,background:r.sicak?"#fffbeb":"#fff"}},
                 h("input",{type:"checkbox",checked:!!rotaSecim[r.ad],onChange:()=>setRotaSecim(s=>({...s,[r.ad]:!s[r.ad]})),style:{flexShrink:0,width:16,height:16,cursor:"pointer"}}),
                 h("span",{style:{fontSize:16,flexShrink:0}}, c?c.ik:"📍"),
@@ -3534,8 +3564,8 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🔭 Gözcü — telefonunu/bilgisini aldığın ama henüz satış yapmadığın kişi ve mekanlar. Haritada 🔭 ile görünür; satış/konsinye yapınca kaleye dönüşür."),
       h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Gözcü ekle"),
       kesifKart(),
-      (gozculer.length>0||haritaliKale.length>0||digerKaleler.length>0||(kesifListe&&kesifListe.length>0)) && h("div",{style:{marginBottom:14}},
-        h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,digerKaleler,kesifler:kesifListe||[],
+      (gozculer.length>0||haritaliKale.length>0||digerKaleler.length>0||(kesifFiltre&&kesifFiltre.length>0)) && h("div",{style:{marginBottom:14}},
+        h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,digerKaleler,kesifler:kesifFiltre||[],
           onKesif:(r)=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||"",kesif:true}),
           onSec:(item)=>{ const mus = item.id ? item : ((item.musteriId&&musById[item.musteriId]) || {ad:item.ad,bolge:item.bolge,lat:item.lat,lng:item.lng}); setMusteriBag(mus); }})),
       !liste.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Gözcü yok. + ile telefonunu aldığın kişileri/mekanları ekle — konumunu da seç.")
