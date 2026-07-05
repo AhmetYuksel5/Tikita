@@ -1046,10 +1046,18 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   // —— 💵 stok & bu hafta üretim değeri (pazarlamacıya veriliş fiyatı = pazFiyat) ——
   let stokDeger=0, planDeger=0, planAdet=0; const fiyatEksik=[];
   liste.forEach(u=>{ const pf=num(u.pazFiyat), stk=num(u.stokta);
-    const haftaAdet=(baskiMap[u.id]||[]).filter(haftaIci).reduce((a,p)=>a+num(p.adet||1),0);
-    planAdet += haftaAdet;
-    if(pf>0){ stokDeger += stk*pf; planDeger += haftaAdet*pf; }
-    else if(stk>0 || haftaAdet>0){ fiyatEksik.push(u.ad); }
+    const bh=(baskiMap[u.id]||[]).filter(haftaIci); const parcalar=u.parcalar||[];
+    // ÜRÜN-EŞDEĞERİ adet: parçalar tek başına ürün değil; her parça gereken adede bölünüp
+    // parça sayısına göre normalize edilir → 60 Alt + 60 üst = 60 ürün (120 değil)
+    let urunAdet;
+    if(parcalar.length){
+      const pa={}; parcalar.forEach(p=>pa[p]=0);
+      bh.forEach(p=>{ const a=num(p.adet||1); if(p.parcaAd && parcalar.includes(p.parcaAd)) pa[p.parcaAd]+=a; else parcalar.forEach(pt=>pa[pt]+=a); });
+      urunAdet = parcalar.reduce((s,p)=>s + pa[p]/gereken(u,p), 0) / parcalar.length;
+    } else urunAdet = bh.reduce((a,p)=>a+num(p.adet||1),0);
+    planAdet += urunAdet;
+    if(pf>0){ stokDeger += stk*pf; planDeger += urunAdet*pf; }
+    else if(stk>0 || urunAdet>0){ fiyatEksik.push(u.ad); }
   });
   return h("div",null,
     // 💵 üst özet — pazarlamacıya veriliş değeri
@@ -1061,7 +1069,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
         h("div",{style:{fontSize:11.5,color:C.mut,fontWeight:700}},"🖨 Bu hafta üretilecek ürünlerin değeri (pazarlamacıya)"),
         h("div",{style:{fontSize:22,fontWeight:800,color:"#0e7490",marginTop:2}}, tl(planDeger)),
         h("div",{style:{fontSize:12,color:C.mut,fontWeight:700,marginTop:4,borderTop:"1px dashed #cbe6ec",paddingTop:4}},
-          "📦 Bu hafta planlanan toplam ürün: ",h("b",{style:{color:"#0e7490",fontSize:14}},planAdet+" adet")))),
+          "📦 Bu hafta planlanan toplam ürün: ",h("b",{style:{color:"#0e7490",fontSize:14}},Math.round(planAdet)+" adet")))),
     fiyatEksik.length>0 && h("div",{style:{marginBottom:12,padding:"9px 12px",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,fontSize:12,color:"#9a3412",fontWeight:700}},
       "⚠ Pazarlamacı fiyatı (₺) girilmemiş — değere katılmadı: "+fiyatEksik.join(", ")),
     h("div",{style:{userSelect:"none",WebkitUserSelect:"none"}},
@@ -3855,7 +3863,16 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
   const [nowPt,setNowPt]=useState(Date.now());
   useEffect(()=>{ const t=setInterval(()=>setNowPt(Date.now()),60000); return ()=>clearInterval(t); },[]);
   const _phb=haftaBasi(nowPt).getTime(), _phe=_phb+7*86400000;
-  const buHaftaUretim=(plan||[]).filter(p=>p.urunId).filter(p=>{ const s=new Date(p.baslangic).getTime(); return s>=_phb && s<_phe; }).reduce((s,p)=>s+num(p.adet||1),0);
+  // ÜRÜN-EŞDEĞERİ: parçalı üründe parçalar tek başına ürün sayılmaz (60 Alt + 60 üst = 60 ürün)
+  const buHaftaUretim=(()=>{ const byU={};
+    (plan||[]).forEach(p=>{ if(!p.urunId) return; const s=new Date(p.baslangic).getTime(); if(s<_phb||s>=_phe) return; (byU[p.urunId]=byU[p.urunId]||[]).push(p); });
+    let tot=0;
+    Object.keys(byU).forEach(uid=>{ const u=(urunler||[]).find(x=>x.id===uid)||{}; const parcalar=u.parcalar||[]; const bh=byU[uid];
+      if(parcalar.length){ const pa={}; parcalar.forEach(p=>pa[p]=0);
+        bh.forEach(p=>{ const a=num(p.adet||1); if(p.parcaAd && parcalar.includes(p.parcaAd)) pa[p.parcaAd]+=a; else parcalar.forEach(pt=>pa[pt]+=a); });
+        tot += parcalar.reduce((s,p)=>s + pa[p]/Math.max(1,Math.round(num((u.parcaAdet||{})[p]||1))), 0)/parcalar.length;
+      } else tot += bh.reduce((a,p)=>a+num(p.adet||1),0); });
+    return Math.round(tot); })();
   const [alt,setAlt]=useState("ozet");
   const [rapMod,setRapMod]=useState("ay");
   const [rapTarih,setRapTarih]=useState(()=>new Date().toISOString().slice(0,10));
