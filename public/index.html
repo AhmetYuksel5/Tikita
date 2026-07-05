@@ -876,9 +876,26 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   const montajBaz=(u)=> (u.parcalar||[]).length
     ? Math.min.apply(null, u.parcalar.map(p=>parcaTakim(u,p)))
     : num(basildiMap[u.id]) - num(u.montajBitti) - num(u.zayiat);
-  const montajdaOf=(u)=> Math.max(0, montajBaz(u) + num(u.montajElle));   // otomatik baz + elle ofset
-  // montaj adedini elle doğrudan belirle → elle ofseti hedefe göre ayarla
-  async function montajAyarla(u,hedef){ const t=Math.max(0,Math.round(num(hedef))); await save("stok_urun",{id:u.id,montajElle:Math.round(t-montajBaz(u))}); }
+  // parçalıda NEGATİF elle ofset uygulanmaz: elle azaltma artık kalıcı ofset değil TÜKETİM olarak
+  // işlenir (aşağıda); eski negatif ofsetler yeni basılan parçaları yutmasın diye yok sayılır.
+  const montajdaOf=(u)=> (u.parcalar||[]).length
+    ? Math.max(0, montajBaz(u) + Math.max(0,num(u.montajElle)))
+    : Math.max(0, montajBaz(u) + num(u.montajElle));
+  // montaj adedini elle doğrudan belirle — AZALTMA o anki adetlerin tüketimidir (yeni baskıları etkilemez), ARTIRMA pozitif ofsettir
+  async function montajAyarla(u,hedef){
+    const t=Math.max(0,Math.round(num(hedef))); const su=montajdaOf(u); const delta=t-su; if(!delta) return;
+    const parcalar=u.parcalar||[];
+    if(delta>0){ await save("stok_urun",{id:u.id,montajElle:Math.max(0,num(u.montajElle))+delta}); return; }
+    if(parcalar.length){
+      // önce pozitif elle ofseti düş, kalan azaltmayı parça tüketimine yaz
+      const elle=Math.max(0,num(u.montajElle)); const elleDus=Math.min(elle,-delta); const kalan=(-delta)-elleDus;
+      const tk={...(u.parcaTuket||{})}; if(kalan>0) parcalar.forEach(p=>tk[p]=num(tk[p])+kalan*gereken(u,p));
+      await save("stok_urun",{id:u.id,parcaTuket:tk,montajElle:elle-elleDus});
+    } else {
+      const elle=num(u.montajElle); const elleDus=Math.min(Math.max(0,elle),-delta); const kalan=(-delta)-elleDus;
+      await save("stok_urun",{id:u.id,montajElle:elle-elleDus,montajBitti:num(u.montajBitti)+kalan});
+    }
+  }
   // stok adedini elle doğrudan belirle
   async function stoktaAyarla(u,hedef){ await save("stok_urun",{id:u.id,stokta:Math.max(0,Math.round(num(hedef)))}); }
 
