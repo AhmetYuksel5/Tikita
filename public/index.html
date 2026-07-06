@@ -230,17 +230,32 @@ function toInput(d){ const t=new Date(d); return t.getFullYear()+"-"+pad(t.getMo
 function gunBasi(d){ const t=new Date(d); t.setHours(0,0,0,0); return t; }
 function haftaBasi(d){ const t=gunBasi(d); t.setDate(t.getDate()-((t.getDay()-6+7)%7)); return t; }  // o haftanın Cumartesi'si
 function ayBasi(d){ const t=new Date(d); return new Date(t.getFullYear(),t.getMonth(),1).getTime(); }
+// bir baskının kapsadığı parçalar: çoklu (parcaAdlar) > tekli (parcaAd) > takım (tüm parçalar)
+function plParcalari(p, parcalar){
+  parcalar=parcalar||[];
+  if(p.parcaAdlar && p.parcaAdlar.length){ const s=p.parcaAdlar.filter(x=>parcalar.includes(x)); if(s.length) return s; }
+  if(p.parcaAd && parcalar.includes(p.parcaAd)) return [p.parcaAd];
+  return parcalar.slice();   // takım / tümü
+}
 // ürün birim maliyeti (baskılardan) — elle girilmişse o; eksik veri → null
 function urunBirimMaliyet(u, prints, filById){
   const birim=p=>{ const fl=filById[p.filamentId];
     if(!(num(p.sureDk)>0 && num(p.gram)>0 && fl && num(fl.kgFiyat)>0)) return null;
     const ad=Math.max(1,num(p.adet||1)); return (num(p.sureDk)/ad/60)*SAAT_MALIYET + (num(p.gram)/ad/1000)*num(fl.kgFiyat); };
-  // ADET-AĞIRLIKLI ortalama: toplam maliyet ÷ toplam adet (çok basılan baskı fiyatı daha çok belirler)
-  const ort=arr=>{ let tM=0,tA=0; arr.forEach(p=>{ const b=birim(p); if(b==null) return; const a=Math.max(1,num(p.adet||1)); tM+=b*a; tA+=a; }); return tA>0?tM/tA:null; };
   const parts=u.parcalar||[];
-  if(parts.length){ let tot=0; for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(c==null) return ort(prints.filter(p=>!p.parcaAd));
-    tot+=c*Math.max(1,Math.round(num((u.parcaAdet||{})[part]||1))); } return tot; }
-  return ort(prints);
+  if(parts.length){ let tot=0;
+    for(const part of parts){
+      // çoklu-parça baskıda birim maliyet kapsadığı parça sayısına bölünür (çift saymayı önler)
+      let tM=0,tA=0; prints.forEach(p=>{ const cov=plParcalari(p,parts); if(!cov.includes(part)) return;
+        const b=birim(p); if(b==null) return; const a=Math.max(1,num(p.adet||1)); tM+=(b/cov.length)*a; tA+=a; });
+      if(tA===0) return null;
+      tot += (tM/tA)*Math.max(1,Math.round(num((u.parcaAdet||{})[part]||1)));
+    }
+    return tot;
+  }
+  // ADET-AĞIRLIKLI ortalama (tekli ürün): toplam maliyet ÷ toplam adet
+  let tM=0,tA=0; prints.forEach(p=>{ const b=birim(p); if(b==null) return; const a=Math.max(1,num(p.adet||1)); tM+=b*a; tA+=a; });
+  return tA>0?tM/tA:null;
 }
 function urunMaliyet(u, prints, filById){ return num(u.maliyet)>0 ? num(u.maliyet) : urunBirimMaliyet(u,prints,filById); }
 
@@ -316,6 +331,7 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
     ad:       kayit.ad       || "",
     urunId:   kayit.urunId   || "",
     parcaAd:  kayit.parcaAd  || "",
+    parcaAdlar: kayit.parcaAdlar || (kayit.parcaAd?[kayit.parcaAd]:[]),   // aynı tabladaki parçalar (çoklu)
     adet:     kayit.adet     || 1,
     baslangic:toInput(kayit.baslangic || Date.now()),
     sureDk:   kayit.sureDk   || "",
@@ -328,8 +344,14 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
   // ürün seçimi: kayıtlı bir ürüne bağlıysa o ürünü/parçasını seç, yoksa elle giriş ("diger")
   const urunListe = (urunler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   const [urunMod,setUrunMod] = useState(()=> (kayit.urunId || !kayit.ad) ? "urun" : "diger");
-  // mevcut seçimin select value'su
-  const urunVal = f.urunId ? ("u:"+f.urunId+(f.parcaAd?("|"+f.parcaAd):"")) : "";
+  // mevcut seçimin select value'su (artık ürün düzeyi; parçalar aşağıda çoklu seçilir)
+  const urunVal = f.urunId ? ("u:"+f.urunId) : "";
+  const seciliUrun = urunListe.find(x=>x.id===f.urunId);
+  const seciliParcalar = (seciliUrun && seciliUrun.parcalar) || [];
+  // parça çipini aç/kapa → ad'ı güncelle (hepsi/hiç = takım)
+  function parcaToggle(pt){ setF(s=>{ const cur=new Set(s.parcaAdlar||[]); cur.has(pt)?cur.delete(pt):cur.add(pt);
+    const arr=seciliParcalar.filter(x=>cur.has(x)); const hepsi=arr.length===0||arr.length===seciliParcalar.length;
+    return {...s, parcaAdlar:arr, ad: seciliUrun ? (hepsi? seciliUrun.ad : seciliUrun.ad+" "+arr.join("+")) : s.ad}; }); }
   const [tekrar,setTekrar] = useState(false);
   const [planReset,setPlanReset] = useState(false);
   // ⚠ ÖNEMLİ: yeni baskı VARSAYILAN olarak yalnızca PLANLANIR (basladi=false).
@@ -354,18 +376,16 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
   },[plan,kayit.id,f.makineId]);
   function tekrarla(o){
     if(!o) return;
-    setF(s=>({ ...s, ad:o.ad, urunId:o.urunId||"", parcaAd:o.parcaAd||"", adet:o.adet, sureDk:o.sureDk, gram:o.gram||"", filamentId:o.filamentId||"", ams:!!o.ams, not:o.not||"" }));
+    setF(s=>({ ...s, ad:o.ad, urunId:o.urunId||"", parcaAd:o.parcaAd||"", parcaAdlar:o.parcaAdlar||(o.parcaAd?[o.parcaAd]:[]), adet:o.adet, sureDk:o.sureDk, gram:o.gram||"", filamentId:o.filamentId||"", ams:!!o.ams, not:o.not||"" }));
     setUrunMod((o.urunId||!o.ad)?"urun":"diger");
     setTekrar(true);
   }
-  // ürün açılır listesinden seçim: value "u:<id>" veya "u:<id>|<parça>"
+  // ürün açılır listesinden seçim: value "u:<id>" (varsayılan takım; parçalar aşağıda seçilir)
   function urunSec(val){
-    if(!val){ setF(s=>({...s,urunId:"",parcaAd:"",ad:""})); return; }
-    const [, rest] = val.split(/^u:/);
-    const [id,parca] = (rest||"").split("|");
-    const u = urunListe.find(x=>x.id===id);
-    if(!u) return;
-    setF(s=>({...s, urunId:id, parcaAd:parca||"", ad: parca ? (u.ad+" "+parca) : u.ad }));
+    if(!val){ setF(s=>({...s,urunId:"",parcaAd:"",parcaAdlar:[],ad:""})); return; }
+    const id=(val.split(/^u:/)[1]||"").split("|")[0];
+    const u = urunListe.find(x=>x.id===id); if(!u) return;
+    setF(s=>({...s, urunId:id, parcaAd:"", parcaAdlar:[], ad:u.ad }));   // varsayılan: tüm parçalar (takım)
   }
   async function kaydet(){
     if(!f.makineId) return alert("Makine seç.");
@@ -378,8 +398,12 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
     const basladi = tamamlandi;
     // planSureDk = ilk plan süresi (gecikme baz çizgisi). İlk kayıtta sabitlenir; "yeni plan kabul et" ile sıfırlanabilir.
     const planSureDk = (planReset || kayit.planSureDk==null) ? num(f.sureDk) : num(kayit.planSureDk);
+    // parça kaydı: alt küme seçiliyse çoklu; hepsi/hiç ise takım (boş)
+    let pAdlar=[], pAd="";
+    if(urunMod==="urun" && seciliParcalar.length){ const arr=(f.parcaAdlar||[]).filter(x=>seciliParcalar.includes(x));
+      if(arr.length && arr.length<seciliParcalar.length){ pAdlar=arr; pAd=arr.length===1?arr[0]:""; } }
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
-      urunId: (urunMod==="urun" ? f.urunId : "") || "", parcaAd: (urunMod==="urun" ? f.parcaAd : "") || "",
+      urunId: (urunMod==="urun" ? f.urunId : "") || "", parcaAd: pAd, parcaAdlar: pAdlar,
       baslangic:new Date(f.baslangic).toISOString(), sureDk:num(f.sureDk), planSureDk, gram:num(f.gram), filamentId:f.filamentId||"", ams:!!f.ams, not:f.not,
       basladi, gercekBaslangic: basladi ? (kayit.gercekBaslangic || new Date(f.baslangic).toISOString()) : null });
     if(!yeni && kayit.makineId===f.makineId){
@@ -479,20 +503,25 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
                 ? h("div",{style:{display:"flex",gap:6}},
                     h("input",{style:{...S.input,flex:1},value:f.ad,onChange:e=>set("ad",e.target.value),placeholder:"İş / ürün adı (elle gir)",autoFocus:true}),
                     h("button",{type:"button",style:{...S.ibtn,whiteSpace:"nowrap"},
-                      onClick:()=>{ setUrunMod("urun"); setF(s=>({...s,ad:"",urunId:"",parcaAd:""})); }},"⬅ Listeden"))
+                      onClick:()=>{ setUrunMod("urun"); setF(s=>({...s,ad:"",urunId:"",parcaAd:"",parcaAdlar:[]})); }},"⬅ Listeden"))
                 : h("select",{style:{...S.input,fontWeight:f.urunId?700:400},value:urunVal,
-                    onChange:e=>{ const v=e.target.value; if(v==="diger"){ setUrunMod("diger"); setF(s=>({...s,urunId:"",parcaAd:"",ad:""})); } else urunSec(v); }},
+                    onChange:e=>{ const v=e.target.value; if(v==="diger"){ setUrunMod("diger"); setF(s=>({...s,urunId:"",parcaAd:"",parcaAdlar:[],ad:""})); } else urunSec(v); }},
                     h("option",{value:""},"— ürün seç —"),
-                    urunListe.map(u=>{
-                      const parcali=(u.parcalar||[]).length>0;
-                      return parcali
-                        ? h("optgroup",{key:u.id,label:u.ad},
-                            h("option",{value:"u:"+u.id},u.ad+" (tümü / takım)"),
-                            u.parcalar.map(p=>h("option",{key:p,value:"u:"+u.id+"|"+p},"↳ "+p)))
-                        : h("option",{key:u.id,value:"u:"+u.id},u.ad);
-                    }),
+                    urunListe.map(u=>h("option",{key:u.id,value:"u:"+u.id}, u.ad+((u.parcalar||[]).length?" · "+u.parcalar.length+" parça":""))),
                     h("option",{value:"diger"},"✎ Diğer (elle gir)…"))),
             h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:f.adet,onChange:e=>set("adet",e.target.value)}))),
+          // 🧩 çoklu parça seçimi — aynı tablada basılacak parçalar (hepsi seçili = takım)
+          urunMod==="urun" && seciliParcalar.length>0 && (()=>{ const sec=new Set((f.parcaAdlar||[]).filter(x=>seciliParcalar.includes(x)));
+            const takim=sec.size===0||sec.size===seciliParcalar.length;
+            return h("div",{style:{marginBottom:12,marginTop:-4}},
+              h("div",{style:{fontSize:11.5,color:C.mut,fontWeight:700,marginBottom:5}},"🧩 Bu tablada basılacak parçalar"),
+              h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+                h("button",{type:"button",onClick:()=>setF(s=>({...s,parcaAdlar:[],ad:seciliUrun?seciliUrun.ad:s.ad})),
+                  style:{...S.ibtn,fontSize:12,fontWeight:700,...(takim?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}},"Tümü (takım)"),
+                seciliParcalar.map(pt=>{ const on=!takim&&sec.has(pt);
+                  return h("button",{key:pt,type:"button",onClick:()=>parcaToggle(pt),
+                    style:{...S.ibtn,fontSize:12,fontWeight:700,...(on?{background:"#0e7490",color:"#fff",borderColor:"#0e7490"}:{})}}, (on?"✓ ":"")+pt); })),
+              !takim && h("div",{style:{fontSize:11,color:"#0e7490",fontWeight:700,marginTop:5}}, "Seçili "+sec.size+" parça aynı tablada; her biri +"+num(f.adet)+" adet üretime sayılır.")); })(),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
             h(Field,{label:"Başlangıç"}, h("input",{type:"datetime-local",style:S.input,value:f.baslangic,onChange:e=>set("baslangic",e.target.value)})),
             h(Field,{label:"Planlanan bitiş"}, h("input",{type:"datetime-local",style:S.input,
@@ -865,8 +894,13 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
       return tA>0 ? { gram:tG/tA, dk:tD/tA, maliyet:tM/tA } : null; };
     if(parts.length){
       const tot={gram:0,dk:0,maliyet:0};
-      for(const part of parts){ const c=ort(prints.filter(p=>p.parcaAd===part)); if(!c) return ort(prints.filter(p=>!p.parcaAd));
-        const g=gereken(u,part); tot.gram+=c.gram*g; tot.dk+=c.dk*g; tot.maliyet+=c.maliyet*g; }
+      for(const part of parts){
+        // çoklu-parça baskıda birim değer kapsadığı parça sayısına bölünür (aynı tabla iki parçaya çift sayılmasın)
+        let tG=0,tD=0,tM=0,tA=0; prints.forEach(p=>{ const cov=plParcalari(p,parts); if(!cov.includes(part)) return;
+          const d=birimDetay(p); if(!d) return; const a=Math.max(1,num(p.adet||1)); const k=cov.length;
+          tG+=(d.gram/k)*a; tD+=(d.dk/k)*a; tM+=(d.maliyet/k)*a; tA+=a; });
+        if(tA===0) return null;
+        const g=gereken(u,part); tot.gram+=(tG/tA)*g; tot.dk+=(tD/tA)*g; tot.maliyet+=(tM/tA)*g; }
       return tot;
     }
     return ort(prints);
@@ -895,8 +929,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
         const u=prodById[p.urunId];
         if(u && (u.parcalar||[]).length){
           bldP[p.urunId]=bldP[p.urunId]||{};
-          if(p.parcaAd && u.parcalar.includes(p.parcaAd)) bldP[p.urunId][p.parcaAd]=num(bldP[p.urunId][p.parcaAd])+ad;
-          else u.parcalar.forEach(pt=>bldP[p.urunId][pt]=num(bldP[p.urunId][pt])+ad);   // "tümü/takım" → her parçaya +1
+          plParcalari(p,u.parcalar).forEach(pt=>bldP[p.urunId][pt]=num(bldP[p.urunId][pt])+ad);   // seçili her parçaya +adet (çoklu/tekli/takım)
         }
       }
     });
@@ -958,7 +991,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
     let tekliRun=0; const noktalar=[]; let i=0;
     while(i<uclar.length){ const gun=gunBasi(uclar[i].e).getTime(); let j=i;
       while(j<uclar.length && gunBasi(uclar[j].e).getTime()===gun){ const p=uclar[j].p, ad=num(p.adet||1);
-        if(parcalar.length){ if(p.parcaAd && parcalar.includes(p.parcaAd)) avail[p.parcaAd]+=ad; else parcalar.forEach(pt=>avail[pt]+=ad); }
+        if(parcalar.length){ plParcalari(p,parcalar).forEach(pt=>avail[pt]+=ad); }
         else tekliRun+=ad; j++; }
       const adet = parcalar.length
         ? num(u.stokta)+Math.max(0, Math.min.apply(null, parcalar.map(pt=>Math.floor(avail[pt]/gereken(u,pt)))))
@@ -1062,7 +1095,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
     let urunAdet;
     if(parcalar.length){
       const pa={}; parcalar.forEach(p=>pa[p]=0);
-      bh.forEach(p=>{ const a=num(p.adet||1); if(p.parcaAd && parcalar.includes(p.parcaAd)) pa[p.parcaAd]+=a; else parcalar.forEach(pt=>pa[pt]+=a); });
+      bh.forEach(p=>{ const a=num(p.adet||1); plParcalari(p,parcalar).forEach(pt=>pa[pt]+=a); });
       urunAdet = parcalar.reduce((s,p)=>s + pa[p]/gereken(u,p), 0) / parcalar.length;
     } else urunAdet = bh.reduce((a,p)=>a+num(p.adet||1),0);
     planAdet += urunAdet;
@@ -1103,8 +1136,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
           let buHaftaParca=null;
           if(parcali){ buHaftaParca={}; u.parcalar.forEach(pt=>buHaftaParca[pt]=0);
             buHaftaBaskilar.forEach(p=>{ const ad=num(p.adet||1);
-              if(p.parcaAd && u.parcalar.includes(p.parcaAd)) buHaftaParca[p.parcaAd]+=ad;
-              else u.parcalar.forEach(pt=>buHaftaParca[pt]+=ad); }); }
+              plParcalari(p,u.parcalar).forEach(pt=>buHaftaParca[pt]+=ad); }); }
           return h("div",{key:u.id,className:"tk-pcard",style:{...S.card,position:"relative",borderTop:"4px solid "+r.ana,padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}},
             // 🔔 bildirim işareti — basımda / planlı baskı varsa
             proj && h("span",{title:(proj.basimda?"Basımda + ":"")+"bekleyen "+proj.bekleyen+" baskı",
@@ -3931,7 +3963,7 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
     let tot=0;
     Object.keys(byU).forEach(uid=>{ const u=(urunler||[]).find(x=>x.id===uid)||{}; const parcalar=u.parcalar||[]; const bh=byU[uid];
       if(parcalar.length){ const pa={}; parcalar.forEach(p=>pa[p]=0);
-        bh.forEach(p=>{ const a=num(p.adet||1); if(p.parcaAd && parcalar.includes(p.parcaAd)) pa[p.parcaAd]+=a; else parcalar.forEach(pt=>pa[pt]+=a); });
+        bh.forEach(p=>{ const a=num(p.adet||1); plParcalari(p,parcalar).forEach(pt=>pa[pt]+=a); });
         tot += parcalar.reduce((s,p)=>s + pa[p]/Math.max(1,Math.round(num((u.parcaAdet||{})[p]||1))), 0)/parcalar.length;
       } else tot += bh.reduce((a,p)=>a+num(p.adet||1),0); });
     return Math.round(tot); })();
