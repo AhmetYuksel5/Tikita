@@ -332,6 +332,9 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
   const urunVal = f.urunId ? ("u:"+f.urunId+(f.parcaAd?("|"+f.parcaAd):"")) : "";
   const [tekrar,setTekrar] = useState(false);
   const [planReset,setPlanReset] = useState(false);
+  // ⚠ ÖNEMLİ: yeni baskı VARSAYILAN olarak yalnızca PLANLANIR (basladi=false).
+  // Makine gerçekten çalışıp üretim yaptıysa/yapacaksa bu kutu işaretlenir → tamamlanmış/üretime sayılır.
+  const [tamamlandi,setTamamlandi] = useState(!!kayit.basladi);
   const [tik,setTik] = useState(Date.now());
   useEffect(()=>{ const t=setInterval(()=>setTik(Date.now()),1000); return ()=>clearInterval(t); },[]);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
@@ -370,8 +373,9 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
     if(!f.sureDk)   return alert("Süre gir (dk).");
     onSnap&&onSnap();
     const sMs = new Date(f.baslangic).getTime();
-    // Yeni iş geçmiş bir zaman dilimine giriliyorsa → planlanan değil, tamamlanmış (başladı) say
-    const basladi = yeni ? (sMs <= Date.now()) : !!f.basladi;
+    // Planlama otomatik ÜRETİM sayılmaz: yalnız kutu işaretliyse başlamış/tamamlanmış say.
+    // (Aksi halde zamanı geçen planlar makine çalışmadan üretilmiş görünüyordu.)
+    const basladi = tamamlandi;
     // planSureDk = ilk plan süresi (gecikme baz çizgisi). İlk kayıtta sabitlenir; "yeni plan kabul et" ile sıfırlanabilir.
     const planSureDk = (planReset || kayit.planSureDk==null) ? num(f.sureDk) : num(kayit.planSureDk);
     const id = await save("plan",{ id:kayit.id, makineId:f.makineId, ad:f.ad.trim(), adet:num(f.adet),
@@ -516,9 +520,15 @@ function IsModal({ kayit, makineler, plan, urunler, filamentler, haftaBas, hafta
             return h("div",{style:{fontSize:12,marginTop:-4,marginBottom:12,color:C.kirmiziB,fontWeight:700}},
               "⏱ Gecikme: "+fmtSureSaat(gec)+"  (ilk plan bitişi: "+fmtTarihSaat(new Date(f.baslangic).getTime()+base*60000)+")  ",
               h("button",{type:"button",style:{...S.ibtn,padding:"2px 7px",fontSize:11},onClick:()=>setPlanReset(true)},"↺ yeni plan kabul et")); })(),
-          yeni && new Date(f.baslangic).getTime()<=Date.now() && h("div",{style:{fontSize:12,marginTop:-6,marginBottom:12,
-            color:C.yesilT,background:C.yesil,border:"1px solid "+C.yesilB,borderRadius:8,padding:"6px 10px",fontWeight:700}},
-            "✓ Geçmiş zaman — bu iş tamamlanmış (başladı) olarak eklenecek."),
+          // ✅ üretim/tamamlandı onayı — İŞARETLİ DEĞİLSE yalnız PLANLANIR, stoğa/üretime sayılmaz
+          h("label",{style:{display:"flex",alignItems:"flex-start",gap:9,marginBottom:12,padding:"9px 11px",borderRadius:9,cursor:"pointer",
+            background: tamamlandi?C.yesil:"#f8fafc", border:"1px solid "+(tamamlandi?C.yesilB:C.line)}},
+            h("input",{type:"checkbox",checked:tamamlandi,onChange:e=>setTamamlandi(e.target.checked),style:{width:17,height:17,marginTop:1,flexShrink:0,cursor:"pointer"}}),
+            h("div",{style:{minWidth:0}},
+              h("div",{style:{fontSize:13,fontWeight:800,color:tamamlandi?C.yesilT:C.txt}}, tamamlandi?"✅ Bu baskı yapıldı — üretime sayılacak":"🗓 Yalnızca planla (henüz üretilmedi)"),
+              h("div",{style:{fontSize:11,color:C.mut,marginTop:2}}, tamamlandi
+                ? "Makine bu baskıyı çalıştırdı; parçalar montaja/stoğa eklenir."
+                : "İşaretleme! Baskıyı gerçekten yapınca Gantt'ta 'Başlasın mı?' ile onayla — böylece çalışmayan planlar üretilmiş görünmez."))),
           h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not,onChange:e=>set("not",e.target.value)}))),
     yeni && num(f.sureDk)>0 && h("div",{style:{marginTop:6,padding:"10px 12px",background:"#f0f9ff",border:"1px dashed #7dd3fc",borderRadius:10}},
       h("div",{style:{fontSize:12.5,fontWeight:800,color:"#0369a1"}},"🗓 Haftayı bu baskıyla doldur"),
