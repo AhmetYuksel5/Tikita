@@ -931,21 +931,31 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
   //  basildiMap= basımı bitmiş toplam adet (urunId'ye göre)
   //  basildiParca = parçalı üründe her parçanın basılmış adedi
   const { basimMap, basildiMap, basildiParca } = useMemo(()=>{
-    const now=Date.now(), bsm={}, bld={}, bldP={}, prodById={};
+    const now=Date.now(), bsm={}, bsmP={}, bld={}, bldP={}, prodById={};
     urunler.forEach(u=>prodById[u.id]=u);
     (plan||[]).forEach(p=>{
       if(!p.urunId || !p.basladi) return;
       const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000, ad=num(p.adet||1);
-      if(s<=now && e>now){ bsm[p.urunId]=num(bsm[p.urunId])+ad; return; }   // çalışıyor
+      const u=prodById[p.urunId];
+      if(s<=now && e>now){                                                 // çalışıyor
+        if(u && (u.parcalar||[]).length){
+          bsmP[p.urunId]=bsmP[p.urunId]||{};
+          const kk=plParcaKatki(p,u); for(const pt in kk) bsmP[p.urunId][pt]=num(bsmP[p.urunId][pt])+kk[pt];   // parça bazında topla
+        } else bsm[p.urunId]=num(bsm[p.urunId])+ad;
+        return;
+      }
       if(e<=now){                                                          // basımı bitti → stoğa say
         bld[p.urunId]=num(bld[p.urunId])+ad;
-        const u=prodById[p.urunId];
         if(u && (u.parcalar||[]).length){
           bldP[p.urunId]=bldP[p.urunId]||{};
           const kk=plParcaKatki(p,u); for(const pt in kk) bldP[p.urunId][pt]=num(bldP[p.urunId][pt])+kk[pt];   // çoklu=set → ×gereken
         }
       }
     });
+    // parçalı ürünlerde "basımda" = parça adetlerini ÜRÜN karşılığına çevir (tabla/set değil, o an basılan ürün)
+    urunler.forEach(u=>{ const parts=u.parcalar||[]; if(parts.length && bsmP[u.id]){
+      const pe=parts.reduce((sm,pt)=>sm+num(bsmP[u.id][pt])/Math.max(1,Math.round(num((u.parcaAdet||{})[pt]||1))),0)/parts.length;
+      bsm[u.id]=Math.round(pe); } });
     return { basimMap:bsm, basildiMap:bld, basildiParca:bldP };
   },[plan,urunler]);
 
