@@ -237,13 +237,12 @@ function plParcalari(p, parcalar){
   if(p.parcaAd && parcalar.includes(p.parcaAd)) return [p.parcaAd];
   return parcalar.slice();   // takım / tümü
 }
-// bir baskının her parçaya kattığı ÜRETİM adedi.
-//  Çoklu/takım baskı (birden çok parça aynı tablada) = SET/TAKIM sayısı → her parçaya adet × gereken(parça).
-//  Tek parça baskı = ham adet (o parçadan adet kadar).
+// bir baskının her parçaya kattığı ÜRETİM adedi (PARÇA adedi).
+//  adet HER ZAMAN set/takım sayısıdır → kapsanan her parçaya adet × gereken(parça).
+//  (tek parça da çoklu da aynı kural — birim tutarlı: 14 set = ÜST×28, ARA×56, YAN×140)
 function plParcaKatki(p, u){
   const parcalar=(u&&u.parcalar)||[]; const cov=plParcalari(p,parcalar); const ad=Math.max(0,num(p.adet||1));
-  const coklu=cov.length>1; const m={};
-  cov.forEach(pt=>{ m[pt]=ad*(coklu?Math.max(1,Math.round(num((u.parcaAdet||{})[pt]||1))):1); });
+  const m={}; cov.forEach(pt=>{ m[pt]=ad*Math.max(1,Math.round(num((u.parcaAdet||{})[pt]||1))); });
   return m;
 }
 // ürün birim maliyeti (baskılardan) — elle girilmişse o; eksik veri → null
@@ -254,10 +253,10 @@ function urunBirimMaliyet(u, prints, filById){
   const parts=u.parcalar||[];
   if(parts.length){ const ger=q=>Math.max(1,Math.round(num((u.parcaAdet||{})[q]||1))); let tot=0;
     for(const part of parts){
-      // parça-başı maliyet: çoklu tablada birim maliyet Σgereken(kapsanan) parçaya bölünür
+      // parça-başı maliyet: birim maliyet Σgereken(kapsanan) parçaya bölünür (set → parça)
       let tM=0,tW=0; prints.forEach(p=>{ const cov=plParcalari(p,parts); if(!cov.includes(part)) return;
-        const b=birim(p); if(b==null) return; const coklu=cov.length>1;
-        const pay=coklu?cov.reduce((s,q)=>s+ger(q),0):1; const pieces=Math.max(1,num(p.adet||1))*(coklu?ger(part):1);
+        const b=birim(p); if(b==null) return;
+        const pay=cov.reduce((s,q)=>s+ger(q),0); const pieces=Math.max(1,num(p.adet||1))*ger(part);
         tM+=(b/pay)*pieces; tW+=pieces; });
       if(tW===0) return null;
       tot += (tM/tW)*ger(part);
@@ -902,10 +901,10 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
     if(parts.length){
       const tot={gram:0,dk:0,maliyet:0};
       for(const part of parts){
-        // parça-başı (piece) maliyet: çoklu tablada birim değer Σgereken(kapsanan) parçaya bölünür → çift saymayı önler
+        // parça-başı (piece) maliyet: birim değer Σgereken(kapsanan) parçaya bölünür (set → parça; çift saymayı önler)
         let tG=0,tD=0,tM=0,tW=0; prints.forEach(p=>{ const cov=plParcalari(p,parts); if(!cov.includes(part)) return;
-          const d=birimDetay(p); if(!d) return; const coklu=cov.length>1;
-          const pay=coklu?cov.reduce((s,q)=>s+gereken(u,q),0):1; const pieces=Math.max(1,num(p.adet||1))*(coklu?gereken(u,part):1);
+          const d=birimDetay(p); if(!d) return;
+          const pay=cov.reduce((s,q)=>s+gereken(u,q),0); const pieces=Math.max(1,num(p.adet||1))*gereken(u,part);
           tG+=(d.gram/pay)*pieces; tD+=(d.dk/pay)*pieces; tM+=(d.maliyet/pay)*pieces; tW+=pieces; });
         if(tW===0) return null;
         const g=gereken(u,part); tot.gram+=(tG/tW)*g; tot.dk+=(tD/tW)*g; tot.maliyet+=(tM/tW)*g; }
@@ -1188,15 +1187,17 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
                       h("b",{style:{color:"#0e7490",flexShrink:0}}, "en fazla "+mk.adet+" adet")))),
                   proj.artis>0 && h("div",{style:{fontSize:10.5,color:C.mut,borderTop:"1px dashed #a5f3fc",paddingTop:4}},
                     "Şu an "+proj.simdiki+" hazır · tüm baskı+montaj sonrası +"+proj.artis))); })(),
-            // 🖨 bu hafta basılacak — parçalıda parça parça, teklide toplam adet
-            (parcali ? Object.values(buHaftaParca||{}).some(v=>v>0) : buHaftaBaski>0) && h("div",{style:{fontSize:11.5,background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:9,padding:"8px 10px"}},
-              h("div",{style:{fontWeight:800,color:"#6d28d9",marginBottom:parcali?4:0}}, "🖨 Bu hafta basılacak"),
-              parcali
-                ? h("div",{style:{display:"flex",flexDirection:"column",gap:2}},
-                    u.parcalar.filter(p=>num(buHaftaParca[p])>0).map(p=>h("div",{key:p,style:{display:"flex",justifyContent:"space-between",gap:8}},
-                      h("span",{style:{color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p),
-                      h("b",{style:{color:"#6d28d9",flexShrink:0}}, num(buHaftaParca[p])+" adet"))))
-                : h("span",{style:{fontWeight:700,color:"#6d28d9"}}, buHaftaBaski+" adet")),
+            // 🖨 bu hafta basılacak — parçalıda parça parça (parça adedi + set karşılığı), teklide toplam adet
+            (parcali ? Object.values(buHaftaParca||{}).some(v=>v>0) : buHaftaBaski>0) && (()=>{
+              const setEsd = parcali ? Math.round(u.parcalar.reduce((s,p)=>s+num(buHaftaParca[p])/gereken(u,p),0)/u.parcalar.length) : 0;
+              return h("div",{style:{fontSize:11.5,background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:9,padding:"8px 10px"}},
+                h("div",{style:{fontWeight:800,color:"#6d28d9",marginBottom:parcali?4:0}}, "🖨 Bu hafta basılacak"+(parcali?(" · "+setEsd+" set"):"")),
+                parcali
+                  ? h("div",{style:{display:"flex",flexDirection:"column",gap:2}},
+                      u.parcalar.filter(p=>num(buHaftaParca[p])>0).map(p=>h("div",{key:p,style:{display:"flex",justifyContent:"space-between",gap:8}},
+                        h("span",{style:{color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p+(gereken(u,p)>1?(" ×"+gereken(u,p)):"")),
+                        h("b",{style:{color:"#6d28d9",flexShrink:0}}, num(buHaftaParca[p])+" parça"))))
+                  : h("span",{style:{fontWeight:700,color:"#6d28d9"}}, buHaftaBaski+" adet")); })(),
             num(u.zayiat)>0 && h("div",{style:{fontSize:10.5,color:C.kirmiziB,fontWeight:700}},"⚠ Zayiat: "+num(u.zayiat)),
             // parça stoğu — yalnızca parçalı üründe, sade
             parcali && (()=>{ const avails=u.parcalar.map(p=>parcaAvail(u,p));
