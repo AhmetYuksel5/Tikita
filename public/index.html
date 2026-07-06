@@ -710,10 +710,12 @@ function makineTimeline(makineId, plan, baslaMs, bitMs, now){
 /* ============================================================
    STOK — ürünler, parça stoğu, Montajda → Hazır → Konsinyede
    ============================================================ */
-function StokModal({ kayit, onKapat }){
+function StokModal({ kayit, otoMaliyet, onKapat }){
   const yeni=!kayit.id;
+  const oto=num(otoMaliyet);   // baskılardan (çok adetli baskılar ağırlıklı) hesaplanan maliyet
   const [f,setF]=useState(()=>({ ad:kayit.ad||"", parcaStr:(kayit.parcalar||[]).join(", "),
-    parcaAdet:{...(kayit.parcaAdet||{})}, stokta:kayit.stokta||0, konsinye:kayit.konsinye||0, maliyet:kayit.maliyet||"", pazFiyat:kayit.pazFiyat||"", not:kayit.not||"" }));
+    // elle maliyet yoksa baskılardan hesaplanan değeri otomatik doldur
+    parcaAdet:{...(kayit.parcaAdet||{})}, stokta:kayit.stokta||0, konsinye:kayit.konsinye||0, maliyet:(num(kayit.maliyet)>0?kayit.maliyet:(oto>0?Math.round(oto*100)/100:"")), pazFiyat:kayit.pazFiyat||"", not:kayit.not||"" }));
   const [foto,setFoto]=useState(kayit.foto||[]);
   const [fotoYuk,setFotoYuk]=useState(false);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
@@ -760,8 +762,12 @@ function StokModal({ kayit, onKapat }){
       h(Field,{label:"📥 Stokta"}, h("input",{type:"number",min:0,style:S.input,value:f.stokta,onChange:e=>set("stokta",e.target.value)})),
       h(Field,{label:"🏬 Konsinyede"}, h("input",{type:"number",min:0,style:S.input,value:f.konsinye,onChange:e=>set("konsinye",e.target.value)}))),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-      h(Field,{label:"₺ Maliyet (elle) — boşsa otomatik"},
-        h("input",{type:"number",min:0,step:"0.01",style:S.input,value:f.maliyet,onChange:e=>set("maliyet",e.target.value),placeholder:"otomatik"})),
+      h(Field,{label:"₺ Maliyet — baskılardan otomatik"},
+        h(React.Fragment,null,
+          h("input",{type:"number",min:0,step:"0.01",style:S.input,value:f.maliyet,onChange:e=>set("maliyet",e.target.value),placeholder: oto>0?(Math.round(oto*100)/100+" (otomatik)"):"baskı verisi gir"}),
+          oto>0 && h("div",{style:{fontSize:11,color:C.mut,marginTop:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}},
+            h("span",null,"🖨 Baskılardan: "+tl(oto)+"/adet"),
+            (num(f.maliyet).toFixed(2)!==(Math.round(oto*100)/100).toFixed(2)) && h("button",{type:"button",style:{...S.ibtn,padding:"2px 8px",fontSize:11},onClick:()=>set("maliyet",Math.round(oto*100)/100)},"↺ otomatiğe dön")))),
       h(Field,{label:"🛒 Pazarlamacıya veriliş (₺/adet)"},
         h("input",{type:"number",min:0,step:"0.01",style:S.input,value:f.pazFiyat,onChange:e=>set("pazFiyat",e.target.value),placeholder:"pazarlamacı alış"}))),
     h(Field,{label:"Not"}, h("input",{style:S.input,value:f.not||"",onChange:e=>set("not",e.target.value)})));
@@ -1234,7 +1240,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
                         h("div",{style:{fontSize:10.5,color:C.mut}}, fmtTarihSaat(st)+(num(p.gram)?" · "+num(p.gram)+" gr":"")+(p.ams?" · AMS":""))),
                       h("span",{style:{flexShrink:0,fontSize:10.5,fontWeight:800,color:d.c,background:"#f8fafc",borderRadius:6,padding:"2px 7px"}},d.t)); }))); })());
         }))),
-    edit && h(StokModal,{kayit:edit,onKapat:()=>setEdit(null)}),
+    edit && h(StokModal,{kayit:edit, otoMaliyet:(edit.id?(()=>{ const d=urunDetay(edit); return d?d.maliyet:0; })():0), onKapat:()=>setEdit(null)}),
     aks && aks.stage==="konsinye" && h(KonsinyeDagilimModal,{urun:aks.u, dagilim:konsSaha[aks.u.id], workshopKons:num(aks.u.konsinye),
       onIade:(n)=>konsinyedenCikar(aks.u,n,"stokta"), onSatildi:(n)=>konsinyedenCikar(aks.u,n,"satildi"), onKapat:()=>setAks(null)}),
     aks && aks.stage==="satildi" && h(SatisDagilimModal,{urun:aks.u, dagilim:satSaha[aks.u.id], workshopSat:num(aks.u.satildi),
