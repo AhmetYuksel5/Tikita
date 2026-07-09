@@ -2981,24 +2981,13 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     await bagDelta(u, +num(r.adet||1));   // çantaya geri koy (atomik)
     await remove("pazarlama_hareket", r.id);
   }
-  // sefere bağlanmamış (sefersiz kalmış) mevcut işlem var mı — bu pazarlamacıya ait, geçmiş-giriş değil
-  const seferizMi=x=> !x.seferId && x.kaynak!=="gecmis" && (!AKTIF_KUL || !x.kullaniciId || x.kullaniciId===AKTIF_KUL.id)
-    && ["satis","konsinye","tahsilat","avans","stant"].includes(x.tip);
-  const seferizVar=(hareketler||[]).some(seferizMi);
-  // sefersiz işlemleri verilen sefere kat (hesabı kapatılabilsin) — iade'ler hariç (çift 'Dönen' saymayı önler)
-  async function seferizleriTopla(sid){ if(!sid) return; const list=(hareketler||[]).filter(seferizMi);
-    for(const x of list) await save("pazarlama_hareket",{id:x.id,seferId:sid}); }
-  async function seferIdAl(){ if(aktifSefer){ return aktifSefer.id; }
-    const sid=await save("sefer",{baslangic:new Date().toISOString(),durum:"acik",kullaniciId:AKTIF_KUL?AKTIF_KUL.id:""});
-    await seferizleriTopla(sid);   // yeni sefer açılırken sefersiz kalmış işlemleri de kat
-    return sid; }
-  async function seferiBitir(){ if(!aktifSefer && !cephane.length && !seferizVar) return alert("Aktif sefer yok.");
+  async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik",kullaniciId:AKTIF_KUL?AKTIF_KUL.id:""}); }
+  async function seferiBitir(){ if(!aktifSefer && !cephane.length) return alert("Aktif sefer yok.");
     if(!confirm("Seferi bitir — kalan cephaneyi atölyeye geri çek?")) return;
-    const sid=aktifSefer?aktifSefer.id:await seferIdAl(), iso=new Date().toISOString();
-    await seferizleriTopla(sid);   // kalan sefersiz işlemleri de bu sefere kat, sonra kapat
+    const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
     for(const u of cephane){ const b=bagOf(u); await bagYaz(u, 0, {stoktaDelta:+b});
-      await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:b,seferId:sid,tarih:iso}); }
-    await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); }
+      if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:b,seferId:sid,tarih:iso}); }
+    if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
 
   const altlar=[["komuta","🏰","Komuta"],["cephane","🎒","Cephane"],["kale","🛡️","Kaleler"],["gozcu","🔭","Gözcü"],["rapor","📊","Rapor"]];
 
@@ -3361,7 +3350,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
           "🏰 Bu seferde "+yeniKaleSayi+" yeni kale fethettin! 🎉")),
       h("div",{style:{background:"#fff",padding:"10px 14px",display:"flex",gap:8,flexWrap:"wrap"}},
         h("button",{style:{...S.btn("p"),flex:"1 1 170px"},onClick:()=>setCantaDoldur(true)}, aktifSefer?"➕ Cephane ekle":"⚔️ Orduyu hazırla (cephaneyi doldur)"),
-        (aktifSefer||seferizVar) && h("button",{style:{...S.btn(),flex:"1 1 170px",borderColor:"#b45309",color:"#b45309",fontWeight:800},onClick:seferiBitir}, aktifSefer?"🏭 Seferi bitir — atölyeye dön":"🏭 Hesabı kapat — seferi bitir"))),
+        aktifSefer && h("button",{style:{...S.btn(),flex:"1 1 170px",borderColor:"#b45309",color:"#b45309",fontWeight:800},onClick:seferiBitir},"🏭 Seferi bitir — atölyeye dön"))),
     // —— ⚡ GERİLLA VURUŞU (akın bandının altında) — teker teker +/- ile anlık seyyar satış ——
     cephane.length>0 && h("div",{style:{...S.card,padding:0,overflow:"hidden",marginBottom:14,border:"1px solid #f59e0b",boxShadow: vurkacModu?"0 0 16px rgba(245,158,11,.45)":undefined}},
       h("button",{onClick:()=>setGerillaAcik(a=>!a),style:{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:"pointer",border:"none",background:"linear-gradient(135deg,#1e293b,#7c2d12)",color:"#fff",textAlign:"left"}},
