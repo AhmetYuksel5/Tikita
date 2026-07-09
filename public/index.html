@@ -1677,7 +1677,16 @@ function HareketDuzenModal({ hareket, onSil, onKapat }){
     h(Field,{label:"Tarih"}, h("input",{type:"date",style:S.input,value:f.tarih,onChange:e=>set("tarih",e.target.value)})));
 }
 
-function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKapat }){
+function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, seferIdAl, onKapat }){
+  // Kaleye gelip işlem yapılırsa (satış/tahsilat/konsinye çöz/iade…) sanki sefere çıkılmış say:
+  //  aktif sefer yoksa ilk işlemde otomatik aç → "Seferi bitir" ile normal sefer gibi kapatılır.
+  const seferIdRef=useRef(aktifSeferId||null), seferPromiseRef=useRef(null);
+  function sidAl(){
+    if(seferIdRef.current) return Promise.resolve(seferIdRef.current);
+    if(aktifSeferId){ seferIdRef.current=aktifSeferId; return Promise.resolve(aktifSeferId); }
+    if(!seferPromiseRef.current) seferPromiseRef.current=Promise.resolve(seferIdAl?seferIdAl():null).then(id=>{ seferIdRef.current=id; return id; });
+    return seferPromiseRef.current;
+  }
   const [s1,setS1]=useState({});      // konsinye çöz adetleri  urunId->adet
   const [lines,setLines]=useState({}); // yeni  urunId->{adet,mod}
   const buradaMi=x=> (musteri.id && x.musteriId===musteri.id) || ((x.yer||"")===(musteri.ad||""));
@@ -1688,6 +1697,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   async function coz(p,mod){   // mod: "satildi" | "iade"
     const istek=s1[p.urunId]!=null?Math.floor(num(s1[p.urunId])):p.kalan; let n=Math.min(istek,p.kalan); if(n<1) return alert("Adet gir.");
     if(mod==="satildi" && !fiyatOnay([{ad:p.urunAd,fiyat:p.satisFiyat}])) return;
+    const sid=await sidAl();   // kaleye gelip konsinye çözmek = sefer işlemi (yoksa aç)
     const iso=new Date().toISOString();
     // satıldı: alınan tutar boşsa tam ödeme; eksikse kalan = ALACAK
     let alinanKalan=null;
@@ -1697,7 +1707,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     for(const r of recs){ if(n<=0)break; const d=Math.min(n,num(r.kalan));
       await save("pazarlama_hareket",{id:r.id,kalan:num(r.kalan)-d});
       if(mod==="satildi"){ const recBek=d*num(r.satisFiyat); const recTah=Math.max(0,Math.min(recBek,alinanKalan)); alinanKalan-=recTah;
-        await harKaydet({tip:"satis",urunId:r.urunId,urunAd:r.urunAd,adet:d,alisFiyat:num(r.alisFiyat),satisFiyat:num(r.satisFiyat),tahsil:recTah,yer:r.yer||musteri.ad,bolge:r.bolge||musteri.bolge||"",musteriId:r.musteriId||musteri.id||"",kaynak:"konsinye",seferId:aktifSeferId||null,tarih:iso}); }
+        await harKaydet({tip:"satis",urunId:r.urunId,urunAd:r.urunAd,adet:d,alisFiyat:num(r.alisFiyat),satisFiyat:num(r.satisFiyat),tahsil:recTah,yer:r.yer||musteri.ad,bolge:r.bolge||musteri.bolge||"",musteriId:r.musteriId||musteri.id||"",kaynak:"konsinye",seferId:sid,tarih:iso}); }
       else { const u=(urunler||[]).find(x=>x.id===p.urunId); if(u) await bagYaz(u, bagOf(u)+d);
         // konsinyeden geri toplandı → fiziken çantaya girer + kayıt altına alınır (atölyeye iade ayrı adım)
         // seferId yok: bu müşteri olayı; atölyeye dönüş seferi bitirince ayrıca "Dönen" sayılır (çift saymayı önler)
@@ -1712,12 +1722,12 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     await save("pazarlama_hareket",{id:x.id,tahsil:yeni});
     // fiilen tahsil edilen tutarı da tahsilat hareketi olarak yaz → haftalık "Tahsilat yap" görevi sayabilsin
     const d=yeni-onceki;
-    if(d>0) await harKaydet({tip:"tahsilat",tutar:d,yer:x.yer||musteri.ad||"",bolge:x.bolge||musteri.bolge||"",musteriId:x.musteriId||musteri.id||"",seferId:aktifSeferId||null,tarih:new Date().toISOString()}); }
+    if(d>0) await harKaydet({tip:"tahsilat",tutar:d,yer:x.yer||musteri.ad||"",bolge:x.bolge||musteri.bolge||"",musteriId:x.musteriId||musteri.id||"",seferId:await sidAl(),tarih:new Date().toISOString()}); }
   // toplu tahsilat — girilen parayı açık alacaklara (en eskiden) uygula; eksik kalırsa alacak durur, fazlası avans
   async function tahsilUygula(miktarStr){ let kalan=num(miktarStr); if(kalan<=0) return alert("Alınan parayı yaz.");
     const iso=new Date().toISOString(); const acik=acikAlacaklar.slice().sort((a,b)=>new Date(a.tarih)-new Date(b.tarih)); let uyg=0;
     for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); await save("pazarlama_hareket",{id:x.id,tahsil:(x.tahsil==null?num(x.adet)*num(x.satisFiyat):num(x.tahsil))+d}); kalan-=d; uyg+=d; }
-    const ort={yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso};
+    const ort={yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso};
     if(uyg>0) await harKaydet({tip:"tahsilat",tutar:uyg,...ort});
     if(kalan>0) await harKaydet({tip:"avans",tutar:kalan,...ort});
     alert("🧾 Tahsilat: "+tl(uyg)+(kalan>0?(" · 💳 avans "+tl(kalan)):"")); }
@@ -1757,8 +1767,9 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     const iso=new Date().toISOString();
     const beklenenSat=secili.filter(x=>x.mod==="sat").reduce((s,x)=>s+x.adet*num(x.u.satisFiyat),0);
     let alinanKalan = tamAlindi ? beklenenSat : Math.max(0,Math.min(beklenenSat,num(alinanYeni)));
+    const sid=await sidAl();   // yeni satış/konsinye = sefer işlemi
     for(const {u,adet,mod} of secili){ await bagYaz(u, bagOf(u)-adet);
-      const base={urunId:u.id,urunAd:u.ad,adet,alisFiyat:num(u.pazFiyat),satisFiyat:num(u.satisFiyat),yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso};
+      const base={urunId:u.id,urunAd:u.ad,adet,alisFiyat:num(u.pazFiyat),satisFiyat:num(u.satisFiyat),yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:sid,tarih:iso};
       if(mod==="konsinye") await harKaydet({tip:"konsinye",kalan:adet,musteriNot:musteri.not||"",lat:musteri.lat||"",lng:musteri.lng||"",fotoK:[],...base});
       else { const bek=adet*num(u.satisFiyat); const tah=Math.max(0,Math.min(bek,alinanKalan)); alinanKalan-=tah; await harKaydet({tip:"satis",tahsil:tah,...base}); } }
     setLines({}); setTamAlindi(true); setAlinanYeni("");
@@ -1810,18 +1821,18 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
   // AKIN — geçmişle aynı form, ama GÜNCEL tarih + gerçek stok/çanta hareketi
   async function akinOnayla(){ const iso=new Date().toISOString();
     if(akn.tip==="stant"){ const fiyat=akn.mod==="satis"?num(akn.fiyat):0;
-      await harKaydet({tip:"stant",mod:akn.mod,fiyat,adet:1,urunAd:"Stant",yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso});
+      await harKaydet({tip:"stant",mod:akn.mod,fiyat,adet:1,urunAd:"Stant",yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso});
       setAkn(s=>({...s,fiyat:""})); return alert(akn.mod==="hediye"?"🎁 Hediye stant kaydedildi.":"💰 Stant satışı kaydedildi."); }
     if(akn.tip==="tahsilat"){ let kalan=num(akn.alinan); if(kalan<=0) return alert("Tahsil edilen tutar gir.");
       const acik=acikAlacaklar.slice().sort((a,b)=>new Date(a.tarih)-new Date(b.tarih)); let uyg=0;
       for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); await save("pazarlama_hareket",{id:x.id,tahsil:(x.tahsil==null?num(x.adet)*num(x.satisFiyat):num(x.tahsil))+d}); kalan-=d; uyg+=d; }
-      const ort={yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso};
+      const ort={yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso};
       if(uyg>0) await harKaydet({tip:"tahsilat",tutar:uyg,...ort});
       if(kalan>0) await harKaydet({tip:"avans",tutar:kalan,...ort});   // borçtan fazlası = önden alınan (avans)
       setAkn(s=>({...s,alinan:""})); return alert("🧾 Tahsilat: "+tl(uyg)+(kalan>0?(" · 💳 avans "+tl(kalan)):"")+" kaydedildi."); }
     const u=(urunler||[]).find(x=>x.id===akn.urunId); if(!u) return alert("Ürün seç.");
     const ad=Math.floor(num(akn.adet)); if(ad<1) return alert("Adet gir.");
-    const base={urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(akn.alis),satisFiyat:num(akn.satis),yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:iso};
+    const base={urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(akn.alis),satisFiyat:num(akn.satis),yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso};
     if(akn.tip==="konsatis"){ const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
       const mevcut=recs.reduce((s,r)=>s+num(r.kalan),0);
       if(mevcut<1) return alert("Bu mekanda sana ait açık konsinye yok — önce konsinye bırak.");
@@ -1900,7 +1911,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, onKa
     if(mod==="satis"){ const v=prompt("🎪 Stant satış fiyatı (₺):", musteri.satisFiyat||""); if(v==null) return; fiyat=num(v);
       if(fiyat<=0 && !confirm("Fiyat 0 ₺ — yine de kaydedeyim mi?")) return; }
     else { if(!confirm("🎁 Bu mekana hediye stant verildi olarak kaydedilsin mi?")) return; }
-    await harKaydet({tip:"stant",mod,fiyat,adet:1,urunAd:"Stant",yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:aktifSeferId||null,tarih:new Date().toISOString()});
+    await harKaydet({tip:"stant",mod,fiyat,adet:1,urunAd:"Stant",yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:new Date().toISOString()});
     alert(mod==="hediye"?"🎁 Hediye stant kaydedildi.":"💰 Stant satışı kaydedildi · "+tl(fiyat)); }
   const satToplam=har.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0)+standGelir;
   const satMarj=har.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);
@@ -3862,7 +3873,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         kaleler.map(savasKart))),
     kartGonder && h(KartGonderModal,{urun:kartGonder,musteriler,onKapat:()=>setKartGonder(null)}),
     cantaDoldur && h(CantaDoldurModal,{urunler,seferIdAl,onKapat:()=>setCantaDoldur(false)}),
-    musteriBag && h(MevkiModal,{musteri:musteriBag,bagItems:cephane,urunler,hareketler,aktifSeferId:aktifSefer?aktifSefer.id:null,onKapat:()=>setMusteriBag(null)}),
+    musteriBag && h(MevkiModal,{musteri:musteriBag,bagItems:cephane,urunler,hareketler,aktifSeferId:aktifSefer?aktifSefer.id:null,seferIdAl,onKapat:()=>setMusteriBag(null)}),
     islem && (()=>{ const u=urunListe.find(x=>x.id===islem.u.id)||islem.u;
       return h(PazIslemModal,{u,mod:islem.mod,alisVar:num(u.pazFiyat)||null,bolgeler,musteriler,secMusteri:islem.musteri||null,aktifSeferId:aktifSefer?aktifSefer.id:null,seferIdAl,onKapat:()=>setIslem(null)}); })(),
     duzen && h(PazUrunModal,{kayit:urunListe.find(x=>x.id===duzen.id)||duzen,onKapat:()=>setDuzen(null)}),
