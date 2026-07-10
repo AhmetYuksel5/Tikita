@@ -133,8 +133,11 @@ async function bagYaz(u, yeniAdet, ekstra){ const uid=AKTIF_KUL?AKTIF_KUL.id:"";
   // atölye stoğu ORTAK → yarış durumuna karşı atomik artır/azalt (increment)
   if(ekstra&&ekstra.stoktaDelta!=null) obj.stokta=increment(Math.round(num(ekstra.stoktaDelta)));
   await save("stok_urun",obj); }
-// çantayı ATOMİK değiştir (hızlı +/- basımında yarış/eski-okuma hatasını önler)
-async function bagDelta(u, d){ const uid=AKTIF_KUL?AKTIF_KUL.id:""; await save("stok_urun",{id:u.id,pazStokK:{[uid]:increment(Math.round(num(d)))}}); }
+// çantayı ATOMİK değiştir (hızlı +/- basımında yarış/eski-okuma hatasını önler); ekstra.stoktaDelta da atomik
+async function bagDelta(u, d, ekstra){ const uid=AKTIF_KUL?AKTIF_KUL.id:"";
+  const obj={id:u.id,pazStokK:{[uid]:increment(Math.round(num(d)))}};
+  if(ekstra&&ekstra.stoktaDelta!=null) obj.stokta=increment(Math.round(num(ekstra.stoktaDelta)));
+  await save("stok_urun",obj); }
 // satış/konsinye fiyatı 0 ise uyar — sessiz 0-ciro kaydını önle
 function fiyatOnay(kalemler){ const s=kalemler.filter(x=>num(x.fiyat)<=0);
   if(!s.length) return true;
@@ -1444,21 +1447,25 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
 // ÇANTAYI DOLDUR — atölye stoğundan toplu ürün al (sefer başlatır/loglar)
 function CantaDoldurModal({ urunler, seferIdAl, onKapat }){
   const [mik,setMik]=useState({});
+  const yukRef=useRef(false); const [yuk,setYuk]=useState(false);   // çift dokunuş kilidi (12 çıkış/6 satış hatasının kökü)
   const liste=urunler.slice().filter(u=>num(u.stokta)>0||bagOf(u)>0).sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   const set=(id,v)=>setMik(s=>({...s,[id]:v}));
   const toplam=liste.reduce((s,u)=>s+Math.max(0,Math.floor(num(mik[u.id]))),0);
   async function ekle(){
-    const alinacak=liste.map(u=>({u,q:Math.max(0,Math.floor(num(mik[u.id])))})).filter(x=>x.q>0);
-    if(!alinacak.length) return alert("Adet gir.");
-    for(const {u,q} of alinacak){ if(q>num(u.stokta)) return alert(u.ad+": atölyede sadece "+num(u.stokta)+" var."); }
-    const sid=await seferIdAl(); const iso=new Date().toISOString();
-    for(const {u,q} of alinacak){ await bagYaz(u, bagOf(u)+q, {stoktaDelta:-q});
-      if(sid) await harKaydet({tip:"al",urunId:u.id,urunAd:u.ad,adet:q,seferId:sid,tarih:iso}); }
-    onKapat();
+    if(yukRef.current) return; yukRef.current=true; setYuk(true);
+    try{
+      const alinacak=liste.map(u=>({u,q:Math.max(0,Math.floor(num(mik[u.id])))})).filter(x=>x.q>0);
+      if(!alinacak.length) return alert("Adet gir.");
+      for(const {u,q} of alinacak){ if(q>num(u.stokta)) return alert(u.ad+": atölyede sadece "+num(u.stokta)+" var."); }
+      const sid=await seferIdAl(); const iso=new Date().toISOString();
+      for(const {u,q} of alinacak){ await bagDelta(u, +q, {stoktaDelta:-q});   // atomik — eski bagOf okuması yok
+        if(sid) await harKaydet({tip:"al",urunId:u.id,urunAd:u.ad,adet:q,seferId:sid,tarih:iso}); }
+      onKapat();
+    } finally { yukRef.current=false; setYuk(false); }
   }
   return h(Modal,{ baslik:"🎒 Çantaya ürün ekle (atölyeden)", onKapat,
     alt:h(React.Fragment,null,
-      h("button",{style:{...S.btn("p"),flex:1},onClick:ekle}, "Çantaya ekle"+(toplam?(" · "+toplam+" adet"):"")),
+      h("button",{style:{...S.btn("p"),flex:1,opacity:yuk?.6:1},disabled:yuk,onClick:ekle}, yuk?"⏳ Ekleniyor…":("Çantaya ekle"+(toplam?(" · "+toplam+" adet"):""))),
       h("button",{style:S.btn(),onClick:onKapat},"Vazgeç")) },
     h("div",{style:{fontSize:12,color:C.mut,marginBottom:8}},"Atölye stoğundan çantana alacağın adetleri gir."),
     !liste.length ? h("div",{style:{...S.card,padding:18,textAlign:"center",color:C.mut}},"Atölye stoğunda ürün yok.")
@@ -2737,12 +2744,18 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     await remove("pazarlama_hareket", r.id);
   }
   async function seferIdAl(){ if(aktifSefer) return aktifSefer.id; return await save("sefer",{baslangic:new Date().toISOString(),durum:"acik",kullaniciId:AKTIF_KUL?AKTIF_KUL.id:""}); }
-  async function seferiBitir(){ if(!aktifSefer && !cephane.length) return alert("Aktif sefer yok.");
+  const seferBitirRef=useRef(false);   // çift dokunuş kilidi
+  async function seferiBitir(){ if(seferBitirRef.current) return;
+    if(!aktifSefer && !cephane.length) return alert("Aktif sefer yok.");
     if(!confirm("Seferi bitir — kalan cephaneyi atölyeye geri çek?")) return;
-    const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
-    for(const u of cephane){ const b=bagOf(u); await bagYaz(u, 0, {stoktaDelta:+b});
-      if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:b,seferId:sid,tarih:iso}); }
-    if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); } }
+    seferBitirRef.current=true;
+    try{
+      const sid=aktifSefer?aktifSefer.id:null, iso=new Date().toISOString();
+      for(const u of cephane){ const b=bagOf(u); if(b<1) continue;
+        await bagDelta(u, -b, {stoktaDelta:+b});   // atomik düş (mutlak 0 yazmak eski okumayla yarışıyordu)
+        if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:b,seferId:sid,tarih:iso}); }
+      if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); }
+    } finally { seferBitirRef.current=false; } }
 
   const altlar=[["komuta","🏰","Komuta"],["cephane","🎒","Cephane"],["kale","🛡️","Kaleler"],["gozcu","🔭","Gözcü"],["rapor","📊","Rapor"]];
 
