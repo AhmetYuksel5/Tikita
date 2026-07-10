@@ -2447,6 +2447,10 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [gerillaLat,setGerillaLat]=useState(""); const [gerillaLng,setGerillaLng]=useState("");
   const [gerillaFiyat,setGerillaFiyat]=useState({});    // urunId -> anlık seyyar fiyat (değişken)
   const [konumYuk,setKonumYuk]=useState(false);
+  const [toptanAcik,setToptanAcik]=useState(false);     // 📦 toptan (paket) satış formu
+  const [toptanAdet,setToptanAdet]=useState({});        // urunId -> adet
+  const [toptanPara,setToptanPara]=useState("");        // alınan toplam ₺
+  const [toptanYuk,setToptanYuk]=useState(false);
   const [musteriBag,setMusteriBag]=useState(null);
   const [rapor,setRapor]=useState(null);
   const [islem,setIslem]=useState(null);     // {u,mod,musteri}
@@ -2687,6 +2691,36 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const sid = aktifSefer ? aktifSefer.id : await seferIdAl();
     await bagDelta(u, -1);   // çantadan 1 düş (atomik)
     await harKaydet({tip:"satis",gerilla:true,kaynak:"gerilla",urunId:u.id,urunAd:u.ad,adet:1,alisFiyat:num(u.pazFiyat),satisFiyat:f,tahsil:f,yer:"⚡ Seyyar · "+(gerillaBolge.trim()||"Konum"),bolge:gerillaBolge.trim(),lat:gerillaLat||"",lng:gerillaLng||"",musteriId:"",seferId:sid,tarih:new Date().toISOString()});
+  }
+  // 📦 TOPTAN (paket) satış — hangi ürün kaça gitti belli değil; tek toplam para alınır.
+  //  Kural: alınan para, ürünlerin pazarlamacıya MALİYETİNDEN (alış) az olamaz.
+  //  Muhasebe: para ürünlere maliyet oranında dağıtılır → üretici borcu (adet×alış) aynı kalır, marj = para − maliyet.
+  const toptanSecili=cephane.map(u=>({u,adet:Math.max(0,Math.floor(num(toptanAdet[u.id])))})).filter(x=>x.adet>0);
+  const toptanMaliyet=toptanSecili.reduce((s,x)=>s+x.adet*num(x.u.pazFiyat),0);
+  const toptanParca=toptanSecili.reduce((s,x)=>s+x.adet,0);
+  async function toptanSat(){
+    if(toptanYuk) return;
+    if(!toptanSecili.length) return alert("Ürün adedi gir.");
+    if(!gerillaBolge.trim() && !(gerillaLat&&gerillaLng)) return alert("Önce bölge yaz ya da 📍 ile konumunu al.");
+    for(const x of toptanSecili) if(x.adet>bagOf(x.u)) return alert(x.u.ad+": çantanda "+bagOf(x.u)+" var.");
+    const para=num(toptanPara);
+    if(para<=0) return alert("Alınan toplam parayı yaz.");
+    if(para<toptanMaliyet) return alert("Alınan para maliyetin altında olamaz!\n\nBu ürünlerin sana maliyeti: "+tl(toptanMaliyet)+"\nAlınan: "+tl(para)+"\nEksik: "+tl(toptanMaliyet-para));
+    const eksikMaliyet=toptanSecili.filter(x=>num(x.u.pazFiyat)<=0);
+    if(eksikMaliyet.length && !confirm("⚠ Şu ürünlerin alış (maliyet) fiyatı girilmemiş:\n"+eksikMaliyet.map(x=>"• "+x.u.ad).join("\n")+"\n\nMaliyet tabanı eksik hesaplanır. Yine de kaydedilsin mi?")) return;
+    setToptanYuk(true);
+    try{
+      const sid = aktifSefer ? aktifSefer.id : await seferIdAl();
+      const iso=new Date().toISOString();
+      const oran = toptanMaliyet>0 ? para/toptanMaliyet : 0;   // maliyet oranında dağıt; maliyet 0 ise parça başına eşit
+      for(const {u,adet} of toptanSecili){
+        const birim = toptanMaliyet>0 ? Math.round(num(u.pazFiyat)*oran*100)/100 : Math.round((para/toptanParca)*100)/100;
+        await bagDelta(u, -adet);
+        await harKaydet({tip:"satis",gerilla:true,toptan:true,kaynak:"gerilla",urunId:u.id,urunAd:u.ad,adet,alisFiyat:num(u.pazFiyat),satisFiyat:birim,tahsil:adet*birim,yer:"⚡ Seyyar · "+(gerillaBolge.trim()||"Konum"),bolge:gerillaBolge.trim(),lat:gerillaLat||"",lng:gerillaLng||"",musteriId:"",seferId:sid,tarih:iso});
+      }
+      setToptanAdet({}); setToptanPara(""); setToptanAcik(false);
+      alert("📦 Toptan satış kaydedildi: "+toptanParca+" parça · "+tl(para)+(toptanMaliyet>0?("\n🏭 Üreticiye: "+tl(toptanMaliyet)+" · 🫰 Marjın: "+tl(para-toptanMaliyet)):""));
+    } finally { setToptanYuk(false); }
   }
   async function gerillaEksi(u){   // son seyyar satışı geri al (çantaya döner)
     const sid=aktifSefer?aktifSefer.id:null;
@@ -3096,6 +3130,31 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                 h("button",{onClick:()=>gerillaEksi(u),disabled:sold<1,style:{width:34,height:34,borderRadius:9,border:"1px solid "+C.line,background:"#fff",color:"#b45309",fontSize:20,fontWeight:800,cursor:sold<1?"default":"pointer",opacity:sold<1?.4:1,lineHeight:1}},"−"),
                 h("div",{style:{minWidth:22,textAlign:"center",fontWeight:800,fontSize:16,color:"#b45309"}},sold),
                 h("button",{onClick:()=>gerillaArti(u),disabled:bos,style:{width:34,height:34,borderRadius:9,border:"none",background: bos?"#cbd5e1":"#b45309",color:"#fff",fontSize:20,fontWeight:800,cursor:bos?"default":"pointer",lineHeight:1}},"+"))); })),
+        // —— 📦 TOPTAN (paket) satış: tek toplam para, ürün ürün fiyat yok ——
+        h("div",{style:{marginTop:12,border:"1px dashed #b45309",borderRadius:10,overflow:"hidden"}},
+          h("button",{type:"button",onClick:()=>setToptanAcik(a=>!a),style:{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",cursor:"pointer",border:"none",background:"#fff7ed",color:"#9a3412",fontWeight:800,fontSize:13,textAlign:"left"}},
+            h("span",null,"📦"),
+            h("span",{style:{flex:1}},"Toptan sat — hepsine tek para aldım"),
+            h("span",{style:{fontSize:16}}, toptanAcik?"▾":"▸")),
+          toptanAcik && h("div",{style:{padding:"10px 12px",background:"#fffbf5"}},
+            h("div",{style:{fontSize:11.5,color:C.mut,marginBottom:8}},"Hangi üründen kaç tane gittiğini gir, aldığın TOPLAM parayı yaz. Tek kural: para, ürünlerin sana maliyetinden az olamaz."),
+            h("div",{style:{display:"grid",gap:6}},
+              cephane.map(u=>{ const b=bagOf(u);
+                return h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#fff",border:"1px solid "+C.line,borderRadius:8}},
+                  h("div",{style:{flex:1,minWidth:0}},
+                    h("div",{style:{fontWeight:700,fontSize:12.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+                    h("div",{style:{fontSize:10.5,color:C.mut}},"çantanda "+b+(num(u.pazFiyat)>0?(" · maliyet "+tl(num(u.pazFiyat))):" · ⚠ maliyet yok"))),
+                  h("input",{type:"number",min:0,max:b,placeholder:"0",
+                    value:toptanAdet[u.id]||"",onChange:e=>setToptanAdet(s=>({...s,[u.id]:e.target.value})),
+                    style:{...S.input,width:58,padding:"6px 6px",textAlign:"center",fontWeight:700,flexShrink:0}})); })),
+            toptanSecili.length>0 && h("div",{style:{marginTop:8,padding:"8px 10px",borderRadius:8,background:"#fff",border:"1px solid "+C.line,fontSize:12.5,fontWeight:700}},
+              "📦 "+toptanParca+" parça · 🏭 Maliyet tabanı: "+tl(toptanMaliyet),
+              num(toptanPara)>0 && h("span",{style:{color:num(toptanPara)>=toptanMaliyet?"#047857":"#b91c1c"}},
+                num(toptanPara)>=toptanMaliyet ? (" · 🫰 Marjın: "+tl(num(toptanPara)-toptanMaliyet)) : (" · ⛔ "+tl(toptanMaliyet-num(toptanPara))+" eksik!"))),
+            h("div",{style:{display:"flex",gap:8,marginTop:8}},
+              h("input",{type:"number",min:0,placeholder:"Alınan toplam ₺",value:toptanPara,onChange:e=>setToptanPara(e.target.value),
+                style:{...S.input,flex:1,fontWeight:800,fontSize:15}}),
+              h("button",{type:"button",disabled:toptanYuk,onClick:toptanSat,style:{...S.btn("p"),flexShrink:0,background:"#9a3412",borderColor:"#9a3412",opacity:toptanYuk?.6:1}}, toptanYuk?"…":"✓ Kaydet")))),
         h("button",{onClick:()=>setGerillaAcik(false),style:{...S.btn("p"),width:"100%",marginTop:10,background:"#b45309",borderColor:"#b45309"}}, "✓ Vur-kaç bitti — kapat"+(gerillaSefGanimet>0?(" · "+tl(gerillaSefGanimet)+" ganimet"):"")))),
     // taşınan cephane + hedef mevkiler
     aktifSefer && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
