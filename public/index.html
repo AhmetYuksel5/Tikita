@@ -1485,6 +1485,13 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
   const ureticiBorc=sum(sat,x=>num(x.adet)*num(x.alisFiyat));   // sattığı malın alış bedeli → üreticiye verilecek
   const tahsil=sum(sat,x=> x.tahsil==null? num(x.adet)*num(x.satisFiyat) : num(x.tahsil));
   const alacak=Math.max(0, ciro-tahsil);
+  // —— üreticiye ödeme onayı (o an ödenmezse sonradan da onaylanabilir) ——
+  const [odemeYuk,setOdemeYuk]=useState(false);
+  const uOdendi=!!sefer.ureticiOdendi;
+  async function ureticiOde(){ if(!confirm("🏭 Üreticiye "+tl(ureticiBorc)+" ödendi olarak onaylansın mı?")) return;
+    setOdemeYuk(true); try{ await save("sefer",{id:sefer.id,ureticiOdendi:true,ureticiOdenen:ureticiBorc,ureticiOdemeTarih:new Date().toISOString()}); }finally{ setOdemeYuk(false); } }
+  async function ureticiGeriAl(){ if(!confirm("Üretici ödeme onayı geri alınsın mı?")) return;
+    setOdemeYuk(true); try{ await save("sefer",{id:sefer.id,ureticiOdendi:false,ureticiOdenen:0,ureticiOdemeTarih:""}); }finally{ setOdemeYuk(false); } }
   const pazAd=(AKTIF_KUL&&AKTIF_KUL.ad)||sefer.kullaniciAd||"";
   const bas=new Date(sefer.baslangic).getTime(), bit=sefer.bitis?new Date(sefer.bitis).getTime():Date.now();
   const donem=fmtTarihSaat(bas)+(sefer.bitis?(" — "+fmtSaat(bit)):" — (açık)")+" · "+fmtSureSaat((bit-bas)/60000);
@@ -1548,6 +1555,12 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
         h("div",{style:{fontSize:22,fontWeight:800,color:"#047857",marginTop:3}},tl(kar)))),
     h("div",{style:{fontSize:12,color:C.mut,marginTop:8,textAlign:"center"}},
       "Ciro "+tl(ciro)+(tahsil<ciro?(" · Tahsil "+tl(tahsil)+" · Kalan alacak "+tl(alacak)):"")),
+    // —— üreticiye ödeme onayı ——
+    ureticiBorc>0 && (uOdendi
+      ? h("div",{style:{marginTop:10,padding:"10px 12px",borderRadius:10,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}},
+          h("span",{style:{fontSize:13,fontWeight:800,color:"#047857",flex:1,minWidth:0}}, "✓ Üreticiye ödendi — "+tl(num(sefer.ureticiOdenen)||ureticiBorc)+(sefer.ureticiOdemeTarih?(" · "+fmtTarih(new Date(sefer.ureticiOdemeTarih).getTime())):"")),
+          h("button",{type:"button",disabled:odemeYuk,onClick:ureticiGeriAl,style:{...S.btn(),padding:"5px 10px",fontSize:12,borderColor:"#b45309",color:"#b45309"}},"↩ geri al"))
+      : h("button",{type:"button",disabled:odemeYuk,onClick:ureticiOde,style:{...S.btn("p"),width:"100%",marginTop:10,background:"#b45309",borderColor:"#b45309"}}, odemeYuk?"…":("🏭 Üreticiye "+tl(ureticiBorc)+" ödedim — onayla"))),
     liste("💰 Satışlar",sat,"#047857",x=>tl(num(x.adet)*num(x.satisFiyat))),
     liste("🏬 Konsinye bırakılanlar",kon,"#7c3aed",x=>(x.bolge||"")),
     (satA===0&&konA===0) && h("div",{style:{fontSize:12.5,color:C.mut,marginTop:10,textAlign:"center"}},"Bu seferde satış/konsinye yapılmadı."));
@@ -3812,9 +3825,27 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     h("thead",null,h("tr",null,cols.map((c,i)=>h("th",{key:i,style:{textAlign:i?"right":"left",padding:"5px 7px",borderBottom:"2px solid "+C.line,color:C.mut,fontSize:11,whiteSpace:"nowrap"}},c)))),
     h("tbody",null, rows.length ? rows.map((r,ri)=>h("tr",{key:ri}, r.map((cell,ci)=>h("td",{key:ci,style:{textAlign:ci?"right":"left",padding:"5px 7px",borderBottom:"1px solid #f1f5f9",whiteSpace:"nowrap"}},cell))))
       : h("tr",null,h("td",{style:{padding:"8px",color:C.mut}},"(yok)")))));
+  // kapatılmış ama üreticiye ödemesi onaylanmamış seferler (bu pazarlamacı) — sonradan onaylanabilir
+  const seferUreticiBorc=(sid)=>(hareketler||[]).filter(x=>x.seferId===sid&&x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.alisFiyat),0);
+  const benimSeferMi=s=> !AKTIF_KUL || !s.kullaniciId || s.kullaniciId===AKTIF_KUL.id;
+  const bekleyenUretici=(seferler||[]).filter(s=>s.durum==="kapali"&&!s.ureticiOdendi&&benimSeferMi(s))
+    .map(s=>({s,borc:seferUreticiBorc(s.id)})).filter(o=>o.borc>0).sort((a,b)=>new Date(b.s.bitis||0)-new Date(a.s.bitis||0));
+  const bekleyenTop=bekleyenUretici.reduce((s,o)=>s+o.borc,0);
+  async function ureticiOnayla(o){ if(!confirm("🏭 "+fmtTarih(new Date(o.s.bitis||o.s.baslangic).getTime())+" seferi için üreticiye "+tl(o.borc)+" ödendi olarak onaylansın mı?")) return;
+    await save("sefer",{id:o.s.id,ureticiOdendi:true,ureticiOdenen:o.borc,ureticiOdemeTarih:new Date().toISOString()}); }
   const raporView=()=>{ const v=raporVeri();
     return h("div",null,
     !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"📊 Raporlar — tarih + dönem seç, PDF indir ya da WhatsApp'tan gönder. (Çantaya al/iade dahil değildir.)"),
+    bekleyenUretici.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12,border:"1px solid #fed7aa",background:"#fff7ed"}},
+      h("div",{style:{...S.label,marginBottom:8,color:"#9a3412"}},"🏭 Üreticiye ödenecek — bekleyen "+bekleyenUretici.length+" sefer · "+tl(bekleyenTop)),
+      h("div",{style:{display:"grid",gap:8}},
+        bekleyenUretici.map(o=>h("div",{key:o.s.id,style:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"#fff",border:"1px solid "+C.line,borderRadius:9}},
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:13,fontWeight:800}}, tl(o.borc)),
+            h("div",{style:{fontSize:11,color:C.mut}}, fmtTarihSaat(new Date(o.s.bitis||o.s.baslangic).getTime())+" seferi")),
+          h("button",{type:"button",onClick:()=>setRapor(o.s.id),style:{...S.btn(),padding:"6px 10px",fontSize:12}},"rapor"),
+          h("button",{type:"button",onClick:()=>ureticiOnayla(o),style:{...S.btn("p"),padding:"6px 12px",fontSize:12,background:"#b45309",borderColor:"#b45309"}},"✓ Ödedim")))),
+      h("div",{style:{fontSize:11,color:"#9a3412",marginTop:8}},"O an ödemediysen sonradan buradan onaylayabilirsin.")),
       h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8,alignItems:"center"}},
         h("span",{style:{fontSize:12.5,fontWeight:700}},"Tarih:"),
         h("input",{type:"date",style:{...S.input,width:160},value:rapTarih,onChange:e=>setRapTarih(e.target.value)})),
