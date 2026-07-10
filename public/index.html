@@ -1495,8 +1495,6 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
   const pazAd=(AKTIF_KUL&&AKTIF_KUL.ad)||sefer.kullaniciAd||"";
   const bas=new Date(sefer.baslangic).getTime(), bit=sefer.bitis?new Date(sefer.bitis).getTime():Date.now();
   const donem=fmtTarihSaat(bas)+(sefer.bitis?(" — "+fmtSaat(bit)):" — (açık)")+" · "+fmtSureSaat((bit-bas)/60000);
-  const stat=(ad,deg,renk)=>h("div",{style:{...S.card,padding:"10px 8px",textAlign:"center"}},
-    h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}},ad), h("div",{style:{fontSize:18,fontWeight:800,color:renk,marginTop:2}},deg));
   const liste=(baslik,arr,renk,sag)=> arr.length? h("div",{style:{marginTop:10}},
     h("div",{style:{...S.label,marginBottom:4}},baslik),
     arr.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).map((x,i)=>h("div",{key:x.id||i,style:{display:"flex",justifyContent:"space-between",gap:8,padding:"5px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
@@ -1538,32 +1536,41 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
   const seferPDF=()=>{ const w=window.open("","_blank"); if(!w) return alert("Açılır pencere engellendi — tarayıcı izni ver."); w.document.write(seferHTML()); w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },400); };
   const seferWA=()=>{ const t=seferMetin(); if(navigator.share){ navigator.share({text:t}).catch(()=>{}); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
 
+  // —— SADE GÖRÜNÜM: iki büyük rakam + ödeme onayı; gerisi "Detay" altında ——
+  const [detay,setDetay]=useState(false);
+  const ozetParcalar=[["🎒",alA,"çıkış"],["💰",satA,"satış"],["🏬",konA,"konsinye"],["↩",iadeA,"dönen"]].filter(p=>p[1]>0);
   return h(Modal,{ baslik:"🧭 Sefer Raporu", onKapat, alt:h(React.Fragment,null,
       h("button",{style:{...S.btn("p"),flex:1},onClick:seferPDF},"📄 Çıktı"),
       h("button",{style:{...S.btn(),flex:1,borderColor:"#16a34a",color:"#16a34a",fontWeight:800},onClick:seferWA},"📲 WhatsApp"),
       h("button",{style:S.btn(),onClick:onKapat},"Kapat")) },
-    h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10}}, (pazAd?"👤 "+pazAd+" · ":"")+donem),
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:6}},
-      stat("🎒 Çıkış",alA,"#0e7490"), stat("💰 Satış",satA,C.yesilB), stat("🏬 Konsinye",konA,"#7c3aed"), stat("↩ Dönen",iadeA,"#b45309")),
-    // —— çanta boşaltıldı: üreticiye verilecek + sana kalan ——
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}},
-      h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center",background:"#fff7ed",border:"1px solid #fed7aa"}},
-        h("div",{style:{fontSize:11,color:"#9a3412",fontWeight:700}},"🏭 Üreticiye verilecek"),
-        h("div",{style:{fontSize:22,fontWeight:800,color:"#b45309",marginTop:3}},tl(ureticiBorc))),
-      h("div",{style:{...S.card,padding:"12px 8px",textAlign:"center",background:"#ecfdf5",border:"1px solid #a7f3d0"}},
-        h("div",{style:{fontSize:11,color:"#065f46",fontWeight:700}},"🫰 Sana kalan (kâr)"),
-        h("div",{style:{fontSize:22,fontWeight:800,color:"#047857",marginTop:3}},tl(kar)))),
-    h("div",{style:{fontSize:12,color:C.mut,marginTop:8,textAlign:"center"}},
-      "Ciro "+tl(ciro)+(tahsil<ciro?(" · Tahsil "+tl(tahsil)+" · Kalan alacak "+tl(alacak)):"")),
-    // —— üreticiye ödeme onayı ——
+    // 1) İKİ BÜYÜK RAKAM — tek bakışta hesap
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
+      h("div",{style:{...S.card,padding:"14px 8px",textAlign:"center",background:"#fff7ed",border:"1px solid #fed7aa"}},
+        h("div",{style:{fontSize:11.5,color:"#9a3412",fontWeight:700}},"🏭 Üreticiye ver"),
+        h("div",{style:{fontSize:26,fontWeight:800,color:"#b45309",marginTop:3}},tl(ureticiBorc))),
+      h("div",{style:{...S.card,padding:"14px 8px",textAlign:"center",background:"#ecfdf5",border:"1px solid #a7f3d0"}},
+        h("div",{style:{fontSize:11.5,color:"#065f46",fontWeight:700}},"🫰 Cebinde kalan"),
+        h("div",{style:{fontSize:26,fontWeight:800,color:"#047857",marginTop:3}},tl(kar)))),
+    // 2) Ödeme onayı — hemen büyük rakamların altında
     ureticiBorc>0 && (uOdendi
-      ? h("div",{style:{marginTop:10,padding:"10px 12px",borderRadius:10,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}},
+      ? h("div",{style:{marginTop:8,padding:"10px 12px",borderRadius:10,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}},
           h("span",{style:{fontSize:13,fontWeight:800,color:"#047857",flex:1,minWidth:0}}, "✓ Üreticiye ödendi — "+tl(num(sefer.ureticiOdenen)||ureticiBorc)+(sefer.ureticiOdemeTarih?(" · "+fmtTarih(new Date(sefer.ureticiOdemeTarih).getTime())):"")),
           h("button",{type:"button",disabled:odemeYuk,onClick:ureticiGeriAl,style:{...S.btn(),padding:"5px 10px",fontSize:12,borderColor:"#b45309",color:"#b45309"}},"↩ geri al"))
-      : h("button",{type:"button",disabled:odemeYuk,onClick:ureticiOde,style:{...S.btn("p"),width:"100%",marginTop:10,background:"#b45309",borderColor:"#b45309"}}, odemeYuk?"…":("🏭 Üreticiye "+tl(ureticiBorc)+" ödedim — onayla"))),
-    liste("💰 Satışlar",sat,"#047857",x=>tl(num(x.adet)*num(x.satisFiyat))),
-    liste("🏬 Konsinye bırakılanlar",kon,"#7c3aed",x=>(x.bolge||"")),
-    (satA===0&&konA===0) && h("div",{style:{fontSize:12.5,color:C.mut,marginTop:10,textAlign:"center"}},"Bu seferde satış/konsinye yapılmadı."));
+      : h("button",{type:"button",disabled:odemeYuk,onClick:ureticiOde,style:{...S.btn("p"),width:"100%",marginTop:8,background:"#b45309",borderColor:"#b45309"}}, odemeYuk?"…":("🏭 Üreticiye "+tl(ureticiBorc)+" ödedim — onayla"))),
+    // 3) Alacak varsa TEK kırmızı uyarı
+    alacak>0 && h("div",{style:{marginTop:8,padding:"9px 12px",borderRadius:10,background:"#fff7f7",border:"1px solid #fecaca",fontSize:13,fontWeight:800,color:"#b91c1c",textAlign:"center"}},
+      "⚠ "+tl(alacak)+" alacak kaldı — tahsil etmeyi unutma"),
+    (satA===0&&konA===0) && h("div",{style:{fontSize:12.5,color:C.mut,marginTop:10,textAlign:"center"}},"Bu seferde satış/konsinye yapılmadı."),
+    // 4) Küçük tek satır özet (yalnız sıfır olmayanlar)
+    ozetParcalar.length>0 && h("div",{style:{fontSize:12,color:C.mut,marginTop:10,textAlign:"center"}},
+      ozetParcalar.map(p=>p[0]+" "+p[1]+" "+p[2]).join(" · ")),
+    // 5) Ayrıntılar istenirse
+    (sat.length>0||kon.length>0) && h(React.Fragment,null,
+      h("button",{type:"button",onClick:()=>setDetay(d=>!d),style:{...S.btn(),width:"100%",marginTop:10,fontSize:12.5}}, detay?"▾ Detayı gizle":"▸ Detay — ne sattım, nereye bıraktım?"),
+      detay && h(React.Fragment,null,
+        h("div",{style:{fontSize:11.5,color:C.mut,marginTop:8}}, (pazAd?"👤 "+pazAd+" · ":"")+donem+" · Ciro "+tl(ciro)+(tahsil<ciro?(" · Tahsil "+tl(tahsil)):"")),
+        liste("💰 Satışlar",sat,"#047857",x=>tl(num(x.adet)*num(x.satisFiyat))),
+        liste("🏬 Konsinye bırakılanlar",kon,"#7c3aed",x=>(x.bolge||"")))));
 }
 
 // MÜŞTERİ ekle / düzenle
