@@ -4111,6 +4111,16 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
   const netAlacakTop=alacaklar.reduce((s,o)=>s+o.net,0);
   // verecek: pazarlamacı → üretici (tüm zaman satılan malın alış bedeli)
   const verecek=pazarlamacilar.map(u=>({u,borc:H.filter(x=>x.tip==="satis"&&x.kullaniciId===u.id).reduce((s,x)=>s+num(x.adet)*num(x.alisFiyat),0)})).filter(v=>v.borc>0.5).sort((a,b)=>b.borc-a.borc);
+  // —— üretici ödeme onayı (sefer bazlı): kapatılmış seferlerin üretici borcu ödendi mi / bekliyor mu ——
+  const seferUreticiBorc=(sid)=>H.filter(x=>x.seferId===sid&&x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.alisFiyat),0);
+  const kapananSeferler=(seferler||[]).filter(s=>s.durum==="kapali");
+  const ureticiOdeme=pazarlamacilar.map(u=>{ let bekleyen=0,odenen=0,bekSayi=0,odeSayi=0;
+    kapananSeferler.filter(s=>s.kullaniciId===u.id).forEach(s=>{ const b=seferUreticiBorc(s.id); if(b<=0) return;
+      if(s.ureticiOdendi){ odenen+=num(s.ureticiOdenen)||b; odeSayi++; } else { bekleyen+=b; bekSayi++; } });
+    return {u,bekleyen,odenen,bekSayi,odeSayi}; }).filter(o=>o.bekleyen>0||o.odenen>0).sort((a,b)=>b.bekleyen-a.bekleyen);
+  const uBekleyenTop=ureticiOdeme.reduce((s,o)=>s+o.bekleyen,0);
+  const uOdenenTop=ureticiOdeme.reduce((s,o)=>s+o.odenen,0);
+  const uBekSeferTop=ureticiOdeme.reduce((s,o)=>s+o.bekSayi,0);
 
   // —— müşteri bilgileri ——
   const musBilgi=(musteriler||[]).filter(m=>!m.arsiv).map(m=>{ const hs=H.filter(x=>x.musteriId===m.id||x.yer===m.ad);
@@ -4158,11 +4168,18 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
       kart("Aktif pazarlamacı",aktifPaz+" / "+pazarlamacilar.length,"dönemde iş yapan","#0f172a"),
       kart("Uğranılan mekan",aktifMekan.size+"","dönem içi","#0369a1"),
       kart("🧹 Tabla kazancı",tl(T.tablaKaz),T.tabla+" tabla değişimi","#0e7490"),
+      kart("🏭 Üretici ödemesi bekleyen",tl(uBekleyenTop),uBekSeferTop+" sefer · ödendi "+tl(uOdenenTop),"#b45309"),
       kart("📦 Bu hafta planlanan üretim",buHaftaUretim+" adet","güncel plan","#c2410c")),
     h("div",{style:{...S.label,margin:"6px 2px 8px",color:"#334155"}},"🏅 Pazarlamacı performansı · "+donemAd),
     Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"Konsinye",r:1},{t:"Tahsilat",r:1},{t:"Marj",r:1},{t:"Mekan",r:1}],
       pazPerf.map(p=>[p.u.ad,p.satAdet+" ad",tl(p.satTutar),p.konsAdet+" ad",tl(p.tah),tl(p.marj),p.mekan+""]),
-      "Bu dönemde hareket yok."));
+      "Bu dönemde hareket yok."),
+    // —— üretici ödeme durumu (sefer onayı bazlı, tüm zaman) ——
+    h("div",{style:{...S.label,margin:"16px 2px 8px",color:"#334155"}},"🏭 Üretici ödeme durumu — kapatılmış seferler"),
+    Tablo([{t:"Pazarlamacı",b:1},{t:"Bekleyen",r:1},{t:"Bekleyen sefer",r:1},{t:"Ödendi",r:1},{t:"Durum",r:1}],
+      ureticiOdeme.map(o=>[o.u.ad, tl(o.bekleyen), o.bekSayi+"", tl(o.odenen),
+        o.bekleyen>0 ? h("span",{style:{color:"#b45309",fontWeight:800}},"⏳ "+tl(o.bekleyen)+" bekliyor") : h("span",{style:{color:"#047857",fontWeight:800}},"✓ tümü ödendi")]),
+      "Kapatılmış seferde üretici borcu yok."));
 
   const pazView=()=>h("div",null,
     Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"Kons. ad",r:1},{t:"Kons. ₺",r:1},{t:"Tahsilat",r:1},{t:"Avans",r:1},{t:"Üretici borç",r:1},{t:"Marj",r:1},{t:"Mekan",r:1},{t:"Tabla (adet · ₺)",r:1}],
