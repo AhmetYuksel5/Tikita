@@ -3297,12 +3297,17 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         m.arsiv
           ? h("button",{style:{...S.ibtn,color:"#047857",borderColor:"#047857",fontWeight:700},onClick:()=>save("musteri",{id:m.id,arsiv:false})},"♻ Geri aç")
           : h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:700},onClick:()=>setMusteriBag(m)},"⚔️ Akın"))); };
-  const kaleView=()=>{ const aktifMus=(musteriler||[]).filter(m=>!m.arsiv).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const kaleView=()=>{
+    // KALE = satış/konsinye görmüş müşteri; henüz işlem yapılmamış kayıtlar GÖZCÜ adayıdır (🔭 sekmesinde)
+    const aktifMus=(musteriler||[]).filter(m=>!m.arsiv && kaleMi(m)).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+    const adaySayi=(musteriler||[]).filter(m=>!m.arsiv && !kaleMi(m)).length;
     const arsivMus=(musteriler||[]).filter(m=>m.arsiv).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
     return h("div",null,
-    !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🛡️ Kaleler — müşterilerin / mevkilerin. Karta dokun → çantadan akın (sat/konsinye)."),
+    !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🛡️ Kaleler — satış/konsinye yaptığın müşteriler. Karta dokun → çantadan akın (sat/konsinye)."),
       h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Kale (müşteri) ekle"),
-      !aktifMus.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Kale yok. + ile müşteri/mevki ekle — konumunu, telefonunu kaydet.")
+      adaySayi>0 && h("div",{onClick:()=>setAlt("gozcu"),style:{marginBottom:12,padding:"9px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,fontSize:12.5,fontWeight:700,color:"#0369a1",cursor:"pointer"}},
+        "🔭 "+adaySayi+" aday henüz kale değil (satış yapılmadı) — Gözcü sekmesinde ›"),
+      !aktifMus.length ? h("div",{style:{...S.card,padding:22,color:C.mut,textAlign:"center"}},"Henüz kale yok — bir müşteriye satış/konsinye yapınca kale burada belirir. Adaylar 🔭 Gözcü sekmesinde.")
       : h("div",{style:{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))"}}, aktifMus.map(kaleKart)),
       arsivMus.length>0 && h("div",{style:{marginTop:16}},
         h("button",{style:{...S.btn(),fontWeight:700},onClick:()=>setArsivAcik(a=>!a)}, (arsivAcik?"▾":"▸")+" 📦 Arşiv ("+arsivMus.length+")"),
@@ -3460,9 +3465,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
                 h("button",{title:r.tel?"Telefonuyla gözcü olarak ekle":"Aday olarak ekle",style:{...S.ibtn,fontWeight:700,flexShrink:0,...(r.tel?{color:"#fff",background:"#16a34a",borderColor:"#16a34a"}:{})},onClick:()=>setMusEdit({ad:r.ad,lat:String(r.lat),lng:String(r.lng),bolge:r.yakinBolge||"",telefon:r.tel||"",not:r.saat?("🕒 "+r.saat):"",kesif:true})},r.tel?"➕ Gözcü":"➕ Ekle")); })))
       : h("div",{style:{marginTop:10,fontSize:12.5,color:C.mut,textAlign:"center"}},"Yeni aday bulunamadı — yarıçapı büyüt ya da kategori ekle.")));
   // —— 🔭 GÖZCÜ (telefonu alınmış ama satış yapılmamış adaylar) ——
-  const gozcuView=()=>{ const liste=(musteriler||[]).filter(m=>!m.arsiv && (m.telefon||"").trim() && !kaleler.some(k=>k.musteriId===m.id||k.ad===m.ad)).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const gozcuView=()=>{ const liste=(musteriler||[]).filter(m=>!m.arsiv && !kaleMi(m)).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));   // TÜM satışsız adaylar (telefonsuz da kaybolmaz)
     return h("div",null,
-    !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🔭 Gözcü — telefonunu/bilgisini aldığın ama henüz satış yapmadığın kişi ve mekanlar. Haritada 🔭 ile görünür; satış/konsinye yapınca kaleye dönüşür."),
+    !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🔭 Gözcü — bilgisini aldığın ama henüz satış yapmadığın kişi ve mekanlar. Haritada 🔭 ile görünür; satış/konsinye yapınca kaleye dönüşüp Kaleler sekmesine geçer."),
       h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Gözcü ekle"),
       kesifKart(),
       (gozculer.length>0||haritaliKale.length>0||digerKaleler.length>0||(kesifFiltre&&kesifFiltre.length>0)) && h("div",{style:{marginBottom:14}},
@@ -3476,8 +3481,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
               h("div",{style:{display:"flex",alignItems:"center",gap:10}},
                 h("div",{style:{width:40,height:40,borderRadius:10,flexShrink:0,background:"linear-gradient(135deg,#0ea5e9,#0369a1)",color:"#fff",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}},"🔭"),
                 h("div",{style:{minWidth:0,flex:1}},
-                  h("div",{style:{fontWeight:800,fontSize:15.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad),
-                  m.bolge && h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700}},"📍 "+m.bolge)),
+                  h("div",{style:{fontWeight:800,fontSize:15.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🔭 "+m.ad),
+                  h("div",{style:{fontSize:11.5,color:"#7c3aed",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                    (m.bolge?("📍 "+m.bolge):""), m.kesif && h("span",{style:{marginLeft:m.bolge?6:0,background:"#ecfeff",color:"#0e7490",borderRadius:6,padding:"1px 6px",fontSize:10.5}},"🧭 keşiften"))),
                 h("button",{style:{...S.ibtn,flexShrink:0},onClick:()=>setMusEdit(m)},"✎")),
               m.telefon && h("div",{style:{fontSize:13,marginTop:8}},"📞 ",
                 h("a",{href:"tel:"+m.telefon,style:{fontWeight:700,color:"#0369a1",textDecoration:"none"}},m.telefon),
