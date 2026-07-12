@@ -2499,6 +2499,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [kesifR,setKesifR]=useState(2);                 // 🧭 keşif yarıçapı (km)
   const [kesifSonuc,setKesifSonuc]=useState(null);      // 🧭 son tarama sonuçları
   const [aktifHedef,setAktifHedef]=useState(null);      // 🎯 seçili admin hedef bölgesi (null = kendi kalelerim)
+  const [acikGorev,setAcikGorev]=useState(null);        // 📋 açık görev id (durak listesi)
   const [kesifYuk,setKesifYuk]=useState(false);         // 🧭 taranıyor mu
   const [rotaSecim,setRotaSecim]=useState({});          // 🗺️ rotaya seçilen adaylar (ad -> true)
   const [kesifYon,setKesifYon]=useState(null);          // 🧭 seçili yayılma hattı (null = tümü, 0-7 = yön)
@@ -3538,20 +3539,46 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const ara=sirali.slice(0,-1).map(p=>p.lat+","+p.lng).join("|");
     window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+hedef.lat+","+hedef.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank");
   }
-  // 🎯 bu pazarlamacıya açık admin hedef bölgeleri (herkese açık ya da kendisine atanmış)
+  // 🎯 bu pazarlamacıya açık admin hedefleri (herkese açık ya da kendisine atanmış)
   const benimHedefler=(hedefBolge||[]).filter(h2=>h2.lat&&h2.lng && (!h2.kullaniciId || (aktif&&h2.kullaniciId===aktif.id)))
     .slice().sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
+  const benimGorevler=benimHedefler.filter(h2=>(h2.duraklar||[]).length);   // rota/durak içeren görevler
+  const benimBolgeler=benimHedefler.filter(h2=>!(h2.duraklar||[]).length);  // duraksız serbest tarama bölgeleri
+  const gorevRotaAc=hd=>{ const d=(hd.duraklar||[]).filter(x=>x.lat&&x.lng); if(!d.length) return; const son=d[d.length-1]; const ara=d.slice(0,-1).map(p=>p.lat+","+p.lng).join("|");
+    window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+son.lat+","+son.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank"); };
+  // 📋 pazarlamacıya verilen görevler kartı — durak listesi + rota
+  const gorevKart=()=> benimGorevler.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14,border:"1px solid #fed7aa",background:"#fffbf5"}},
+    h("div",{style:{...S.label,marginBottom:8,color:"#9a3412"}},"📋 Sana verilen görevler ("+benimGorevler.length+")"),
+    h("div",{style:{display:"grid",gap:8}},
+      benimGorevler.map(hd=>{ const dur=hd.duraklar||[]; const acik=acikGorev===hd.id;
+        return h("div",{key:hd.id,style:{border:"1px solid "+C.line,borderRadius:9,overflow:"hidden",background:"#fff"}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"9px 11px"}},
+            h("div",{onClick:()=>setAcikGorev(a=>a===hd.id?null:hd.id),style:{flex:1,minWidth:0,cursor:"pointer"}},
+              h("div",{style:{fontSize:13.5,fontWeight:800}}, "🎯 "+hd.ad),
+              h("div",{style:{fontSize:11,color:C.mut}}, dur.length+" durak"+(hd.kullaniciId?"":" · 👥 tüm ekip"))),
+            h("button",{type:"button",onClick:()=>gorevRotaAc(hd),style:{...S.ibtn,color:"#fff",background:"#16a34a",borderColor:"#16a34a",flexShrink:0,fontWeight:700}},"🗺️ Rota"),
+            h("span",{onClick:()=>setAcikGorev(a=>a===hd.id?null:hd.id),style:{fontSize:15,color:C.mut,cursor:"pointer",flexShrink:0}}, acik?"▾":"▸")),
+          acik && h("div",{style:{padding:"4px 11px 10px"}},
+            dur.map((d,i)=>{ const tel=(d.tel||"").replace(/\D/g,"");
+              return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderTop:i?"1px solid "+C.line:"none"}},
+                h("span",{style:{fontSize:12,fontWeight:800,color:"#b45309",flexShrink:0,width:20}},(i+1)+"."),
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},d.ad),
+                  (d.puanG!=null||d.tel)&&h("div",{style:{fontSize:10.5,color:C.mut}},(d.puanG!=null?("⭐"+(+d.puanG).toFixed(1)+" "):"")+(d.tel||""))),
+                d.tel && h("a",{href:"tel:"+d.tel,title:"Ara",style:{...S.ibtn,padding:"5px 8px",textDecoration:"none",flexShrink:0}},"📞"),
+                h("a",{href:"https://www.google.com/maps/search/?api=1&query="+d.lat+","+d.lng,target:"_blank",title:"Harita",style:{...S.ibtn,padding:"5px 8px",textDecoration:"none",flexShrink:0}},"🗺️"),
+                h("button",{type:"button",title:"Gözcü olarak ekle",onClick:()=>setMusEdit({ad:d.ad,lat:String(d.lat),lng:String(d.lng),telefon:d.tel||"",kesif:true}),style:{...S.ibtn,padding:"5px 8px",flexShrink:0,color:"#16a34a",borderColor:"#16a34a"}},"➕")); }))); })));
   const kesifKart=()=>h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
     h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:8,flexWrap:"wrap"}},
       h("span",{style:{fontWeight:800,fontSize:14}},"🧭 Keşif"),
       !MINIMAL && h("span",{style:{fontSize:11.5,color:C.mut}}, aktifHedef?("🎯 "+aktifHedef.ad+" bölgesinde benzer mekanlar"):"kalelerinin çevresinde benzer mekanlar")),
-    // 🎯 yönetici hedef bölgeleri — seç → o bölgede tara
-    benimHedefler.length>0 && h("div",{style:{marginBottom:10}},
+    // 🎯 yönetici serbest hedef bölgeleri — seç → o bölgede tara (görevler ayrı kartta)
+    benimBolgeler.length>0 && h("div",{style:{marginBottom:10}},
       h("div",{style:{fontSize:11,fontWeight:800,color:"#b45309",marginBottom:5}},"🎯 Yöneticinin hedef bölgeleri"),
       h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
         h("button",{type:"button",onClick:()=>{ setAktifHedef(null); setKesifSonuc(null); },
           style:{...S.ibtn,fontSize:12,fontWeight:700,...(aktifHedef==null?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}},"🏰 Kalelerim"),
-        benimHedefler.map(hd=>{ const on=aktifHedef&&aktifHedef.id===hd.id;
+        benimBolgeler.map(hd=>{ const on=aktifHedef&&aktifHedef.id===hd.id;
           return h("button",{key:hd.id,type:"button",onClick:()=>{ setAktifHedef(hd); setKesifSonuc(null); kesifTara(hd); },
             title:(hd.bolge?hd.bolge+" · ":"")+(hd.r?hd.r+" km":"")+(hd.kullaniciId?" · sana atandı":" · tüm ekip"),
             style:{...S.ibtn,fontSize:12,fontWeight:700,...(on?{background:"#b45309",color:"#fff",borderColor:"#b45309"}:{borderColor:"#fed7aa",color:"#9a3412"})}},
@@ -3616,6 +3643,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     return h("div",null,
     !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"🔭 Gözcü — bilgisini aldığın ama henüz satış yapmadığın kişi ve mekanlar. Haritada 🔭 ile görünür; satış/konsinye yapınca kaleye dönüşüp Kaleler sekmesine geçer."),
       h("button",{style:{...S.btn("p"),marginBottom:14},onClick:()=>setMusEdit({})},"+ Gözcü ekle"),
+      gorevKart(),
       kesifKart(),
       (gozculer.length>0||haritaliKale.length>0||digerKaleler.length>0||(kesifFiltre&&kesifFiltre.length>0)) && h("div",{style:{marginBottom:14}},
         h(FetihHarita,{kaleler:haritaliKale,hedefler:haritaHedef,gozculer,digerKaleler,kesifler:kesifFiltre||[],
@@ -3967,6 +3995,90 @@ function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, plan, onKapat }){
       h("button",{style:{...S.btn("p"),width:"100%",marginTop:10},onClick:ekle},"+ Ekle")));
 }
 
+// 🗺️ HEDEF HARİTA — admin haritada alan çizer → içi taranır → mekan seç → rota → pazarlamacıya GÖREV
+function HedefHarita({ kullanicilar, onKaydet }){
+  const ref=useRef(null), mapRef=useRef(null), cizLg=useRef(null), sonucLg=useRef(null);
+  const [kose,setKose]=useState([]);       // alan köşeleri [[lat,lng]]
+  const [sonuc,setSonuc]=useState([]);     // alandaki mekanlar
+  const [secili,setSecili]=useState({});   // ad -> true
+  const [kat,setKat]=useState(KESIF_KAT.map(c=>c.k));
+  const [yuk,setYuk]=useState(false);
+  const [ad,setAd]=useState(""); const [kime,setKime]=useState("");
+  useEffect(()=>{ if(!window.L||!ref.current||mapRef.current) return; const L=window.L;
+    const map=L.map(ref.current,{scrollWheelZoom:true,attributionControl:false}).setView([41.02,29.03],12);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
+    cizLg.current=L.layerGroup().addTo(map); sonucLg.current=L.layerGroup().addTo(map);
+    map.on("click",e=>setKose(k=>[...k,[+e.latlng.lat.toFixed(6),+e.latlng.lng.toFixed(6)]]));
+    mapRef.current=map; setTimeout(()=>{ try{map.invalidateSize();}catch(x){} },200);
+  },[]);
+  useEffect(()=>{ const L=window.L, lg=cizLg.current; if(!L||!lg) return; lg.clearLayers();
+    kose.forEach(p=>L.circleMarker(p,{radius:5,color:"#b45309",fillColor:"#b45309",fillOpacity:1,weight:2}).addTo(lg));
+    if(kose.length>=3) L.polygon(kose,{color:"#b45309",weight:2,fillColor:"#f59e0b",fillOpacity:0.14}).addTo(lg);
+    else if(kose.length===2) L.polyline(kose,{color:"#b45309",weight:2,dashArray:"5,5"}).addTo(lg);
+  },[kose]);
+  useEffect(()=>{ const L=window.L, lg=sonucLg.current; if(!L||!lg) return; lg.clearLayers();
+    sonuc.forEach(r=>{ const on=!!secili[r.ad];
+      const mk=L.circleMarker([+r.lat,+r.lng],{radius:on?8:6,color:on?"#16a34a":"#0369a1",fillColor:on?"#16a34a":"#fff",fillOpacity:on?1:.95,weight:2}).addTo(lg);
+      mk.bindTooltip("<b>"+r.ad+"</b>"+(r.puanG!=null?(" · ⭐"+r.puanG):""),{direction:"top"});
+      mk.on("click",()=>setSecili(s=>({...s,[r.ad]:!s[r.ad]}))); });
+  },[sonuc,secili]);
+  const merkez=()=>{ if(!kose.length) return null; return {lat:kose.reduce((s,p)=>s+p[0],0)/kose.length, lng:kose.reduce((s,p)=>s+p[1],0)/kose.length}; };
+  const yaricapKm=()=>{ const m=merkez(); if(!m) return 1; let mx=0; kose.forEach(p=>{ const d=haversineKm(m.lat,m.lng,p[0],p[1]); if(d>mx)mx=d; }); return Math.max(0.5,mx+0.2); };
+  async function tara(){ if(kose.length<3) return alert("Önce haritaya en az 3 nokta koyarak bir alan çiz.");
+    const katlar=KESIF_KAT.filter(c=>kat.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
+    const m=merkez(), mtr=Math.round(yaricapKm()*1000); setYuk(true);
+    try{ let ham=null;
+      if(GPLACES_KEY){ try{ const g=await kesifGoogle([m],katlar,mtr,GPLACES_KEY); if(g&&g.length) ham=g; }catch(e){} }
+      if(!ham||!ham.length) ham=await kesifOverpass([m],katlar,mtr);
+      const gor=new Set(), tk=[];
+      (ham||[]).forEach(r=>{ if(r.lat==null||r.lng==null||!pointInPoly([+r.lat,+r.lng],kose)) return;
+        const k=(r.ad||"").toLocaleLowerCase("tr"); if(!k||gor.has(k)) return; gor.add(k); tk.push(r); });
+      setSonuc(tk); if(!tk.length) alert("Bu alanda mekan bulunamadı — alanı büyüt ya da kategori ekle.");
+    }catch(e){ alert("Tarama yapılamadı: "+(e.message||e)); }
+    setYuk(false);
+  }
+  const secList=()=>sonuc.filter(r=>secili[r.ad]);
+  function rotaSirala(list){ if(list.length<2) return list.slice(); const kalan=list.slice(); const m=merkez(); let cur={lat:m.lat,lng:m.lng}; const out=[];
+    while(kalan.length){ let bi=0,bd=Infinity; kalan.forEach((p,i)=>{ const d=haversineKm(cur.lat,cur.lng,+p.lat,+p.lng); if(d<bd){bd=d;bi=i;} }); const n=kalan.splice(bi,1)[0]; out.push(n); cur={lat:+n.lat,lng:+n.lng}; } return out; }
+  function rotaAc(){ const list=rotaSirala(secList()).slice(0,10); if(!list.length) return alert("Rota için mekan seç."); const hd=list[list.length-1]; const ara=list.slice(0,-1).map(p=>p.lat+","+p.lng).join("|");
+    window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+hd.lat+","+hd.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank"); }
+  async function gorevVer(){ const list=rotaSirala(secList()); if(!list.length) return alert("Görev için en az bir mekan seç."); if(!ad.trim()) return alert("Görev adı gir.");
+    const m=merkez();
+    await onKaydet({ ad:ad.trim(), poly:kose.map(p=>({lat:p[0],lng:p[1]})), lat:String(m.lat), lng:String(m.lng), r:yaricapKm(),
+      duraklar:list.map(r=>({ad:r.ad,lat:String(r.lat),lng:String(r.lng),tel:r.tel||"",puanG:r.puanG!=null?r.puanG:null,kat:r.kat||""})), kullaniciId:kime });
+    setKose([]); setSonuc([]); setSecili({}); setAd(""); }
+  const secSay=secList().length;
+  return h("div",null,
+    h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
+      KESIF_KAT.map(c=>{ const on=kat.includes(c.k);
+        return h("button",{key:c.k,type:"button",onClick:()=>setKat(s=>on?s.filter(x=>x!==c.k):[...s,c.k]),
+          style:{...S.ibtn,fontSize:12,fontWeight:700,...(on?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}},c.ik+" "+c.ad); })),
+    h("div",{style:{fontSize:11.5,color:"#64748b",marginBottom:6}},"🖊️ Haritaya dokunarak alan köşelerini işaretle (en az 3). Sonra '🔍 Alanı tara' de — içindeki mekanlar gelir."),
+    h("div",{ref,style:{height:400,borderRadius:12,overflow:"hidden",border:"1px solid "+C.line,marginBottom:8}}),
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}},
+      h("button",{type:"button",onClick:()=>{setKose([]);setSonuc([]);setSecili({});},style:{...S.btn(),fontSize:12.5}},"🗑 Temizle ("+kose.length+" nokta)"),
+      h("button",{type:"button",disabled:yuk,onClick:tara,style:{...S.btn("p"),flex:1,minWidth:140}},yuk?"⏳ Taranıyor…":"🔍 Alanı tara")),
+    sonuc.length>0 && h(React.Fragment,null,
+      h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:6}},
+        h("div",{style:{...S.label}},"📍 "+sonuc.length+" mekan · "+secSay+" seçili"),
+        secSay>0 && h("button",{type:"button",onClick:rotaAc,style:{...S.ibtn,color:"#0369a1",borderColor:"#0369a1",fontWeight:700}},"🗺️ Rota önizle")),
+      h("div",{style:{display:"grid",gap:6,maxHeight:240,overflowY:"auto",marginBottom:12}},
+        sonuc.map((r,i)=>{ const on=!!secili[r.ad]; const c=KESIF_KAT.find(x=>x.k===r.kat);
+          return h("div",{key:i,onClick:()=>setSecili(s=>({...s,[r.ad]:!s[r.ad]})),style:{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",border:"1px solid "+(on?"#16a34a":C.line),background:on?"#f0fdf4":"#fff",borderRadius:8,cursor:"pointer"}},
+            h("input",{type:"checkbox",checked:on,readOnly:true,style:{flexShrink:0,width:15,height:15,pointerEvents:"none"}}),
+            h("span",{style:{fontSize:15,flexShrink:0}},c?c.ik:"📍"),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.ad),
+              h("div",{style:{fontSize:10.5,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (r.puanG!=null?("⭐"+r.puanG.toFixed(1)+" · "):"")+(r.tel?("☎ "+r.tel):(c?c.ad:""))))); })),
+      h("div",{style:{...S.card,padding:"12px 14px",background:"#fffbf5",border:"1px solid #fed7aa"}},
+        h("div",{style:{...S.label,marginBottom:8,color:"#9a3412"}},"📋 Görev olarak ver — "+secSay+" durak"),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
+          h("input",{style:S.input,value:ad,onChange:e=>setAd(e.target.value),placeholder:"Görev adı (örn. Beylerbeyi turu)"}),
+          h("select",{style:S.input,value:kime,onChange:e=>setKime(e.target.value)},
+            h("option",{value:""},"👥 Tüm ekip"), (kullanicilar||[]).filter(u=>u.rol!=="admin").map(u=>h("option",{key:u.id,value:u.id},u.ad)))),
+        h("button",{type:"button",onClick:gorevVer,style:{...S.btn("p"),width:"100%",background:"#b45309",borderColor:"#b45309"}},"📋 Görevi ver ("+secSay+" durak)"))));
+}
+
 /* ============================================================
    📊 PAZARLAMA TAKİP — admin izleme paneli (pazarlamacı sayfasından bağımsız)
    Pazarlamacıların hareketleri, satış/konsinye, ürün yerleri, müşteriler,
@@ -4188,35 +4300,31 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
         (x.m.lat&&x.m.lng)? h("a",{href:"https://www.google.com/maps/search/?api=1&query="+x.m.lat+","+x.m.lng,target:"_blank",style:{color:"#0369a1",fontWeight:800,textDecoration:"none"}},"🗺️"):"—"]),
       "Müşteri yok."));
 
-  // —— 🎯 HEDEF BÖLGELER — yönetici pazarlamacılara keşif hedefi belirler ——
-  async function hedefEkle(){ if(!hedefF.ad.trim()) return alert("Hedef bölge adı gir (örn. Kadıköy sahili).");
-    if(!(hedefF.lat&&hedefF.lng)) return alert("Konum seç — mekan/semt ara ya da haritadan iğnele.");
-    const atn=(kullanicilar||[]).find(u=>u.id===hedefF.kullaniciId);
-    await save("hedef",{ ad:hedefF.ad.trim(), lat:String(hedefF.lat), lng:String(hedefF.lng), bolge:hedefF.bolge||"",
-      r:num(hedefF.r)||2, kullaniciId:hedefF.kullaniciId||"", kullaniciAd:atn?atn.ad:"", tarih:new Date().toISOString() });
-    setHedefF({ad:"",lat:"",lng:"",bolge:"",r:2,kullaniciId:""}); }
+  // —— 🎯 HEDEF/GÖREV — admin haritada alan çizer, tarar, rota kurar, pazarlamacıya görev verir ——
+  async function gorevKaydet(g){ const atn=(kullanicilar||[]).find(u=>u.id===g.kullaniciId);
+    await save("hedef",{ tip:"gorev", ad:g.ad, lat:g.lat, lng:g.lng, r:num(g.r)||2, poly:g.poly||[], duraklar:g.duraklar||[],
+      kullaniciId:g.kullaniciId||"", kullaniciAd:atn?atn.ad:"", tarih:new Date().toISOString() });
+    alert("📋 Görev verildi: "+g.ad+" — "+(g.duraklar||[]).length+" durak"+(atn?(" → "+atn.ad):" → tüm ekip")); }
+  const gorevRotaAc=hd=>{ const d=(hd.duraklar||[]).filter(x=>x.lat&&x.lng); if(!d.length) return; const son=d[d.length-1]; const ara=d.slice(0,-1).map(p=>p.lat+","+p.lng).join("|");
+    window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+son.lat+","+son.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank"); };
   const hedefView=()=>h("div",null,
     h("div",{style:{...S.card,padding:"14px 16px",marginBottom:14}},
-      h("div",{style:{...S.label,marginBottom:10,color:"#334155"}},"🎯 Yeni hedef bölge — pazarlamacı bu bölgede kalelerine benzer yerleri keşfeder"),
-      h("div",{style:{display:"grid",gap:10}},
-        h(Field,{label:"Hedef adı"}, h("input",{style:S.input,value:hedefF.ad,onChange:e=>setHedefF(s=>({...s,ad:e.target.value})),placeholder:"örn. Kadıköy sahili"})),
-        h(Field,{label:"📍 Konum (mekan/semt ara veya haritadan iğnele)"},
-          h(KonumSec,{sade:true,ad:hedefF.ad,lat:hedefF.lat,lng:hedefF.lng,onChange:o=>setHedefF(s=>({...s,lat:o.lat,lng:o.lng,bolge:o.bolge||s.bolge,ad:s.ad||o.ad||""}))})),
-        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-          h(Field,{label:"Yarıçap"}, h("select",{style:S.input,value:hedefF.r,onChange:e=>setHedefF(s=>({...s,r:num(e.target.value)}))},[1,2,3,5,8].map(r=>h("option",{key:r,value:r},r+" km")))),
-          h(Field,{label:"Ata"}, h("select",{style:S.input,value:hedefF.kullaniciId,onChange:e=>setHedefF(s=>({...s,kullaniciId:e.target.value}))},
-            h("option",{value:""},"👥 Tüm ekip"), pazarlamacilar.map(u=>h("option",{key:u.id,value:u.id},u.ad))))),
-        h("button",{style:{...S.btn("p"),background:"#b45309",borderColor:"#b45309"},onClick:hedefEkle},"🎯 Hedef bölge ekle"))),
-    h("div",{style:{...S.label,margin:"4px 2px 8px",color:"#334155"}},"📋 Tanımlı hedefler ("+(hedefBolge||[]).length+")"),
-    !(hedefBolge||[]).length ? h("div",{style:{...S.card,padding:18,color:"#64748b",textAlign:"center"}},"Henüz hedef bölge yok.")
+      h("div",{style:{...S.label,marginBottom:10,color:"#334155"}},"🗺️ Yeni görev — haritada alan çiz, tara, mekanları seç, pazarlamacıya rota olarak ver"),
+      h(HedefHarita,{kullanicilar,onKaydet:gorevKaydet})),
+    h("div",{style:{...S.label,margin:"4px 2px 8px",color:"#334155"}},"📋 Verilen görevler ("+(hedefBolge||[]).length+")"),
+    !(hedefBolge||[]).length ? h("div",{style:{...S.card,padding:18,color:"#64748b",textAlign:"center"}},"Henüz görev yok — yukarıda haritada alan çizip oluştur.")
     : h("div",{style:{display:"grid",gap:8}},
-        (hedefBolge||[]).slice().sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0)).map(hd=>h("div",{key:hd.id,style:{...S.card,padding:"11px 13px",display:"flex",alignItems:"center",gap:10}},
-          h("span",{style:{fontSize:20,flexShrink:0}},"🎯"),
-          h("div",{style:{flex:1,minWidth:0}},
-            h("div",{style:{fontSize:14,fontWeight:800}}, hd.ad),
-            h("div",{style:{fontSize:11.5,color:"#64748b"}}, (hd.bolge?"📍 "+hd.bolge+" · ":"")+(num(hd.r)||2)+" km · "+(hd.kullaniciId?("👤 "+(hd.kullaniciAd||kulAd(hd.kullaniciId))):"👥 tüm ekip"))),
-          (hd.lat&&hd.lng)&&h("a",{href:"https://www.google.com/maps/search/?api=1&query="+hd.lat+","+hd.lng,target:"_blank",style:{...S.ibtn,textDecoration:"none",flexShrink:0}},"🗺️"),
-          h("button",{style:{...S.ibtn,color:C.kirmiziB,borderColor:"#fecaca",flexShrink:0},onClick:()=>{if(confirm(hd.ad+" hedefi silinsin mi?"))remove("hedef",hd.id);}},"🗑")))));
+        (hedefBolge||[]).slice().sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0)).map(hd=>{ const dur=(hd.duraklar||[]);
+          return h("div",{key:hd.id,style:{...S.card,padding:"11px 13px"}},
+            h("div",{style:{display:"flex",alignItems:"center",gap:10}},
+              h("span",{style:{fontSize:20,flexShrink:0}},"🎯"),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:14,fontWeight:800}}, hd.ad),
+                h("div",{style:{fontSize:11.5,color:"#64748b"}}, (dur.length?(dur.length+" durak · "):((num(hd.r)||2)+" km · "))+(hd.kullaniciId?("👤 "+(hd.kullaniciAd||kulAd(hd.kullaniciId))):"👥 tüm ekip")+" · "+fmtTarih(new Date(hd.tarih||Date.now()).getTime()))),
+              dur.length>0 && h("button",{style:{...S.ibtn,color:"#0369a1",borderColor:"#0369a1",flexShrink:0,fontWeight:700},onClick:()=>gorevRotaAc(hd)},"🗺️ Rota"),
+              h("button",{style:{...S.ibtn,color:C.kirmiziB,borderColor:"#fecaca",flexShrink:0},onClick:()=>{if(confirm(hd.ad+" görevi silinsin mi?"))remove("hedef",hd.id);}},"🗑")),
+            dur.length>0 && h("div",{style:{fontSize:11.5,color:"#475569",marginTop:6,paddingLeft:30,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+              dur.map((d,i)=>(i+1)+". "+d.ad).join("  →  "))); })));
 
   const hareketView=()=>{ const hLog=pHar.filter(x=>(!seciliPaz||x.kullaniciId===seciliPaz)&&(!hTip||x.tip===hTip)).slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
     return h("div",null,
