@@ -865,9 +865,37 @@ function SatisDagilimModal({ urun, dagilim, workshopSat, onIade, onKapat }){
       h("button",{style:{...S.btn(),width:"100%",borderColor:"#0369a1",color:"#0369a1",fontWeight:800},onClick:async()=>{await onIade(num(n));onKapat();}},"↩ Stoğa iade")));
 }
 
+// 🕘 ÜRÜN STOK GEÇMİŞİ — bu ürün ne zaman nereye gitti: çantaya alındı / satıldı / konsinye / iade + üretim baskıları
+function UrunGecmisModal({ urun, hareketler, plan, onKapat }){
+  const TIP={ al:{ik:"🎒",ad:"Çantaya alındı",renk:"#0e7490"}, satis:{ik:"💰",ad:"Satıldı",renk:"#047857"},
+    konsinye:{ik:"🏬",ad:"Konsinyeye bırakıldı",renk:"#7c3aed"}, iade:{ik:"↩",ad:"İade / geri döndü",renk:"#b45309"},
+    stant:{ik:"🎪",ad:"Stant",renk:"#9333ea"}, basim:{ik:"🖨",ad:"Baskı / üretim",renk:"#0369a1"} };
+  const olaylar=[];
+  (hareketler||[]).filter(x=>x.urunId===urun.id && TIP[x.tip]).forEach(x=>olaylar.push({
+    t:new Date(x.tarih).getTime(), tip:x.tip, adet:num(x.adet), yer:x.yer||"",
+    paz:x.kullaniciAd||"", kaynak:x.kaynak||"", gerilla:!!x.gerilla }));
+  (plan||[]).filter(p=>p.urunId===urun.id).forEach(p=>{ const s=new Date(p.baslangic).getTime(), e=s+num(p.sureDk)*60000, now=Date.now();
+    olaylar.push({ t:s, tip:"basim", adet:num(p.adet||1), yer:"", durum: p.basladi?(e<=now?"bitti":"basımda"):(s>now?"planlı":"onay bekliyor") }); });
+  olaylar.sort((a,b)=>b.t-a.t);
+  const sayac={}; olaylar.forEach(o=>sayac[o.tip]=(sayac[o.tip]||0)+o.adet);
+  return h(Modal,{ baslik:"🕘 Stok geçmişi · "+(urun.ad||""), onKapat, alt:h("button",{style:{...S.btn("p"),flex:1},onClick:onKapat},"Kapat") },
+    h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}},
+      ["basim","al","satis","konsinye","iade"].filter(k=>sayac[k]).map(k=>h("span",{key:k,style:{fontSize:11.5,fontWeight:700,color:TIP[k].renk,background:"#f8fafc",border:"1px solid "+C.line,borderRadius:7,padding:"3px 8px"}}, TIP[k].ik+" "+TIP[k].ad+": "+sayac[k]))),
+    !olaylar.length ? h("div",{style:{...S.card,padding:20,textAlign:"center",color:C.mut}},"Bu ürün için hareket kaydı yok.")
+    : h("div",{style:{display:"grid",gap:7,maxHeight:"60vh",overflowY:"auto"}},
+        olaylar.map((o,i)=>{ const t=TIP[o.tip];
+          return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",border:"1px solid "+C.line,borderLeft:"3px solid "+t.renk,borderRadius:9,background:"#fff"}},
+            h("span",{style:{fontSize:18,flexShrink:0}},t.ik),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:13,fontWeight:800}}, t.ad+" · "+o.adet+" adet"+(o.tip==="satis"&&o.kaynak==="konsinye"?" (konsinyeden)":"")+(o.gerilla?" ⚡":"")),
+              h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                fmtTarihSaat(o.t)+(o.yer?(" · 📍 "+o.yer):"")+(o.paz?(" · 👤 "+o.paz):"")+(o.tip==="basim"&&o.durum?(" · "+o.durum):"")))); })));
+}
+
 function StokTab({ urunler, plan, filamentler, hareketler }){
   const [edit,setEdit]=useState(null);
   const [aks,setAks]=useState(null);   // kutucuk komut penceresi {u,stage}
+  const [gecmis,setGecmis]=useState(null);   // 🕘 ürün stok geçmişi modalı
   const [acik,setAcik]=useState({});   // ürün kartında baskı listesi açık mı
   const [projAcik,setProjAcik]=useState({});   // teslim planı ayrıntısı açık mı
   const liste = urunler.slice().sort((a,b)=>a.ad.localeCompare(b.ad,"tr"));
@@ -1177,6 +1205,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
                   m ? h("span",null, m.v.toFixed(2)+" ₺/adet",
                         m.elle?h("span",{style:{marginLeft:4,fontSize:9,fontWeight:700,color:"#92400e",background:"#fde68a",borderRadius:4,padding:"0 4px"}},"elle"):null)
                     : h("span",null,"maliyet yok"))),
+              h("button",{style:{...S.ibtn,padding:"6px 9px"},title:"Stok geçmişi — ne zaman nereye gitti",onClick:()=>setGecmis(u)},"🕘"),
               h("button",{style:{...S.ibtn,padding:"6px 9px"},title:"Düzenle",onClick:()=>setEdit(u)},"✎"),
               h("button",{style:{...S.ibtn,padding:"6px 9px",color:C.kirmiziB,borderColor:C.kirmiziB},title:"Sil",onClick:()=>{if(confirm(u.ad+" silinsin mi?"))remove("stok_urun",u.id);}},"🗑")),
             u.not && h("div",{style:{fontSize:11.5,color:C.mut,background:"#f8fafc",borderRadius:7,padding:"5px 8px"}},u.not),
@@ -1251,6 +1280,7 @@ function StokTab({ urunler, plan, filamentler, hareketler }){
                         h("div",{style:{fontSize:10.5,color:C.mut}}, fmtTarihSaat(st)+(num(p.gram)?" · "+num(p.gram)+" gr":"")+(p.ams?" · AMS":""))),
                       h("span",{style:{flexShrink:0,fontSize:10.5,fontWeight:800,color:d.c,background:"#f8fafc",borderRadius:6,padding:"2px 7px"}},d.t)); }))); })());
         }))),
+    gecmis && h(UrunGecmisModal,{urun:gecmis, hareketler, plan, onKapat:()=>setGecmis(null)}),
     edit && h(StokModal,{kayit:edit, otoMaliyet:(edit.id?(()=>{ const d=urunDetay(edit); return d?d.maliyet:0; })():0), onKapat:()=>setEdit(null)}),
     aks && aks.stage==="konsinye" && h(KonsinyeDagilimModal,{urun:aks.u, dagilim:konsSaha[aks.u.id], workshopKons:num(aks.u.konsinye),
       onIade:(n)=>konsinyedenCikar(aks.u,n,"stokta"), onSatildi:(n)=>konsinyedenCikar(aks.u,n,"satildi"), onKapat:()=>setAks(null)}),
@@ -2464,6 +2494,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [toptanYuk,setToptanYuk]=useState(false);
   const [musteriBag,setMusteriBag]=useState(null);
   const [rapor,setRapor]=useState(null);
+  const [acikOde,setAcikOde]=useState(null);  // 🏭 üretici ödemesi detayı açık sefer id
   const [duzen,setDuzen]=useState(null);      // ürün görsel/bilgi
   const [musEdit,setMusEdit]=useState(null);  // müşteri (kale) ekle/düzenle
   const [arsivAcik,setArsivAcik]=useState(false);
@@ -3636,6 +3667,17 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const bekleyenTop=bekleyenUretici.reduce((s,o)=>s+o.borc,0);
   async function ureticiOnayla(o){ if(!confirm("🏭 "+fmtTarih(new Date(o.s.bitis||o.s.baslangic).getTime())+" seferi için üreticiye "+tl(o.borc)+" ödendi olarak onaylansın mı?")) return;
     await save("sefer",{id:o.s.id,ureticiOdendi:true,ureticiOdenen:o.borc,ureticiOdemeTarih:new Date().toISOString()}); }
+  // üreticiye YAPILMIŞ ödemeler (tane tane, tarih sırası) + her ödemenin ürün dökümü
+  const odenenUretici=(seferler||[]).filter(s=>s.durum==="kapali"&&s.ureticiOdendi&&benimSeferMi(s))
+    .map(s=>({s,tutar:num(s.ureticiOdenen)||seferUreticiBorc(s.id),tarih:s.ureticiOdemeTarih||s.bitis}))
+    .sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
+  const odenenTop=odenenUretici.reduce((s,o)=>s+o.tutar,0);
+  const seferUreticiKalem=(sid)=>{ const m={};   // o seferde satılan malın üreticiye ait alış bedeli, ürün bazında
+    (hareketler||[]).filter(x=>x.seferId===sid&&x.tip==="satis").forEach(x=>{ const k=x.urunId||x.urunAd;
+      const o=m[k]||(m[k]={urun:x.urunAd||"?",adet:0,tutar:0}); o.adet+=num(x.adet); o.tutar+=num(x.adet)*num(x.alisFiyat); });
+    return Object.values(m).sort((a,b)=>b.tutar-a.tutar); };
+  async function ureticiOdemeGeriAl(sid){ if(!confirm("Bu üretici ödemesinin onayı geri alınsın mı? (Bekleyene döner)")) return;
+    await save("sefer",{id:sid,ureticiOdendi:false,ureticiOdenen:0,ureticiOdemeTarih:""}); }
   const raporView=()=>{ const v=raporVeri();
     return h("div",null,
     !MINIMAL && h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"📊 Raporlar — tarih + dönem seç, PDF indir ya da WhatsApp'tan gönder. (Çantaya al/iade dahil değildir.)"),
@@ -3649,6 +3691,27 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
           h("button",{type:"button",onClick:()=>setRapor(o.s.id),style:{...S.btn(),padding:"6px 10px",fontSize:12}},"rapor"),
           h("button",{type:"button",onClick:()=>ureticiOnayla(o),style:{...S.btn("p"),padding:"6px 12px",fontSize:12,background:"#b45309",borderColor:"#b45309"}},"✓ Ödedim")))),
       h("div",{style:{fontSize:11,color:"#9a3412",marginTop:8}},"O an ödemediysen sonradan buradan onaylayabilirsin.")),
+    // —— 🏭 üreticiye YAPILMIŞ ödemeler (tane tane, tarih + detay) ——
+    odenenUretici.length>0 && h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12}},
+      h("div",{style:{...S.label,marginBottom:8}},"🏭 Üreticiye yaptığın ödemeler — "+odenenUretici.length+" ödeme · toplam "+tl(odenenTop)),
+      h("div",{style:{display:"grid",gap:8}},
+        odenenUretici.map(o=>{ const acik=acikOde===o.s.id; const kalem=acik?seferUreticiKalem(o.s.id):[];
+          return h("div",{key:o.s.id,style:{border:"1px solid "+C.line,borderRadius:9,overflow:"hidden"}},
+            h("div",{onClick:()=>setAcikOde(a=>a===o.s.id?null:o.s.id),style:{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",cursor:"pointer",background:"#f0fdf4"}},
+              h("span",{style:{fontSize:16}},"✓"),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:13.5,fontWeight:800,color:"#047857"}}, tl(o.tutar)+" ödendi"),
+                h("div",{style:{fontSize:11,color:C.mut}}, "📅 "+fmtTarihSaat(new Date(o.tarih).getTime())+" · "+fmtTarih(new Date(o.s.bitis||o.s.baslangic).getTime())+" seferi")),
+              h("span",{style:{fontSize:15,color:C.mut}}, acik?"▾":"▸")),
+            acik && h("div",{style:{padding:"8px 11px",background:"#fff"}},
+              kalem.length? h("div",{style:{display:"grid",gap:4}},
+                kalem.map((it,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:8,fontSize:12.5,padding:"3px 0",borderTop:i?"1px solid "+C.line:"none"}},
+                  h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, it.adet+" × "+it.urun),
+                  h("span",{style:{flexShrink:0,fontWeight:700,color:"#b45309"}}, tl(it.tutar)))))
+                : h("div",{style:{fontSize:12,color:C.mut}},"Bu seferde üreticiye ait satış kalemi yok."),
+              h("div",{style:{display:"flex",gap:8,marginTop:8}},
+                h("button",{type:"button",onClick:()=>setRapor(o.s.id),style:{...S.btn(),flex:1,padding:"6px 10px",fontSize:12}},"🧭 Seferin raporu"),
+                h("button",{type:"button",onClick:()=>ureticiOdemeGeriAl(o.s.id),style:{...S.btn(),padding:"6px 10px",fontSize:12,borderColor:"#b45309",color:"#b45309"}},"↩ Geri al")))); }))),
       h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8,alignItems:"center"}},
         h("span",{style:{fontSize:12.5,fontWeight:700}},"Tarih:"),
         h("input",{type:"date",style:{...S.input,width:160},value:rapTarih,onChange:e=>setRapTarih(e.target.value)})),
@@ -3863,6 +3926,7 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
   const [rapBit,setRapBit]=useState("");
   const [seciliPaz,setSeciliPaz]=useState("");   // hareket dökümü filtresi
   const [hTip,setHTip]=useState("");
+  const [acikOde,setAcikOde]=useState(null);     // 🏭 üretici ödemesi detayı açık sefer id
 
   const H=(hareketler||[]);
   const G=864e5;
@@ -3929,6 +3993,14 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
   const uBekleyenTop=ureticiOdeme.reduce((s,o)=>s+o.bekleyen,0);
   const uOdenenTop=ureticiOdeme.reduce((s,o)=>s+o.odenen,0);
   const uBekSeferTop=ureticiOdeme.reduce((s,o)=>s+o.bekSayi,0);
+  // 🏭 YAPILMIŞ üretici ödemeleri — tüm pazarlamacılar, tane tane, tarih sırası + ürün dökümü
+  const ureticiOdemeler=kapananSeferler.filter(s=>s.ureticiOdendi)
+    .map(s=>({s,paz:s.kullaniciAd||kulAd(s.kullaniciId),tutar:num(s.ureticiOdenen)||seferUreticiBorc(s.id),tarih:s.ureticiOdemeTarih||s.bitis}))
+    .filter(o=>o.tutar>0).sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
+  const seferKalem=(sid)=>{ const m={};
+    H.filter(x=>x.seferId===sid&&x.tip==="satis").forEach(x=>{ const k=x.urunId||x.urunAd;
+      const o=m[k]||(m[k]={urun:x.urunAd||"?",adet:0,tutar:0}); o.adet+=num(x.adet); o.tutar+=num(x.adet)*num(x.alisFiyat); });
+    return Object.values(m).sort((a,b)=>b.tutar-a.tutar); };
 
   // —— müşteri bilgileri ——
   const musBilgi=(musteriler||[]).filter(m=>!m.arsiv).map(m=>{ const hs=H.filter(x=>x.musteriId===m.id||x.yer===m.ad);
@@ -4018,7 +4090,25 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
     Tablo([{t:"Pazarlamacı",b:1},{t:"Toplam borç",r:1},{t:"✓ Ödenen (onaylı)",r:1},{t:"Kalan",r:1}],
       verecek.map(v=>[(v.u.simge||"👤")+" "+v.u.ad,tl(v.borc),v.odenen>0?tl(v.odenen):"—",
         h("b",{style:{color:v.kalanNet>0.5?"#b45309":"#047857"}}, v.kalanNet>0.5?tl(v.kalanNet):"✓ kapandı")]),
-      "Kayıt yok."));
+      "Kayıt yok."),
+    // —— 🏭 üreticiye YAPILMIŞ ödemeler — tane tane, tarih + detay ——
+    h("div",{style:{...S.label,margin:"18px 2px 8px",color:"#334155"}},"🏭 Üreticiye yapılan ödemeler — "+ureticiOdemeler.length+" ödeme · toplam "+tl(ureticiOdemeler.reduce((s,o)=>s+o.tutar,0))),
+    !ureticiOdemeler.length ? h("div",{style:{...S.card,padding:16,color:"#64748b",textAlign:"center"}},"Henüz onaylanmış üretici ödemesi yok.")
+    : h("div",{style:{display:"grid",gap:8}},
+        ureticiOdemeler.map(o=>{ const acik=acikOde===o.s.id; const kalem=acik?seferKalem(o.s.id):[];
+          return h("div",{key:o.s.id,style:{...S.card,padding:0,overflow:"hidden"}},
+            h("div",{onClick:()=>setAcikOde(a=>a===o.s.id?null:o.s.id),style:{display:"flex",alignItems:"center",gap:10,padding:"10px 13px",cursor:"pointer"}},
+              h("span",{style:{fontSize:17}},"✓"),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:14,fontWeight:800,color:"#047857"}}, tl(o.tutar)+" · "+(o.paz||"—")),
+                h("div",{style:{fontSize:11.5,color:"#64748b"}}, "📅 "+fmtTarihSaat(new Date(o.tarih).getTime())+" · "+fmtTarih(new Date(o.s.bitis||o.s.baslangic).getTime())+" seferi")),
+              h("span",{style:{fontSize:15,color:"#94a3b8"}}, acik?"▾":"▸")),
+            acik && h("div",{style:{padding:"8px 13px 12px",borderTop:"1px solid "+C.line,background:"#fcfdfe"}},
+              kalem.length? kalem.map((it,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,padding:"4px 0",borderTop:i?"1px solid #eef2f7":"none"}},
+                h("span",null, it.adet+" × "+it.urun),
+                h("span",{style:{fontWeight:700,color:"#b45309"}}, tl(it.tutar))))
+                : h("div",{style:{fontSize:12.5,color:"#64748b"}},"Bu seferde üreticiye ait satış kalemi yok."))); }))
+  );
 
   const musView=()=>h("div",null,
     h("div",{style:{...S.label,margin:"4px 2px 8px",color:"#334155"}},"🗺️ Müşteriler — "+musBilgi.length+" mekan"),
