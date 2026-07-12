@@ -3451,21 +3451,24 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const katlar=KESIF_KAT.filter(c=>kesifSec.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
     const gKey=(AY.googleKey||"").trim();
     const rKm=(hedefNokta && num(hedefNokta.r)>0)?num(hedefNokta.r):kesifR;   // hedef bölgenin yarıçapı varsa onu kullan
+    const mtr=Math.round(rKm*1000);
     setKesifYuk(true);
     try{
-      const ham = gKey
-        ? await kesifGoogle(merkez,katlar,Math.round(rKm*1000),gKey)
-        : await kesifOverpass(merkez,katlar,Math.round(rKm*1000));
+      let ham=null, kaynak="osm", googleHata="";
+      // Google anahtarı varsa önce onu dene; tarayıcıdan reddedilir/boş dönerse SESSİZCE OSM'ye düş (keşif hiç durmasın)
+      if(gKey){ try{ const g=await kesifGoogle(merkez,katlar,mtr,gKey); if(g&&g.length){ ham=g; kaynak="google"; } }
+        catch(e){ googleHata=e.message||String(e); } }
+      if(!ham || !ham.length){ ham=await kesifOverpass(merkez,katlar,mtr); kaynak="osm"; }
       const mevcutNokta=[...(musteriler||[]).filter(m=>m.lat&&m.lng), ...konumluKaleler];
-      const temiz=ham
+      const temiz=(ham||[])
         .filter(r=> r.lat!=null && r.lng!=null && !mevcutAdSet.has(adNorm(r.ad)) && !mevcutNokta.some(m=>haversineKm(r.lat,r.lng,+m.lat,+m.lng)<0.06))
         .map(r=>{ let mn=Infinity,yakin=null; konumluKaleler.forEach(k=>{ const d=haversineKm(r.lat,r.lng,+k.lat,+k.lng); if(d<mn){ mn=d; yakin=k; } });
           return {ad:r.ad, lat:r.lat, lng:r.lng, kat:r.kat, tel:r.tel||"", saat:r.saat||"", web:r.web||"", puanG:(r.puanG!=null?r.puanG:null), yorum:num(r.yorum), mesafe:mn===Infinity?null:mn, yakinAd:yakin?yakin.ad:"", yakinBolge:(yakin&&yakin.bolge)||""}; })
         .sort((a,b)=>(a.mesafe!=null?a.mesafe:9e9)-(b.mesafe!=null?b.mesafe:9e9)).slice(0,60);
       setKesifSonuc(temiz);
-      // 💾 önbellek — sekme her açıldığında son tarama hazır gelsin
-      if(aktif) save("kesif_cache",{id:aktif.id,sonuc:temiz,tarih:new Date().toISOString(),kaynak:gKey?"google":"osm"});
-    }catch(e){ alert((AY.googleKey?"Google Keşif hatası: "+(e.message||e)+"\n\nAnahtarı, 'Places API (New)' etkin mi ve faturalandırma açık mı diye kontrol et.":"Keşif yapılamadı — harita sunucusu yoğun olabilir, birazdan tekrar dene.")); }
+      if(aktif) save("kesif_cache",{id:aktif.id,sonuc:temiz,tarih:new Date().toISOString(),kaynak});
+      if(!temiz.length) alert("Bu bölgede yeni aday bulunamadı — yarıçapı büyüt ya da kategori ekle."+(googleHata?("\n\n(Google reddetti, OSM denendi: "+googleHata+" — anahtar kısıtı/SKU olabilir.)"):""));
+    }catch(e){ alert("Keşif yapılamadı — harita sunucusu yoğun olabilir, birazdan tekrar dene.\n"+(e.message||e)); }
     setKesifYuk(false);
   }
   // görünen liste: canlı tarama > önbellek; redde ve sonradan eklenen müşterilere göre süzülür
