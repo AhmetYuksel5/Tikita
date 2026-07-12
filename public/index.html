@@ -104,7 +104,7 @@ const h = React.createElement;
    böylece deneme işlemleri ana veriyi/stoğu etkilemez. 'kullanici' paylaşılır (giriş listesi). */
 let DEMO_MODE=false;
 let GPLACES_KEY="";   // ayarlardaki Google Places API (New) anahtarı — konum aramasında da kullanılır (App her render atar)
-const DEMO_COLLS=new Set(["stok_urun","plan","pazarlama_hareket","bolge","musteri","sefer","makineler","filament","ayar","kesif_red","kesif_cache","stok_hareket"]);
+const DEMO_COLLS=new Set(["stok_urun","plan","pazarlama_hareket","bolge","musteri","sefer","makineler","filament","ayar","kesif_red","kesif_cache","stok_hareket","hedef"]);
 function cn(name){ return (DEMO_MODE && DEMO_COLLS.has(name)) ? ("demo_"+name) : name; }
 // MINIMAL — sade/materyal görünüm (minimal deneme hesabı). Materyal ikon yardımcısı:
 let MINIMAL=false;
@@ -2479,7 +2479,7 @@ function KartGonderModal({ urun, musteriler, onKapat }){
             h("button",{disabled:mesgul===m.id,onClick:()=>gonder(m),style:{flexShrink:0,background:yollandi?"#e2e8f0":"#16a34a",color:yollandi?"#334155":"#fff",border:"none",borderRadius:9,padding:"8px 13px",cursor:mesgul===m.id?"default":"pointer",fontWeight:800,fontSize:13,opacity:mesgul===m.id?0.7:1}}, mesgul===m.id?"⏳ Hazırlanıyor":yollandi?"✓ Tekrar":"📲 Gönder")); })));
 }
 
-function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif, tablaUcret, ayar, kesifRed, kesifCache }){
+function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, musteriler, seferler, kullanicilar, aktif, tablaUcret, ayar, kesifRed, kesifCache, hedefBolge }){
   // ayarlanabilir eşikler / görev hedefleri (admin panelinden) — varsayılan 10/20/30, terk 40
   const AY=ayar||{};
   const esik=[Math.max(1,num(AY.tehdit1)||10), Math.max(2,num(AY.tehdit2)||20), Math.max(3,num(AY.tehdit3)||30)];
@@ -2498,6 +2498,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const [kesifKat,setKesifKat]=useState(null);          // 🧭 keşif kategorileri (null = kale adlarından otomatik)
   const [kesifR,setKesifR]=useState(2);                 // 🧭 keşif yarıçapı (km)
   const [kesifSonuc,setKesifSonuc]=useState(null);      // 🧭 son tarama sonuçları
+  const [aktifHedef,setAktifHedef]=useState(null);      // 🎯 seçili admin hedef bölgesi (null = kendi kalelerim)
   const [kesifYuk,setKesifYuk]=useState(false);         // 🧭 taranıyor mu
   const [rotaSecim,setRotaSecim]=useState({});          // 🗺️ rotaya seçilen adaylar (ad -> true)
   const [kesifYon,setKesifYon]=useState(null);          // 🧭 seçili yayılma hattı (null = tümü, 0-7 = yön)
@@ -3441,16 +3442,20 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const kesifRedSet=new Set((kesifRed||[]).map(r=>r.adNorm||adNorm(r.ad)).filter(Boolean));
   const kesifRedPts=(kesifRed||[]).filter(r=>r.lat&&r.lng);
   const mevcutAdSet=new Set(kaleler.map(k=>adNorm(k.ad)).concat((musteriler||[]).map(m=>adNorm(m.ad))).filter(Boolean));
-  async function kesifTara(){
-    const merkez=(konumluKaleler.length?konumluKaleler.slice().sort((a,b)=>b.guc-a.guc):(musteriler||[]).filter(m=>m.lat&&m.lng)).slice(0,8);
-    if(!merkez.length) return alert("Önce konumlu bir kale ya da gözcü ekle.");
+  async function kesifTara(hedefNokta){
+    // hedefNokta verildiyse (admin hedef bölgesi) o merkezde tara; yoksa kalelerin çevresinde
+    const merkez = hedefNokta && hedefNokta.lat && hedefNokta.lng
+      ? [{lat:+hedefNokta.lat, lng:+hedefNokta.lng}]
+      : (konumluKaleler.length?konumluKaleler.slice().sort((a,b)=>b.guc-a.guc):(musteriler||[]).filter(m=>m.lat&&m.lng)).slice(0,8);
+    if(!merkez.length) return alert("Önce konumlu bir kale ya da gözcü ekle — ya da yönetici bir hedef bölge belirlesin.");
     const katlar=KESIF_KAT.filter(c=>kesifSec.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
     const gKey=(AY.googleKey||"").trim();
+    const rKm=(hedefNokta && num(hedefNokta.r)>0)?num(hedefNokta.r):kesifR;   // hedef bölgenin yarıçapı varsa onu kullan
     setKesifYuk(true);
     try{
       const ham = gKey
-        ? await kesifGoogle(merkez,katlar,Math.round(kesifR*1000),gKey)
-        : await kesifOverpass(merkez,katlar,Math.round(kesifR*1000));
+        ? await kesifGoogle(merkez,katlar,Math.round(rKm*1000),gKey)
+        : await kesifOverpass(merkez,katlar,Math.round(rKm*1000));
       const mevcutNokta=[...(musteriler||[]).filter(m=>m.lat&&m.lng), ...konumluKaleler];
       const temiz=ham
         .filter(r=> r.lat!=null && r.lng!=null && !mevcutAdSet.has(adNorm(r.ad)) && !mevcutNokta.some(m=>haversineKm(r.lat,r.lng,+m.lat,+m.lng)<0.06))
@@ -3530,10 +3535,24 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const ara=sirali.slice(0,-1).map(p=>p.lat+","+p.lng).join("|");
     window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+hedef.lat+","+hedef.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank");
   }
+  // 🎯 bu pazarlamacıya açık admin hedef bölgeleri (herkese açık ya da kendisine atanmış)
+  const benimHedefler=(hedefBolge||[]).filter(h2=>h2.lat&&h2.lng && (!h2.kullaniciId || (aktif&&h2.kullaniciId===aktif.id)))
+    .slice().sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
   const kesifKart=()=>h("div",{style:{...S.card,padding:"12px 14px",marginBottom:14}},
     h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:8,flexWrap:"wrap"}},
       h("span",{style:{fontWeight:800,fontSize:14}},"🧭 Keşif"),
-      !MINIMAL && h("span",{style:{fontSize:11.5,color:C.mut}},"kalelerinin çevresinde benzer mekanlar")),
+      !MINIMAL && h("span",{style:{fontSize:11.5,color:C.mut}}, aktifHedef?("🎯 "+aktifHedef.ad+" bölgesinde benzer mekanlar"):"kalelerinin çevresinde benzer mekanlar")),
+    // 🎯 yönetici hedef bölgeleri — seç → o bölgede tara
+    benimHedefler.length>0 && h("div",{style:{marginBottom:10}},
+      h("div",{style:{fontSize:11,fontWeight:800,color:"#b45309",marginBottom:5}},"🎯 Yöneticinin hedef bölgeleri"),
+      h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+        h("button",{type:"button",onClick:()=>{ setAktifHedef(null); setKesifSonuc(null); },
+          style:{...S.ibtn,fontSize:12,fontWeight:700,...(aktifHedef==null?{background:"#0f172a",color:"#fff",borderColor:"#0f172a"}:{})}},"🏰 Kalelerim"),
+        benimHedefler.map(hd=>{ const on=aktifHedef&&aktifHedef.id===hd.id;
+          return h("button",{key:hd.id,type:"button",onClick:()=>{ setAktifHedef(hd); setKesifSonuc(null); kesifTara(hd); },
+            title:(hd.bolge?hd.bolge+" · ":"")+(hd.r?hd.r+" km":"")+(hd.kullaniciId?" · sana atandı":" · tüm ekip"),
+            style:{...S.ibtn,fontSize:12,fontWeight:700,...(on?{background:"#b45309",color:"#fff",borderColor:"#b45309"}:{borderColor:"#fed7aa",color:"#9a3412"})}},
+            "🎯 "+hd.ad+(hd.kullaniciId?"":" 👥")); }))),
     h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
       KESIF_KAT.map(c=>{ const on=kesifSec.includes(c.k);
         return h("button",{key:c.k,type:"button",onClick:()=>{ const s=new Set(kesifSec); if(on) s.delete(c.k); else s.add(c.k); setKesifKat(Array.from(s)); },
@@ -3541,7 +3560,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     h("div",{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
       h("select",{style:{...S.input,width:100},value:kesifR,onChange:e=>setKesifR(num(e.target.value))},
         [1,2,3,5].map(r=>h("option",{key:r,value:r},r+" km"))),
-      h("button",{disabled:kesifYuk,style:{...S.btn("p"),flex:1,minWidth:130},onClick:kesifTara}, kesifYuk?"⏳ Taranıyor…":(kesifListe?"🔄 Yeniden tara":"🧭 Çevreyi tara")),
+      h("button",{disabled:kesifYuk,style:{...S.btn("p"),flex:1,minWidth:130},onClick:()=>kesifTara(aktifHedef)}, kesifYuk?"⏳ Taranıyor…":(kesifListe?"🔄 Yeniden tara":(aktifHedef?("🎯 "+aktifHedef.ad+" bölgesini tara"):"🧭 Çevreyi tara"))),
       rotaSayi>0 && h("button",{style:{...S.btn(),borderColor:"#0369a1",color:"#0369a1",fontWeight:800},onClick:rotaAc},"🗺️ Rota ("+rotaSayi+")")),
     kesifListe && (kesifListe.length
       ? h(React.Fragment,null,
@@ -3950,7 +3969,7 @@ function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, plan, onKapat }){
    Pazarlamacıların hareketleri, satış/konsinye, ürün yerleri, müşteriler,
    günlük/haftalık/aylık performans, alacak/verecek — tek yerde.
    ============================================================ */
-function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferler, plan }){
+function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferler, plan, hedefBolge }){
   // 📦 bu hafta üretilmesi planlanan toplam ürün (güncel) — başlangıcı bu haftaya düşen baskılar
   const [nowPt,setNowPt]=useState(Date.now());
   useEffect(()=>{ const t=setInterval(()=>setNowPt(Date.now()),60000); return ()=>clearInterval(t); },[]);
@@ -3975,6 +3994,7 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
   const [seciliPaz,setSeciliPaz]=useState("");   // hareket dökümü filtresi
   const [hTip,setHTip]=useState("");
   const [acikOde,setAcikOde]=useState(null);     // 🏭 üretici ödemesi detayı açık sefer id
+  const [hedefF,setHedefF]=useState({ad:"",lat:"",lng:"",bolge:"",r:2,kullaniciId:""});   // 🎯 hedef bölge ekleme formu
 
   const H=(hareketler||[]);
   const G=864e5;
@@ -4165,6 +4185,36 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
         (x.m.lat&&x.m.lng)? h("a",{href:"https://www.google.com/maps/search/?api=1&query="+x.m.lat+","+x.m.lng,target:"_blank",style:{color:"#0369a1",fontWeight:800,textDecoration:"none"}},"🗺️"):"—"]),
       "Müşteri yok."));
 
+  // —— 🎯 HEDEF BÖLGELER — yönetici pazarlamacılara keşif hedefi belirler ——
+  async function hedefEkle(){ if(!hedefF.ad.trim()) return alert("Hedef bölge adı gir (örn. Kadıköy sahili).");
+    if(!(hedefF.lat&&hedefF.lng)) return alert("Konum seç — mekan/semt ara ya da haritadan iğnele.");
+    const atn=(kullanicilar||[]).find(u=>u.id===hedefF.kullaniciId);
+    await save("hedef",{ ad:hedefF.ad.trim(), lat:String(hedefF.lat), lng:String(hedefF.lng), bolge:hedefF.bolge||"",
+      r:num(hedefF.r)||2, kullaniciId:hedefF.kullaniciId||"", kullaniciAd:atn?atn.ad:"", tarih:new Date().toISOString() });
+    setHedefF({ad:"",lat:"",lng:"",bolge:"",r:2,kullaniciId:""}); }
+  const hedefView=()=>h("div",null,
+    h("div",{style:{...S.card,padding:"14px 16px",marginBottom:14}},
+      h("div",{style:{...S.label,marginBottom:10,color:"#334155"}},"🎯 Yeni hedef bölge — pazarlamacı bu bölgede kalelerine benzer yerleri keşfeder"),
+      h("div",{style:{display:"grid",gap:10}},
+        h(Field,{label:"Hedef adı"}, h("input",{style:S.input,value:hedefF.ad,onChange:e=>setHedefF(s=>({...s,ad:e.target.value})),placeholder:"örn. Kadıköy sahili"})),
+        h(Field,{label:"📍 Konum (mekan/semt ara veya haritadan iğnele)"},
+          h(KonumSec,{sade:true,ad:hedefF.ad,lat:hedefF.lat,lng:hedefF.lng,onChange:o=>setHedefF(s=>({...s,lat:o.lat,lng:o.lng,bolge:o.bolge||s.bolge,ad:s.ad||o.ad||""}))})),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+          h(Field,{label:"Yarıçap"}, h("select",{style:S.input,value:hedefF.r,onChange:e=>setHedefF(s=>({...s,r:num(e.target.value)}))},[1,2,3,5,8].map(r=>h("option",{key:r,value:r},r+" km")))),
+          h(Field,{label:"Ata"}, h("select",{style:S.input,value:hedefF.kullaniciId,onChange:e=>setHedefF(s=>({...s,kullaniciId:e.target.value}))},
+            h("option",{value:""},"👥 Tüm ekip"), pazarlamacilar.map(u=>h("option",{key:u.id,value:u.id},u.ad))))),
+        h("button",{style:{...S.btn("p"),background:"#b45309",borderColor:"#b45309"},onClick:hedefEkle},"🎯 Hedef bölge ekle"))),
+    h("div",{style:{...S.label,margin:"4px 2px 8px",color:"#334155"}},"📋 Tanımlı hedefler ("+(hedefBolge||[]).length+")"),
+    !(hedefBolge||[]).length ? h("div",{style:{...S.card,padding:18,color:"#64748b",textAlign:"center"}},"Henüz hedef bölge yok.")
+    : h("div",{style:{display:"grid",gap:8}},
+        (hedefBolge||[]).slice().sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0)).map(hd=>h("div",{key:hd.id,style:{...S.card,padding:"11px 13px",display:"flex",alignItems:"center",gap:10}},
+          h("span",{style:{fontSize:20,flexShrink:0}},"🎯"),
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:14,fontWeight:800}}, hd.ad),
+            h("div",{style:{fontSize:11.5,color:"#64748b"}}, (hd.bolge?"📍 "+hd.bolge+" · ":"")+(num(hd.r)||2)+" km · "+(hd.kullaniciId?("👤 "+(hd.kullaniciAd||kulAd(hd.kullaniciId))):"👥 tüm ekip"))),
+          (hd.lat&&hd.lng)&&h("a",{href:"https://www.google.com/maps/search/?api=1&query="+hd.lat+","+hd.lng,target:"_blank",style:{...S.ibtn,textDecoration:"none",flexShrink:0}},"🗺️"),
+          h("button",{style:{...S.ibtn,color:C.kirmiziB,borderColor:"#fecaca",flexShrink:0},onClick:()=>{if(confirm(hd.ad+" hedefi silinsin mi?"))remove("hedef",hd.id);}},"🗑")))));
+
   const hareketView=()=>{ const hLog=pHar.filter(x=>(!seciliPaz||x.kullaniciId===seciliPaz)&&(!hTip||x.tip===hTip)).slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
     return h("div",null,
       h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,alignItems:"center"}},
@@ -4183,7 +4233,7 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
     h("div",{style:{fontSize:20,fontWeight:800,color:C.navyHdr,marginBottom:3}},"📊 Pazarlama Takip"),
     h("div",{style:{fontSize:12.5,color:"#64748b",marginBottom:14}},"Pazarlamacıların hareketleri, satış & konsinye, ürün yerleri, müşteriler, performans ve alacak/verecek — tek panelde."),
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
-      [["ozet","📊 Özet"],["paz","👥 Pazarlamacılar"],["kons","🏬 Konsinye"],["alacak","💰 Alacak / Verecek"],["mus","🗺️ Müşteriler"],["hareket","📜 Hareketler"]].map(([k,ad])=>
+      [["ozet","📊 Özet"],["paz","👥 Pazarlamacılar"],["kons","🏬 Konsinye"],["alacak","💰 Alacak / Verecek"],["mus","🗺️ Müşteriler"],["hedef","🎯 Hedefler"],["hareket","📜 Hareketler"]].map(([k,ad])=>
         h("button",{key:k,onClick:()=>setAlt(k),style:{...S.btn(alt===k?"p":""),padding:"9px 15px",fontWeight:700,fontSize:13.5}},ad))),
     ["ozet","paz","hareket"].includes(alt) && donemBar,
     alt==="ozet" && ozetView(),
@@ -4191,6 +4241,7 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
     alt==="kons" && konsView(),
     alt==="alacak" && alacakView(),
     alt==="mus" && musView(),
+    alt==="hedef" && hedefView(),
     alt==="hareket" && hareketView());
 }
 
@@ -4278,6 +4329,7 @@ function App(){
   const seferler = useColl("sefer",demo);
   const kesifRed = useColl("kesif_red",demo);
   const kesifCache = useColl("kesif_cache",demo);
+  const hedefler_ = useColl("hedef",demo);   // 🎯 admin'in belirlediği keşif hedef bölgeleri
   const ayarlar = useColl("ayar",demo);
   const ayar = ayarlar.find(a=>a.id==="genel")||{};
   GPLACES_KEY=(ayar.googleKey||"").trim();   // konum araması da keşifle aynı anahtarı kullanır
@@ -4440,8 +4492,8 @@ function App(){
     ekipAcik && h(EkipModal,{kullanicilar,aktif,tablaUcret,ayar,plan,onKapat:()=>setEkipAcik(false)}),
     gorSekme==="stok" && h(StokTab,{urunler:stokUrun,plan,filamentler,hareketler:pazHareket,stokHareket}),
     gorSekme==="pazarlama" && (isAdmin
-      ? h(PazarlamaTakip,{hareketler:pazHareket,musteriler,kullanicilar,urunler:stokUrun,seferler,plan})
-      : h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret,ayar,kesifRed,kesifCache})),
+      ? h(PazarlamaTakip,{hareketler:pazHareket,musteriler,kullanicilar,urunler:stokUrun,seferler,plan,hedefBolge:hedefler_})
+      : h(OyunTab,{plan,urunler:stokUrun,hareketler:pazHareket,makineler:mlist,filamentler,bolgeler,musteriler,seferler,kullanicilar,aktif,tablaUcret,ayar,kesifRed,kesifCache,hedefBolge:hedefler_})),
     gorSekme==="plan" && !isAdmin && h(CephaneBandi,{plan,makineler:mlist,now}),
     gorSekme==="plan" && isAdmin && h("div",null,
     // başlık
