@@ -2282,13 +2282,21 @@ function pointInPoly(pt,poly){ const x=pt[1],y=pt[0]; let ic=false;
 function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, kesifler, onSec, onKesif }){
   const ref=useRef(null), mapRef=useRef(null), lgRef=useRef(null), fitRef=useRef(false);
   const [tamEkran,setTamEkran]=useState(false);
+  const [kilit,setKilit]=useState(true);   // 🔒 gömülü haritada kaydırma/zoom kapalı → sayfa scroll'u haritaya takılmaz (marker dokunuşları çalışır)
   const [zoom,setZoom]=useState(12);
+  // kilit durumu → Leaflet etkileşimleri + dokunma davranışı
+  useEffect(()=>{ const m=mapRef.current; if(!m) return;
+    const acik=!kilit||tamEkran;
+    try{ ["dragging","touchZoom","doubleClickZoom","boxZoom","keyboard"].forEach(h2=>{ if(m[h2]) acik?m[h2].enable():m[h2].disable(); }); }catch(e){}
+    if(ref.current) ref.current.style.touchAction = acik?"none":"pan-y";   // kilitliyken dikey kaydırma sayfaya gitsin
+  },[kilit,tamEkran]);
   useEffect(()=>{ const m=mapRef.current; if(!m) return; setTimeout(()=>{ try{ m.invalidateSize(); }catch(e){} },80);
     const esc=e=>{ if(e.key==="Escape") setTamEkran(false); }; window.addEventListener("keydown",esc);
     return ()=>window.removeEventListener("keydown",esc); },[tamEkran]);
   useEffect(()=>{ if(!window.L || !ref.current || mapRef.current) return;
     const L=window.L;
-    const map=L.map(ref.current,{scrollWheelZoom:false,attributionControl:false}).setView([41.02,29.06],11);
+    const map=L.map(ref.current,{scrollWheelZoom:false,attributionControl:false,dragging:false,touchZoom:false,doubleClickZoom:false,boxZoom:false,keyboard:false}).setView([41.02,29.06],11);   // kilitli başlar
+    ref.current.style.touchAction="pan-y";
     map.on("zoomend",()=>setZoom(map.getZoom()));
     // renkli modern taban (etiketsiz) — strateji oyunu tahtası hissi
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
@@ -2370,11 +2378,17 @@ function FetihHarita({ kaleler, hedefler, gozculer, digerKaleler, kesifler, onSe
     : {position:"relative"};
   return h("div",{style:sar},
     h("div",{ref,className:"tk-fetih-map",style:{height:tamEkran?"100%":320,borderRadius:tamEkran?0:12,overflow:"hidden",zIndex:0}}),
-    h("button",{onClick:()=>setTamEkran(t=>!t),title:tamEkran?"Çık":"Tam ekran",
+    h("button",{onClick:()=>setTamEkran(t=>{ const yeni=!t; setKilit(!yeni); return yeni; }),title:tamEkran?"Çık":"Tam ekran",
       style:{position:"absolute",right:12,bottom:12,zIndex:10000,width:40,height:40,borderRadius:10,cursor:"pointer",
         border:"1px solid rgba(255,255,255,.85)",background:"rgba(17,24,39,.82)",color:"#fff",fontSize:18,lineHeight:1,
         display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(15,23,42,.4)"}},
-      tamEkran?"✕":"⛶"));
+      tamEkran?"✕":"⛶"),
+    // 🔒/🖐 kaydırma kilidi — gömülü haritada sayfa scroll'u haritaya takılmasın (tam ekranda gizli, zaten serbest)
+    !tamEkran && h("button",{onClick:()=>setKilit(k=>!k),title:kilit?"Haritayı oynatmak için aç":"Haritayı kilitle (sayfa rahat kaysın)",
+      style:{position:"absolute",right:12,bottom:60,zIndex:10000,height:40,borderRadius:10,cursor:"pointer",padding:"0 12px",
+        border:"1px solid rgba(255,255,255,.85)",background:kilit?"rgba(17,24,39,.82)":"rgba(180,83,9,.92)",color:"#fff",fontSize:13,fontWeight:800,lineHeight:1,
+        display:"flex",alignItems:"center",gap:6,boxShadow:"0 2px 8px rgba(15,23,42,.4)"}},
+      kilit?"🔒 Kilitli":"🖐 Serbest"));
 }
 
 // 📲 KART GÖNDER — telefonu kayıtlı müşterilere ürünün kartını WhatsApp'tan gönder; her gönderim iletişim (diplomasi) payesine sayılır
