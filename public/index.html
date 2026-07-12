@@ -4024,16 +4024,34 @@ function HedefHarita({ kullanicilar, onKaydet }){
   },[sonuc,secili]);
   const merkez=()=>{ if(!kose.length) return null; return {lat:kose.reduce((s,p)=>s+p[0],0)/kose.length, lng:kose.reduce((s,p)=>s+p[1],0)/kose.length}; };
   const yaricapKm=()=>{ const m=merkez(); if(!m) return 1; let mx=0; kose.forEach(p=>{ const d=haversineKm(m.lat,m.lng,p[0],p[1]); if(d>mx)mx=d; }); return Math.max(0.5,mx+0.2); };
+  // alanı ızgaraya böl → her hücreyi ayrı tara (Google'ın 20-sonuç limitini aş) — hücre merkezleri + hücre yarıçapı
+  function gridMerkezler(){
+    const lats=kose.map(p=>p[0]), lngs=kose.map(p=>p[1]);
+    const laMin=Math.min.apply(null,lats), laMax=Math.max.apply(null,lats), loMin=Math.min.apply(null,lngs), loMax=Math.max.apply(null,lngs);
+    const enKm=haversineKm(laMin,loMin,laMax,loMin), boyKm=haversineKm(laMin,loMin,laMin,loMax);
+    const ny=Math.max(1,Math.min(4,Math.ceil(enKm/1.2))), nx=Math.max(1,Math.min(4,Math.ceil(boyKm/1.2)));   // ~1.2 km hücreler, en çok 4×4
+    const mrk=[];
+    for(let i=0;i<ny;i++) for(let j=0;j<nx;j++) mrk.push({lat:laMin+(laMax-laMin)*(i+0.5)/ny, lng:loMin+(loMax-loMin)*(j+0.5)/nx});
+    const cellKm=Math.max(0.6, haversineKm(laMin,loMin, laMin+(laMax-laMin)/ny, loMin+(loMax-loMin)/nx)/2 + 0.4);   // hücre köşegeninin yarısı + pay
+    return {mrk, cellKm};
+  }
   async function tara(){ if(kose.length<3) return alert("Önce haritaya en az 3 nokta koyarak bir alan çiz.");
     const katlar=KESIF_KAT.filter(c=>kat.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
-    const m=merkez(), mtr=Math.round(yaricapKm()*1000); setYuk(true);
-    try{ let ham=null;
-      if(GPLACES_KEY){ try{ const g=await kesifGoogle([m],katlar,mtr,GPLACES_KEY); if(g&&g.length) ham=g; }catch(e){} }
-      if(!ham||!ham.length) ham=await kesifOverpass([m],katlar,mtr);
-      const gor=new Set(), tk=[];
-      (ham||[]).forEach(r=>{ if(r.lat==null||r.lng==null||!pointInPoly([+r.lat,+r.lng],kose)) return;
-        const k=(r.ad||"").toLocaleLowerCase("tr"); if(!k||gor.has(k)) return; gor.add(k); tk.push(r); });
-      setSonuc(tk); if(!tk.length) alert("Bu alanda mekan bulunamadı — alanı büyüt ya da kategori ekle.");
+    const {mrk,cellKm}=gridMerkezler(); const mtr=Math.round(cellKm*1000); setYuk(true);
+    try{ let all=[];
+      // BİRLEŞİM: Google (varsa) + OSM/Overpass; alanı ızgarayla tara → çok daha fazla mekan
+      if(GPLACES_KEY){ try{ const g=await kesifGoogle(mrk,katlar,mtr,GPLACES_KEY); if(g) all=all.concat(g); }catch(e){} }
+      try{ const o=await kesifOverpass(mrk,katlar,mtr); if(o) all=all.concat(o); }catch(e){}
+      // alan içi filtre + isim/konum dedup (Google ve OSM aynı yeri iki kez döndürebilir)
+      const tut=[];
+      all.forEach(r=>{ if(r.lat==null||r.lng==null||!(r.ad||"").trim()) return;
+        if(!pointInPoly([+r.lat,+r.lng],kose)) return;
+        const ad=(r.ad||"").toLocaleLowerCase("tr").trim();
+        const dup=tut.some(g=> ((g.ad||"").toLocaleLowerCase("tr").trim()===ad) || haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04);
+        if(dup){ if(r.puanG!=null){ const ex=tut.find(g=>haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04); if(ex&&ex.puanG==null){ ex.puanG=r.puanG; ex.yorum=r.yorum; if(r.tel)ex.tel=ex.tel||r.tel; } } return; }
+        tut.push(r); });
+      tut.sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+      setSonuc(tut); if(!tut.length) alert("Bu alanda mekan bulunamadı — alanı büyüt ya da kategori ekle.");
     }catch(e){ alert("Tarama yapılamadı: "+(e.message||e)); }
     setYuk(false);
   }
