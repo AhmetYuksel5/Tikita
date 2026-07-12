@@ -2242,12 +2242,18 @@ const KESIF_KAT=[
   {k:"hediyelik", ad:"Oyuncak/Hediye", ik:"🧸", test:/oyuncak|hediyelik|gift/,                q:'["shop"~"^(toys|gift)$"]', gt:["gift_shop","toy_store"]},
 ];
 function kesifKatFromGTypes(types){ const ts=new Set(types||[]); const c=KESIF_KAT.find(x=>(x.gt||[]).some(g=>ts.has(g))); return c?c.k:"diger"; }
+// büyük market zincirleri + kurumsal kayıtlar (genel merkez/depo) — keşifte gösterme (mahalle bakkalı/marketi hedef)
+const ZINCIR_RE=/(^|[^a-zçğıöşü])(bim|bı̇m|migros|a\s?-?101|şok|sok\s?market|carrefour(sa)?|file\b|macro\s?center|metro\s?(market|gross)|tespo|hakmar|onur\s?market|happy\s?center|ekomini|beğendik|kipa|tansaş|real\b|seç\s?market|dia\b|snowy|mopaş|pehlivanoğlu|çağrı\s?market|birmar|marketpaşa|ekomax|hopi)([^a-zçğıöşü]|$)/i;
+const KURUMSAL_RE=/(genel\s?(merkez|müdürlük)|dağıtım|lojistik|depo(su)?|a\.?ş\.?\s*$|san\.?\s?ve\s?tic|holding|plaza|toptan)/i;
+function zincirMi(ad){ const t=(ad||"").trim(); if(!t) return true;
+  const n=t.toLocaleLowerCase("tr").replace(/[̇̈]/g,"").replace(/ı/g,"i");   // Türkçe İ/ı → i normalize (BİM, A101 vb. eşleşsin)
+  return ZINCIR_RE.test(n) || KURUMSAL_RE.test(n); }
 // Google Places (New) — searchNearby: kale merkezleri çevresinde mekan + puan + yorum + telefon
 async function kesifGoogle(merkezler, katlar, metre, key){
   const includedTypes=Array.from(new Set(katlar.flatMap(c=>c.gt||[])));
   const gor=new Set(), out=[];
   for(const m of merkezler){
-    const body={ includedTypes, maxResultCount:20, rankPreference:"POPULARITY",
+    const body={ includedTypes, maxResultCount:20, rankPreference:"DISTANCE",   // en yakın 20 → mahalle esnafı da gelir (POPULARITY zincirleri öne çıkarıyordu)
       locationRestriction:{ circle:{ center:{latitude:+m.lat,longitude:+m.lng}, radius:Math.min(50000,metre) } } };
     const r=await fetch("https://places.googleapis.com/v1/places:searchNearby",{method:"POST",
       headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,
@@ -3476,7 +3482,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   const kesifCacheDoc=(kesifCache||[]).find(c=>c.id===(aktif&&aktif.id));
   const kesifHamListe = kesifSonuc || (kesifCacheDoc&&kesifCacheDoc.sonuc) || null;
   const kesifGorunen = kesifHamListe ? kesifHamListe.filter(r=>
-    !kesifRedSet.has(adNorm(r.ad)) && !mevcutAdSet.has(adNorm(r.ad)) &&
+    !zincirMi(r.ad) && !kesifRedSet.has(adNorm(r.ad)) && !mevcutAdSet.has(adNorm(r.ad)) &&
     !kesifRedPts.some(m=>haversineKm(r.lat,r.lng,+m.lat,+m.lng)<0.06)) : null;
   async function kesifReddet(r){
     setKesifSonuc(s=>s?s.filter(x=>x!==r):s);
@@ -4029,10 +4035,10 @@ function HedefHarita({ kullanicilar, onKaydet }){
     const lats=kose.map(p=>p[0]), lngs=kose.map(p=>p[1]);
     const laMin=Math.min.apply(null,lats), laMax=Math.max.apply(null,lats), loMin=Math.min.apply(null,lngs), loMax=Math.max.apply(null,lngs);
     const enKm=haversineKm(laMin,loMin,laMax,loMin), boyKm=haversineKm(laMin,loMin,laMin,loMax);
-    const ny=Math.max(1,Math.min(4,Math.ceil(enKm/1.2))), nx=Math.max(1,Math.min(4,Math.ceil(boyKm/1.2)));   // ~1.2 km hücreler, en çok 4×4
+    const ny=Math.max(1,Math.min(6,Math.ceil(enKm/0.8))), nx=Math.max(1,Math.min(6,Math.ceil(boyKm/0.8)));   // ~0.8 km hücreler, en çok 6×6 → olabildiğince çok mekan
     const mrk=[];
     for(let i=0;i<ny;i++) for(let j=0;j<nx;j++) mrk.push({lat:laMin+(laMax-laMin)*(i+0.5)/ny, lng:loMin+(loMax-loMin)*(j+0.5)/nx});
-    const cellKm=Math.max(0.6, haversineKm(laMin,loMin, laMin+(laMax-laMin)/ny, loMin+(loMax-loMin)/nx)/2 + 0.4);   // hücre köşegeninin yarısı + pay
+    const cellKm=Math.max(0.5, haversineKm(laMin,loMin, laMin+(laMax-laMin)/ny, loMin+(loMax-loMin)/nx)/2 + 0.35);   // hücre köşegeninin yarısı + pay
     return {mrk, cellKm};
   }
   async function tara(){ if(kose.length<3) return alert("Önce haritaya en az 3 nokta koyarak bir alan çiz.");
@@ -4045,6 +4051,7 @@ function HedefHarita({ kullanicilar, onKaydet }){
       // alan içi filtre + isim/konum dedup (Google ve OSM aynı yeri iki kez döndürebilir)
       const tut=[];
       all.forEach(r=>{ if(r.lat==null||r.lng==null||!(r.ad||"").trim()) return;
+        if(zincirMi(r.ad)) return;   // 🚫 BİM/Migros/A101/Şok… büyük zincirleri ve kurumsal kayıtları ele
         if(!pointInPoly([+r.lat,+r.lng],kose)) return;
         const ad=(r.ad||"").toLocaleLowerCase("tr").trim();
         const dup=tut.some(g=> ((g.ad||"").toLocaleLowerCase("tr").trim()===ad) || haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04);
