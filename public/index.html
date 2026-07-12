@@ -77,7 +77,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- Google Maps (Places) — billing/anahtar hazır olunca aşağıdaki satırı aç; kod otomatik Google'a geçer.
-<script async src="https://maps.googleapis.com/maps/api/js?key=YOUR_KEY&libraries=places&language=tr&region=TR"></script>
+<!-- Google konum araması Places API (New) REST ile yapılır (Ayarlar'daki anahtar) — ölü YOUR_KEY script etiketi kaldırıldı -->
 -->
 </head>
 <body>
@@ -103,6 +103,7 @@ const h = React.createElement;
 /* ---------- DEMO MODU — demo hesabı aktifken oyun koleksiyonları 'demo_' önekine gider,
    böylece deneme işlemleri ana veriyi/stoğu etkilemez. 'kullanici' paylaşılır (giriş listesi). */
 let DEMO_MODE=false;
+let GPLACES_KEY="";   // ayarlardaki Google Places API (New) anahtarı — konum aramasında da kullanılır (App her render atar)
 const DEMO_COLLS=new Set(["stok_urun","plan","pazarlama_hareket","bolge","musteri","sefer","makineler","filament","ayar","kesif_red","kesif_cache"]);
 function cn(name){ return (DEMO_MODE && DEMO_COLLS.has(name)) ? ("demo_"+name) : name; }
 // MINIMAL — sade/materyal görünüm (minimal deneme hesabı). Materyal ikon yardımcısı:
@@ -1296,6 +1297,41 @@ function ilceOf(a){ if(!a) return ""; return a.county||a.town||a.city_district||
 const IST_VB="28.0,41.65,29.95,40.80";   // İstanbul sınır kutusu (viewbox)
 // —— Google Haritalar (Places) — anahtar/billing açıksa kullanılır; yoksa Nominatim'e düşer ——
 function gmapsHazir(){ return !!(window.google && window.google.maps && window.google.maps.places); }
+// Places API (New) METİN ARAMASI — ayarlardaki anahtar (keşifle aynı) ile REST/CORS; anahtar yoksa null → Nominatim'e düşülür
+//  Mekan ADIYLA arama Nominatim'de çoğu zaman sonuç vermiyordu; Google searchText bunu çözer (konum+ilçe de gelir, ek Details çağrısı gerekmez)
+async function placesText(t, merkez){ const key=GPLACES_KEY; if(!key) return null;
+  try{
+    const r=await fetch("https://places.googleapis.com/v1/places:searchText",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,
+        "X-Goog-FieldMask":"places.displayName,places.location,places.formattedAddress,places.addressComponents"},
+      body:JSON.stringify({textQuery:t,languageCode:"tr",regionCode:"TR",pageSize:10,
+        locationBias:{circle:{center:{latitude:(merkez&&merkez.lat)||41.0082,longitude:(merkez&&merkez.lng)||28.9784},radius:30000}}})});
+    if(!r.ok) return null;
+    const j=await r.json();
+    return (j.places||[]).map(p=>{ const comp=p.addressComponents||[]; const f=t2=>{ const c=comp.find(x=>(x.types||[]).includes(t2)); return c?(c.longText||c.shortText||""):""; };
+      return { g2:true, ad:(p.displayName&&p.displayName.text)||"", lat:p.location&&p.location.latitude, lng:p.location&&p.location.longitude,
+        tam:p.formattedAddress||"", bolge:f("administrative_area_level_2")||f("sublocality_level_1")||f("sublocality")||"" }; })
+      .filter(x=>x.ad && x.lat!=null);
+  }catch(e){ return null; }
+}
+// Overpass/OSM İSİMLE mekan arama (anahtarsız) — Nominatim POI adlarında zayıf; OSM name~regex araması dükkanları bulur
+async function overpassAdAra(t, merkez){
+  try{
+    const esc=t.replace(/[.*+?^${}()|[\]\\"]/g,"\\$&");
+    const lat=(merkez&&merkez.lat)||41.0082, lng=(merkez&&merkez.lng)||28.9784;
+    const q='[out:json][timeout:15];nwr["name"~"'+esc+'",i](around:25000,'+lat+','+lng+');out center 15;';
+    const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});
+    if(!r.ok) return null;
+    const j=await r.json(); const gor=new Set(), out=[];
+    (j.elements||[]).forEach(el=>{ const tg=el.tags||{}; const ad=tg.name; if(!ad) return;
+      const la=el.lat!=null?el.lat:(el.center&&el.center.lat), lo=el.lon!=null?el.lon:(el.center&&el.center.lon);
+      if(la==null||lo==null) return;
+      const key=el.type+"/"+el.id; if(gor.has(key)) return; gor.add(key);
+      const adres=[tg["addr:street"],tg["addr:housenumber"],tg["addr:suburb"]||tg["addr:district"],tg["addr:city"]].filter(Boolean).join(" ");
+      out.push({g2:true, ad, lat:la, lng:lo, tam:adres||("OSM · "+(tg.shop||tg.amenity||"")), bolge:tg["addr:district"]||tg["addr:suburb"]||""}); });
+    return out;
+  }catch(e){ return null; }
+}
 function ilceFromComp(comps){ if(!comps) return ""; const f=t=>{ const c=comps.find(x=>(x.types||[]).includes(t)); return c?c.long_name:""; };
   return f("administrative_area_level_2")||f("administrative_area_level_1")||f("sublocality_level_1")||f("sublocality")||""; }
 function googleAra(t){ return new Promise(res=>{ if(!gmapsHazir()) return res(null);
@@ -1327,11 +1363,17 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
   useEffect(()=>{ if(!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(p=>setMerkez({lat:p.coords.latitude,lng:p.coords.longitude}),()=>{},{enableHighAccuracy:true,timeout:8000,maximumAge:300000});
   },[]);
-  async function aramaYap(t){ t=(t||"").trim(); if(t.length<2) return; setAra(true);
+  const [bos,setBos]=useState(false);   // arama yapıldı ama sonuç çıkmadı → kullanıcıya söyle (sessiz kalma)
+  async function aramaYap(t){ t=(t||"").trim(); if(t.length<2) return; setAra(true); setBos(false);
     try{ let j;
-      if(sade){ // önce Google Places (varsa), yoksa Nominatim (İstanbul)
+      // 1) Google Places (New) metin araması — ayarlarda anahtar varsa (mekan adıyla en isabetli yol)
+      const gj=await placesText(t,merkez);
+      if(gj && gj.length){ gj.sort((a,b)=>Math.hypot(+a.lat-merkez.lat,+a.lng-merkez.lng)-Math.hypot(+b.lat-merkez.lat,+b.lng-merkez.lng)); setSonuc(gj); setAra(false); return; }
+      // 2) Maps JS Autocomplete (sayfa anahtarı yüklüyse)
+      if(sade){
         const preds=await googleAra(t);
         if(preds && preds.length){ setSonuc(preds.map(p=>({google:true,place_id:p.place_id,main:(p.structured_formatting&&p.structured_formatting.main_text)||p.description,desc:p.description}))); setAra(false); return; }
+        // 3) Nominatim (İstanbul)
         const base="https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=12&countrycodes=tr&accept-language=tr";
         const r=await fetch(base+"&viewbox="+IST_VB+"&bounded=1&q="+encodeURIComponent(t));
         j=await r.json();
@@ -1343,9 +1385,13 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
         j=await r.json();
         if(!j.length){ const r2=await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&countrycodes=tr&accept-language=tr&q="+encodeURIComponent(t)); j=await r2.json(); }
       }
+      if(!j.length){ // 4) Overpass/OSM isimle arama — Nominatim mekan adını bulamadıysa (anahtarsız çözüm)
+        const oj=await overpassAdAra(t,merkez);
+        if(oj && oj.length){ oj.sort((a,b)=>Math.hypot(+a.lat-merkez.lat,+a.lng-merkez.lng)-Math.hypot(+b.lat-merkez.lat,+b.lng-merkez.lng)); setSonuc(oj); setAra(false); return; }
+      }
       j.sort((a,b)=>Math.hypot(+a.lat-merkez.lat,+a.lon-merkez.lng)-Math.hypot(+b.lat-merkez.lat,+b.lon-merkez.lng));
-      setSonuc(j);
-    }catch(e){ /* sessiz */ } finally{ setAra(false); } }
+      setSonuc(j); if(!j.length) setBos(true);
+    }catch(e){ setBos(true); } finally{ setAra(false); } }
   // yazarken otomatik ara (debounce)
   useEffect(()=>{ if(!touched.current) return; const t=q.trim();
     if(t.length<2){ setSonuc([]); return; }
@@ -1369,6 +1415,7 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
     else { mapObj.current.setView([merkez.lat,merkez.lng], mapObj.current.getZoom()); }
   },[lat,lng,merkez,sade]);
   async function sec(r){
+    if(r.g2){ onChange({ad:r.ad,lat:(+r.lat).toFixed(6),lng:(+r.lng).toFixed(6),tam:r.tam,bolge:r.bolge}); setQ(r.ad); setSonuc([]); touched.current=false; return; }
     if(r.google){ const d=await googleDetay(r.place_id);
       if(d && d.geometry && d.geometry.location){ const la=d.geometry.location.lat(), lo=d.geometry.location.lng(); const nm=d.name||r.main||q;
         onChange({ad:nm,lat:(+la).toFixed(6),lng:(+lo).toFixed(6),tam:d.formatted_address,bolge:ilceFromComp(d.address_components)}); setQ(nm); setSonuc([]); touched.current=false; return; }
@@ -1402,13 +1449,19 @@ function KonumSec({ ad, lat, lng, onChange, sade }){
     }
     if(!k){ alert("Linkten konum çıkarılamadı 😕\nGoogle Maps'te yeri aç → adres çubuğundaki TAM linki (içinde '@enlem,boylam' olan) kopyala-yapıştır, ya da konumdayken 📍 kullan."); return; }
     nm=nm||q||ad||""; setMerkez({lat:+k.lat,lng:+k.lng}); onChange({ad:nm,lat:k.lat,lng:k.lng}); if(nm) setQ(nm); setLink(""); }
-  const sonucKutu = sonuc.length>0 && h("div",{style:{...S.card,marginTop:6,maxHeight:220,overflowY:"auto"}},
-    sonuc.map((r,i)=>{ const g=r.google; const main=g?r.main:((r.display_name||"").split(",")[0]); const alt2=g?r.desc:r.display_name;
-      const km=(!g)?Math.round(111*Math.hypot(+r.lat-merkez.lat,(+r.lon-merkez.lng)*Math.cos(merkez.lat*Math.PI/180))):null;
-      return h("div",{key:i,onClick:()=>sec(r),style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 10px",borderTop:i?"1px solid "+C.line:"none",cursor:"pointer",fontSize:12.5}},
-        h("div",{style:{minWidth:0}}, h("b",null,main),
-          h("div",{style:{color:C.mut,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},alt2)),
-        km!=null && h("span",{style:{flexShrink:0,fontSize:11,color:C.mut,fontWeight:700}},"~"+km+" km")); }));
+  const sonucKutu = sonuc.length>0
+    ? h("div",{style:{...S.card,marginTop:6,maxHeight:220,overflowY:"auto"}},
+        sonuc.map((r,i)=>{ const g=r.google, g2=r.g2;
+          const main=g?r.main:(g2?r.ad:((r.display_name||"").split(",")[0]));
+          const alt2=g?r.desc:(g2?r.tam:r.display_name);
+          const LON=g2?r.lng:r.lon;
+          const km=(!g && r.lat!=null && LON!=null)?Math.round(111*Math.hypot(+r.lat-merkez.lat,(+LON-merkez.lng)*Math.cos(merkez.lat*Math.PI/180))):null;
+          return h("div",{key:i,onClick:()=>sec(r),style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 10px",borderTop:i?"1px solid "+C.line:"none",cursor:"pointer",fontSize:12.5}},
+            h("div",{style:{minWidth:0}}, h("b",null,main),
+              h("div",{style:{color:C.mut,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},alt2)),
+            km!=null && h("span",{style:{flexShrink:0,fontSize:11,color:C.mut,fontWeight:700}},"~"+km+" km")); }))
+    : (bos && h("div",{style:{marginTop:6,padding:"9px 11px",borderRadius:9,background:"#fff7ed",border:"1px solid #fed7aa",fontSize:12,color:"#9a3412",fontWeight:700}},
+        "😕 Sonuç bulunamadı. Haritaya dokunarak iğnele, 📍 ile konumunu al"+(sade?"":" ya da Google Maps linkini yapıştır")+"."+(GPLACES_KEY?"":" (Ayarlar'a Google anahtarı girilirse mekan adıyla arama çok daha isabetli olur.)")));
   if(sade) return h("div",null,
     h("div",{style:{display:"flex",gap:6}},
       h("input",{style:{...S.input,flex:1},value:q,onChange:e=>{ touched.current=true; setQ(e.target.value); },
@@ -4068,6 +4121,7 @@ function App(){
   const kesifCache = useColl("kesif_cache",demo);
   const ayarlar = useColl("ayar",demo);
   const ayar = ayarlar.find(a=>a.id==="genel")||{};
+  GPLACES_KEY=(ayar.googleKey||"").trim();   // konum araması da keşifle aynı anahtarı kullanır
   const tablaUcret = ayar.tablaUcret!=null ? num(ayar.tablaUcret) : 5;
   const [ekipAcik,setEkipAcik]=useState(false);
   // 🎮 demo hesabı + verisini ana stoktan hazırla (yalnız yönetici; demo_ koleksiyonlarına yazar)
