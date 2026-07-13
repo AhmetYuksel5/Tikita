@@ -1786,10 +1786,17 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
   const [s1,setS1]=useState({});      // konsinye çöz adetleri  urunId->adet
   const [lines,setLines]=useState({}); // yeni  urunId->{adet,mod}
   const buradaMi=x=> (musteri.id && x.musteriId===musteri.id) || ((x.yer||"")===(musteri.ad||""));
-  // burada açık konsinye (ürün başına topla)
+  // konsinye grup anahtarı: urunId varsa ona, yoksa (eski / urunId'si boş kayıtlar) ürün adına göre — farklı ürünler tek satıra çakışmasın
+  const konsKey=x=> x.urunId ? ("id:"+x.urunId) : ("ad:"+((x.urunAd||"").trim().toLocaleLowerCase("tr")));
+  // burada açık konsinye (grup başına topla)
   const buradaMap={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye" && num(x.kalan)>0 && buradaMi(x)){
-    const b=buradaMap[x.urunId]||(buradaMap[x.urunId]={urunId:x.urunId,urunAd:x.urunAd,kalan:0,satisFiyat:num(x.satisFiyat),alisFiyat:num(x.alisFiyat)}); b.kalan+=num(x.kalan); }});
+    const k=konsKey(x); const b=buradaMap[k]||(buradaMap[k]={key:k,urunId:x.urunId||"",urunAd:x.urunAd,kalan:0,satisFiyat:num(x.satisFiyat),alisFiyat:num(x.alisFiyat)}); b.kalan+=num(x.kalan); }});
   const burada=Object.values(buradaMap);
+  // konsMod (konsatis/iade) seçimi grup anahtarıyla çözülür → urunId'si boş eski kayıtlar da işlenebilir (master ürün bulunamazsa konsinyenin kendi bilgisinden üretilir)
+  const konsCoz=selKey=>{ const sel=burada.find(b=>b.key===selKey); if(!sel) return null;
+    const u=(urunler||[]).find(x=>x.id===sel.urunId) || {id:sel.urunId||"",ad:sel.urunAd,satisFiyat:sel.satisFiyat,alisFiyat:sel.alisFiyat};
+    return {sel,u}; };
+  const konsRecs=selKey=>(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&konsKey(x)===selKey&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
   async function coz(p,mod){   // mod: "satildi" | "iade"
     if(mesgul.current) return; mesgul.current=true;
     try{
@@ -1912,18 +1919,21 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
       if(uyg>0) await harKaydet({tip:"tahsilat",tutar:uyg,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"gecmis",tarih:iso});
       setGec(s=>({...s,alinan:""})); return alert("📅 Geçmiş tahsilat: "+tl(uyg)+(kalan>0.5?(" · ⚠ "+tl(kalan)+" borçtan fazla, uygulanmadı"):"")); }
-    const u=(urunler||[]).find(x=>x.id===gec.urunId); if(!u) return alert("Ürün seç.");
+    const konsModG=gec.tip==="konsatis"||gec.tip==="iade";
+    let u, selKeyG=null;
+    if(konsModG){ const c=konsCoz(gec.urunId); if(!c) return alert("Bu mekanda açık konsinye seç."); u=c.u; selKeyG=c.sel.key; }
+    else { u=(urunler||[]).find(x=>x.id===gec.urunId); if(!u) return alert("Ürün seç."); }
     const ad=Math.floor(num(gec.adet)); if(ad<1) return alert("Adet gir.");
     const base={urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(gec.alis),satisFiyat:num(gec.satis),yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"gecmis",tarih:iso};
     if(gec.tip==="konsatis"){
       // açık konsinyeyi FIFO düş (varsa), sonra satışı tahsil/borç bilgisiyle yaz
-      let kalanAzalt=ad; const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
+      let kalanAzalt=ad; const recs=konsRecs(selKeyG);
       for(const r of recs){ if(kalanAzalt<=0)break; const d=Math.min(kalanAzalt,num(r.kalan)); await save("pazarlama_hareket",{id:r.id,kalan:increment(-d)}); kalanAzalt-=d; }
       // konsinye satışı: para peşin alınmaz, kale borçlanır (tahsil=0); tahsilat ayrı toplanır
       const bek=ad*num(gec.satis);
       await harKaydet({tip:"satis",...base,kaynak:"konsinye",tahsil:0});
       setGec(s=>({...s,adet:"",alinan:""})); return alert("📅 Geçmiş konsinye satışı eklendi · "+gec.tarih+" · "+ad+" × "+tl(num(gec.satis))+" = "+tl(bek)); }
-    if(gec.tip==="iade"){ let azalt=ad; const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
+    if(gec.tip==="iade"){ let azalt=ad; const recs=konsRecs(selKeyG);
       for(const r of recs){ if(azalt<=0)break; const d=Math.min(azalt,num(r.kalan)); await save("pazarlama_hareket",{id:r.id,kalan:increment(-d)}); azalt-=d; }
       await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:ad,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"konsinye",tarih:iso});
       setGec(s=>({...s,adet:""})); return alert("📅 Geçmiş iade eklendi · "+gec.tarih); }
@@ -1943,10 +1953,13 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
       if(uyg>0) await harKaydet({tip:"tahsilat",tutar:uyg,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso});
       setAkn(s=>({...s,alinan:""})); return alert((uyg>0?("🧾 Tahsil edildi: "+tl(uyg)):"Bu mekanda açık borç yok.")+(kalan>0.5?("\n⚠ "+tl(kalan)+" borçtan fazla, uygulanmadı"):"")); }
-    const u=(urunler||[]).find(x=>x.id===akn.urunId); if(!u) return alert("Ürün seç.");
+    const konsModA=akn.tip==="konsatis"||akn.tip==="iade";
+    let u, selKeyA=null;
+    if(konsModA){ const c=konsCoz(akn.urunId); if(!c) return alert("Bu mekanda açık konsinye seç."); u=c.u; selKeyA=c.sel.key; }
+    else { u=(urunler||[]).find(x=>x.id===akn.urunId); if(!u) return alert("Ürün seç."); }
     const ad=Math.floor(num(akn.adet)); if(ad<1) return alert("Adet gir.");
     const base={urunId:u.id,urunAd:u.ad,adet:ad,alisFiyat:num(akn.alis),satisFiyat:num(akn.satis),yer:musteri.ad||"",bolge:musteri.bolge||"",telefon:musteri.telefon||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso};
-    if(akn.tip==="konsatis"){ const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
+    if(akn.tip==="konsatis"){ const recs=konsRecs(selKeyA);
       const mevcut=recs.reduce((s,r)=>s+num(r.kalan),0);
       if(mevcut<1) return alert("Bu mekanda sana ait açık konsinye yok — önce konsinye bırak.");
       if(ad>mevcut) return alert("Bu mekanda "+mevcut+" adet açık konsinye var; fazlası konsinyeden satılamaz.");
@@ -1957,15 +1970,15 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       const bek=ad*num(akn.satis);
       await harKaydet({tip:"satis",...base,kaynak:"konsinye",tahsil:0});
       setAkn(s=>({...s,adet:"",alinan:""})); return alert("💰 Konsinye satışı kaydedildi · "+ad+" × "+tl(num(akn.satis))+" = "+tl(bek)+"\n🧾 "+tl(bek)+" kale borcu — Tahsilat ile topla."); }
-    if(akn.tip==="iade"){ const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
+    if(akn.tip==="iade"){ const recs=konsRecs(selKeyA);
       const mevcut=recs.reduce((s,r)=>s+num(r.kalan),0);
       if(mevcut<1) return alert("Bu mekanda sana ait açık konsinye yok.");
       if(ad>mevcut) return alert("Bu mekanda "+mevcut+" adet açık konsinye var; fazlası iade alınamaz.");
       let azalt=ad;
       for(const r of recs){ if(azalt<=0)break; const d=Math.min(azalt,num(r.kalan)); await save("pazarlama_hareket",{id:r.id,kalan:increment(-d)}); azalt-=d; }
-      await bagDelta(u, +ad);   // atomik çantaya al
+      if(u.id) await bagDelta(u, +ad);   // atomik çantaya al (master ürün yoksa stok takibi atlanır ama iade yine de kayda geçer)
       await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:ad,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"konsinye",tarih:iso});
-      setAkn(s=>({...s,adet:""})); return alert("↩ İade alındı — "+ad+" adet çantana döndü."); }
+      setAkn(s=>({...s,adet:""})); return alert("↩ İade alındı — "+ad+" adet"+(u.id?" çantana döndü":" iade kaydedildi (master ürün yok, çanta güncellenmedi)")+"."); }
     // satış / konsinye → çantadan düş
     if(ad>bagOf(u)) return alert(u.ad+": çantanda "+bagOf(u)+" var. Önce Cephane'den al.");
     if(!fiyatOnay([{ad:u.ad,fiyat:akn.satis}])) return;
@@ -2002,10 +2015,10 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
               return h(React.Fragment,null,
                 h(Field,{label:st.tip==="konsatis"?"Ürün (bu mekandaki konsinyeden)":st.tip==="iade"?"Ürün (bu mekandaki konsinyeden iade)":"Ürün"},
                   h("select",{style:S.input,value:st.urunId,
-                    onChange:e=>{ const id=e.target.value; if(konsMod){ const b=burada.find(x=>x.urunId===id); setSt(s=>({...s,urunId:id,satis:b?(b.satisFiyat||s.satis):s.satis,alis:b?(b.alisFiyat||s.alis):s.alis})); } else urunSecF(setSt,id); }},
+                    onChange:e=>{ const id=e.target.value; if(konsMod){ const b=burada.find(x=>x.key===id); setSt(s=>({...s,urunId:id,satis:b?(b.satisFiyat||s.satis):s.satis,alis:b?(b.alisFiyat||s.alis):s.alis})); } else urunSecF(setSt,id); }},
                     h("option",{value:""},"— seç —"),
                     konsMod
-                      ? burada.map(b=>h("option",{key:b.urunId,value:b.urunId}, b.urunAd+" · konsinye "+b.kalan))
+                      ? burada.map(b=>h("option",{key:b.key,value:b.key}, b.urunAd+" · konsinye "+b.kalan))
                       : (urunler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>h("option",{key:u.id,value:u.id},u.ad+(cantaMod?(" · çantanda "+bagOf(u)):""))))),
                 konsMod && !burada.length && h("div",{style:{fontSize:12,color:"#b45309",fontWeight:700,margin:"-4px 0 8px"}},"⚠ Bu mekanda sana ait açık konsinye yok.")); })(),
             st.tip==="iade"
