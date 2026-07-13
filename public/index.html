@@ -2827,6 +2827,18 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         if(sid) await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:b,seferId:sid,tarih:iso}); }
       if(sid){ await save("sefer",{id:sid,durum:"kapali",bitis:iso}); setRapor(sid); }
     } finally { seferBitirRef.current=false; } }
+  // KOMUTA MERKEZİNE RAPOR — çanta boşaltılmadan bu dönemin hesabını kes, yeni rapor dönemi başlat
+  async function raporVer(){ if(seferBitirRef.current) return;
+    if(!aktifSefer) return alert("Aktif sefer yok — önce cüzdanı doldur, sahaya çık.");
+    if(!confirm("📡 Komuta merkezine rapor ver?\n\nBir önceki rapordan bu yana yaptığın satış / tahsilat / konsinye özetlenir; üreticiye vereceğin de çıkar. Çanta BOŞALMAZ — sahada kalırsın.")) return;
+    seferBitirRef.current=true;
+    try{
+      const sid=await seferIdAl(), iso=new Date().toISOString();
+      await save("sefer",{id:sid,durum:"kapali",bitis:iso});   // bu dönemi (raporu) kapat — cephane geri çekilmez
+      seferPromRef.current=save("sefer",{baslangic:iso,durum:"acik",kullaniciId:AKTIF_KUL?AKTIF_KUL.id:""});   // yeni rapor dönemi başlat (çanta devam)
+      await seferPromRef.current;
+      setRapor(sid);
+    } finally { seferBitirRef.current=false; } }
 
   const altlar=[["komuta","🏰","Komuta"],["cephane","🎒","Cephane"],["kale","🛡️","Kaleler"],["gozcu","🔭","Gözcü"],["rapor","📊","Rapor"]];
 
@@ -3143,6 +3155,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     // —— sefer (seans) aksiyonları: kripto kabuğunda da cüzdan doldurma + seans kapatma ——
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}},
       h("button",{onClick:()=>setCantaDoldur(true),style:{flex:"1 1 150px",padding:"10px",borderRadius:10,border:"1px solid "+KX.line,background:KX.panel,color:KX.sari,fontWeight:800,fontSize:12.5,cursor:"pointer"}}, aktifSefer?"➕ Cüzdana varlık ekle":"👛 Cüzdanı doldur — sahaya çık"),
+      aktifSefer && h("button",{onClick:raporVer,style:{flex:"1 1 150px",padding:"10px",borderRadius:10,border:"1px solid #0e7490",background:KX.panel,color:"#22d3ee",fontWeight:800,fontSize:12.5,cursor:"pointer"}},"📡 Merkeze rapor gönder — cüzdan durur"),
       aktifSefer && h("button",{onClick:seferiBitir,style:{flex:"1 1 150px",padding:"10px",borderRadius:10,border:"1px solid #b45309",background:KX.panel,color:"#f59e0b",fontWeight:800,fontSize:12.5,cursor:"pointer"}},"🏦 Seansı kapat — kasayı teslim et")),
     gerillaPanel(),
     airdropPanel(),
@@ -3253,6 +3266,7 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
           "🏰 Bu seferde "+yeniKaleSayi+" yeni kale fethettin! 🎉")),
       h("div",{style:{background:"#fff",padding:"10px 14px",display:"flex",gap:8,flexWrap:"wrap"}},
         h("button",{style:{...S.btn("p"),flex:"1 1 170px"},onClick:()=>setCantaDoldur(true)}, aktifSefer?"➕ Cephane ekle":"⚔️ Orduyu hazırla (cephaneyi doldur)"),
+        aktifSefer && h("button",{style:{...S.btn(),flex:"1 1 170px",borderColor:"#0369a1",color:"#0369a1",fontWeight:800},onClick:raporVer},"📡 Komuta'ya rapor ver — cephane durur"),
         aktifSefer && h("button",{style:{...S.btn(),flex:"1 1 170px",borderColor:"#b45309",color:"#b45309",fontWeight:800},onClick:seferiBitir},"🏭 Seferi bitir — atölyeye dön"))),
     // —— ⚡ Gerilla (ortak panel) ——
     gerillaPanel(),
