@@ -1879,7 +1879,16 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       const k=sonKons(); if(k) await save("pazarlama_hareket",{id:k.id,kalan:increment(ad)});
       await remove("pazarlama_hareket",x.id); return; }
     if(x.tip==="diplomasi"){ if(!confirm("Bu iletişim kaydı silinsin mi?")) return; await remove("pazarlama_hareket",x.id); return; }
-    // stant / tahsilat / avans / al ve diğer tipler — finansal/rapor kaydı; onayla ve sil
+    if(x.tip==="tahsilat"){ const T=num(x.tutar);
+      // tahsilat, satış kayıtlarının 'tahsil' alanını artırmıştı → silerken bunu geri al ki borç geri gelsin
+      if(!confirm("Bu tahsilat ("+tl(T)+") geri alınsın mı?\nKalenin tahsil edilecek borcu "+tl(T)+" artacak.")) return;
+      let kalan=T;
+      const tahsilli=(hareketler||[]).filter(s=>s.tip==="satis"&&buradaMi(s)&&num(s.tahsil)>0).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));   // en yeni tahsilden geri al
+      for(const s of tahsilli){ if(kalan<=0.001)break; const d=Math.min(kalan,num(s.tahsil)); await save("pazarlama_hareket",{id:s.id,tahsil:increment(-d)}); kalan-=d; }
+      await remove("pazarlama_hareket",x.id);
+      if(kalan>0.5) alert("↩ Tahsilat silindi. Not: "+tl(kalan)+" kadarı ilgili satış bulunamadığı için borca geri yansıtılamadı.");
+      return; }
+    // stant / avans / al ve diğer tipler — finansal/rapor kaydı; onayla ve sil
     if(!confirm("Bu kayıt silinsin mi?")) return;
     await remove("pazarlama_hareket",x.id);
     } finally { mesgul.current=false; }
