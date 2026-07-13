@@ -1899,9 +1899,10 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       // açık konsinyeyi FIFO düş (varsa), sonra satışı tahsil/borç bilgisiyle yaz
       let kalanAzalt=ad; const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
       for(const r of recs){ if(kalanAzalt<=0)break; const d=Math.min(kalanAzalt,num(r.kalan)); await save("pazarlama_hareket",{id:r.id,kalan:increment(-d)}); kalanAzalt-=d; }
-      const bek=ad*num(gec.satis); const alinan=gec.alinan===""?bek:Math.max(0,Math.min(bek,num(gec.alinan)));
-      await harKaydet({tip:"satis",...base,kaynak:"konsinye",tahsil:alinan});
-      setGec(s=>({...s,adet:"",alinan:""})); return alert("📅 Geçmiş konsinye satışı eklendi · "+gec.tarih+(bek-alinan>0?(" · "+tl(bek-alinan)+" alacak"):"")); }
+      // konsinye satışı: tahsilat toplu/ayrı → tam alınmış say (alacak yaratma)
+      const bek=ad*num(gec.satis);
+      await harKaydet({tip:"satis",...base,kaynak:"konsinye",tahsil:bek});
+      setGec(s=>({...s,adet:"",alinan:""})); return alert("📅 Geçmiş konsinye satışı eklendi · "+gec.tarih+" · "+ad+" × "+tl(num(gec.satis))+" = "+tl(bek)); }
     if(gec.tip==="iade"){ let azalt=ad; const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
       for(const r of recs){ if(azalt<=0)break; const d=Math.min(azalt,num(r.kalan)); await save("pazarlama_hareket",{id:r.id,kalan:increment(-d)}); azalt-=d; }
       await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:ad,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"konsinye",tarih:iso});
@@ -1931,11 +1932,13 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       const mevcut=recs.reduce((s,r)=>s+num(r.kalan),0);
       if(mevcut<1) return alert("Bu mekanda sana ait açık konsinye yok — önce konsinye bırak.");
       if(ad>mevcut) return alert("Bu mekanda "+mevcut+" adet açık konsinye var; fazlası konsinyeden satılamaz.");
+      if(num(akn.satis)>0 && num(akn.alis)>0 && num(akn.satis)<num(akn.alis) && !confirm("⚠ Satış fiyatı ("+tl(num(akn.satis))+") alış fiyatının ("+tl(num(akn.alis))+") ALTINDA — zararına satış!\nYine de kaydedilsin mi?")) return;
       let kalanAzalt=ad;
       for(const r of recs){ if(kalanAzalt<=0)break; const d=Math.min(kalanAzalt,num(r.kalan)); await save("pazarlama_hareket",{id:r.id,kalan:increment(-d)}); kalanAzalt-=d; }
-      const bek=ad*num(akn.satis); const alinan=akn.alinan===""?bek:Math.max(0,Math.min(bek,num(akn.alinan)));
-      await harKaydet({tip:"satis",...base,kaynak:"konsinye",tahsil:alinan});
-      setAkn(s=>({...s,adet:"",alinan:""})); return alert("💰 Konsinye satışı kaydedildi"+(bek-alinan>0?(" · "+tl(bek-alinan)+" alacak"):"")); }
+      // konsinye satışında tahsilat TOPLU/ayrı yapılır → burada tam alınmış say (alacak yaratma); tahsilat işi Tahsilat sekmesinde
+      const bek=ad*num(akn.satis);
+      await harKaydet({tip:"satis",...base,kaynak:"konsinye",tahsil:bek});
+      setAkn(s=>({...s,adet:"",alinan:""})); return alert("💰 Konsinye satışı kaydedildi · "+ad+" × "+tl(num(akn.satis))+" = "+tl(bek)); }
     if(akn.tip==="iade"){ const recs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&x.urunId===u.id&&buradaMi(x)).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
       const mevcut=recs.reduce((s,r)=>s+num(r.kalan),0);
       if(mevcut<1) return alert("Bu mekanda sana ait açık konsinye yok.");
@@ -1990,11 +1993,13 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
             st.tip==="iade"
               ? h(Field,{label:"Adet (çantaya dönecek)"}, h("input",{type:"number",min:1,style:S.input,value:st.adet,onChange:e=>setSt(s=>({...s,adet:e.target.value}))}))
               : h(React.Fragment,null,
-                  h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+                  // konsinye satıldı: sadece ADET + SATIŞ (alış konsinyeden otomatik gelir, arka planda zarar kontrolü için)
+                  h("div",{style:{display:"grid",gridTemplateColumns: st.tip==="konsatis"?"1fr 1fr":"1fr 1fr 1fr",gap:8}},
                     h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:st.adet,onChange:e=>setSt(s=>({...s,adet:e.target.value}))})),
-                    h(Field,{label:"Satış ₺"}, h("input",{type:"number",min:0,style:S.input,value:st.satis,onChange:e=>setSt(s=>({...s,satis:e.target.value}))})),
-                    h(Field,{label:"Alış ₺"}, h("input",{type:"number",min:0,style:S.input,value:st.alis,onChange:e=>setSt(s=>({...s,alis:e.target.value}))}))),
-                  (st.tip==="satis"||st.tip==="konsatis") && h(Field,{label:"Alınan ₺ (boş = tamamı alındı; eksik = borç/alacak)"}, h("input",{type:"number",min:0,style:S.input,value:st.alinan,onChange:e=>setSt(s=>({...s,alinan:e.target.value}))})))),
+                    h(Field,{label:"Satış ₺ (senin sattığın)"}, h("input",{type:"number",min:0,style:S.input,value:st.satis,onChange:e=>setSt(s=>({...s,satis:e.target.value}))})),
+                    st.tip!=="konsatis" && h(Field,{label:"Alış ₺"}, h("input",{type:"number",min:0,style:S.input,value:st.alis,onChange:e=>setSt(s=>({...s,alis:e.target.value}))}))),
+                  st.tip==="satis" && h(Field,{label:"Alınan ₺ (boş = tamamı alındı; eksik = borç/alacak)"}, h("input",{type:"number",min:0,style:S.input,value:st.alinan,onChange:e=>setSt(s=>({...s,alinan:e.target.value}))})),
+                  st.tip==="konsatis" && num(st.satis)>0 && num(st.alis)>0 && num(st.satis)<num(st.alis) && h("div",{style:{fontSize:12,fontWeight:800,color:"#b91c1c",marginTop:2}},"⚠ Satış fiyatı alış fiyatının altında — zarar!"))),
       tarihGoster && h(Field,{label:"Tarih"}, h("input",{type:"date",style:S.input,value:st.tarih,onChange:e=>setSt(s=>({...s,tarih:e.target.value}))})),
       h("button",{style:{...S.btn("p"),width:"100%",marginTop:6},onClick:onSubmit},btnEt)); };
   // bu kalenin tüm hareketleri (tarihli)
