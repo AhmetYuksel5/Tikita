@@ -3736,19 +3736,24 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const satAdet=satList.reduce((s,r)=>s+r.adet,0), satTutar=satList.reduce((s,r)=>s+r.tutar,0);
     const tahToplam=tahList.reduce((s,r)=>s+r.tutar,0), avansT=avansList.reduce((s,r)=>s+r.tutar,0);
     const satHam=rHar.filter(x=>x.tip==="satis");
+    // her satış (kale / konsinyeden / gerilla) → TAHSİL EDİLEN + ALACAK olarak ayrışır; ciro = tahsil + alacak
+    const satTahsil=satHam.reduce((s,x)=>s+satPay(x).tahsil,0);         // tahsil edilen (gerilla nakit tam + kaleden alınan)
+    const satAlacak=satHam.reduce((s,x)=>s+satPay(x).alacak,0);         // kalan borç (gerillada 0)
+    const gerNakit=satHam.filter(x=>x.gerilla).reduce((s,x)=>s+satPay(x).tahsil,0);   // bunun içinde gerilla nakdi
     const ureticiBorc=satHam.reduce((s,x)=>s+satPay(x).ureticiPay,0);   // üreticiye — TAHSİL edilenin alış payı
     const marj=satHam.reduce((s,x)=>s+satPay(x).pazPay,0);              // pazarlamacının ücreti — tahsil oranında
-    return { baslik,konsList,satList,tahList,avansList,mekanlar, konsAdet,konsTutar,satAdet,satTutar,tahToplam,avansT,ureticiBorc,marj, mekanSayi:mekanlar.length, netAlacak:alacakGenel, kisi:(aktif?aktif.ad:"") }; };
+    return { baslik,konsList,satList,tahList,avansList,mekanlar, konsAdet,konsTutar,satAdet,satTutar,tahToplam,avansT,satTahsil,satAlacak,gerNakit,ureticiBorc,marj, mekanSayi:mekanlar.length, netAlacak:alacakGenel, kisi:(aktif?aktif.ad:"") }; };
   const raporMetin=v=>{ const L=[];
     L.push("📊 PAZARLAMA RAPORU"); L.push(v.baslik); if(v.kisi) L.push("👤 "+v.kisi); L.push("");
     L.push("📈 ÖZET");
     L.push("• Uğranılan mekan: "+v.mekanSayi);
     L.push("• Konsinye bırakılan: "+v.konsAdet+" adet · "+tl(v.konsTutar));
-    L.push("• Satış: "+v.satAdet+" adet · "+tl(v.satTutar));
-    L.push("• Tahsilat: "+tl(v.tahToplam)+(v.avansT?(" · avans "+tl(v.avansT)):""));
+    L.push("• Satış (ciro): "+v.satAdet+" adet · "+tl(v.satTutar));
+    L.push("• Tahsil edilen: "+tl(v.satTahsil)+(v.gerNakit>0?(" (⚡ gerilla nakdi "+tl(v.gerNakit)+" dahil)"):""));
+    L.push("• Alacak (kalan borç): "+tl(v.satAlacak));
     L.push("• Üreticiye ödenecek: "+tl(v.ureticiBorc));
     L.push("• Marj (kâr): "+tl(v.marj));
-    L.push("• Net alacak (güncel): "+tl(v.netAlacak));
+    L.push("• Tüm zamanların güncel açık alacağı: "+tl(v.netAlacak));
     L.push(""); L.push("🏬 KONSİNYE BIRAKILANLAR");
     if(!v.konsList.length) L.push("  (yok)"); else v.konsList.forEach(r=>L.push("• "+r.mekan+" — "+r.urun+" ×"+r.adet+" @"+tl(r.fiyat)+" = "+tl(r.tutar)));
     L.push(""); L.push("💰 SATIŞLAR");
@@ -3761,15 +3766,17 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     const tbl=(cols,rows,foot)=>"<table style='width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px'>"+th(cols)+(rows.length?rows.join(""):tr(["(yok)"]))+(foot||"")+"</table>";
     const ozet="<table style='width:100%;border-collapse:collapse;font-size:13px'>"
       +tr(["Uğranılan mekan",v.mekanSayi])+tr(["Konsinye bırakılan",v.konsAdet+" adet · "+tl(v.konsTutar)])
-      +tr(["Satış",v.satAdet+" adet · "+tl(v.satTutar)])+tr(["Tahsilat",tl(v.tahToplam)+(v.avansT?(" · avans "+tl(v.avansT)):"")])
+      +tr(["Satış (ciro)",v.satAdet+" adet · "+tl(v.satTutar)])
+      +tr(["Tahsil edilen",tl(v.satTahsil)+(v.gerNakit>0?(" (⚡ gerilla "+tl(v.gerNakit)+" dahil)"):"")])
+      +tr(["Alacak (kalan borç)",tl(v.satAlacak)])
       +tr(["<b>Üreticiye ödenecek</b>","<b>"+tl(v.ureticiBorc)+"</b>"])+tr(["Marj (kâr)",tl(v.marj)])
-      +tr([v.netAlacak>=0?"Net alacak (güncel)":"Net avans (güncel)",tl(Math.abs(v.netAlacak))])+"</table>";
+      +tr(["Tüm zamanların açık alacağı",tl(v.netAlacak)])+"</table>";
     return "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Pazarlama Raporu</title><style>body{font-family:system-ui,Arial;padding:20px;color:#0f172a}h1{font-size:19px;margin:0}h2{font-size:14px;margin:16px 0 6px}.sub{color:#64748b;font-size:12px;margin:3px 0 10px}</style></head><body>"
       +"<h1>📊 Pazarlama Raporu</h1><div class=sub>"+v.baslik+(v.kisi?(" · "+v.kisi):"")+"</div>"
       +"<h2>Özet</h2>"+ozet
       +"<h2>Konsinye bırakılanlar</h2>"+tbl(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.konsList.map(r=>tr([r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)])), v.konsList.length?tr(["<b>Toplam</b>","","<b>"+v.konsAdet+"</b>","","<b>"+tl(v.konsTutar)+"</b>"]):"")
       +"<h2>Satışlar</h2>"+tbl(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.satList.map(r=>tr([r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)])), v.satList.length?tr(["<b>Toplam</b>","","<b>"+v.satAdet+"</b>","","<b>"+tl(v.satTutar)+"</b>"]):"")
-      +"<h2>Tahsilatlar</h2>"+tbl(["Mekan","Tutar"], v.tahList.map(r=>tr([r.mekan,tl(r.tutar)])), v.tahList.length?tr(["<b>Toplam</b>","<b>"+tl(v.tahToplam)+"</b>"]):"")
+      +"<h2>Kaleden tahsil işlemleri</h2>"+tbl(["Mekan","Tutar"], v.tahList.map(r=>tr([r.mekan,tl(r.tutar)])), v.tahList.length?tr(["<b>Toplam</b>","<b>"+tl(v.tahToplam)+"</b>"]):"")
       +"<div class=sub style='margin-top:18px'>Tikita · rapor</div></body></html>"; };
   const raporPDF=v=>{ const w=window.open("","_blank"); if(!w) return alert("Açılır pencere engellendi — tarayıcı izni ver."); w.document.write(raporHTML(v)); w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },500); };
   const raporWA=v=>{ const t=raporMetin(v); if(navigator.share){ navigator.share({text:t}).catch(()=>{}); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
@@ -3877,11 +3884,18 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:8}},
           rIstat("📍 Uğranılan mekan",v.mekanSayi+"","#0369a1"),
           rIstat("🏬 Konsinye",v.konsAdet+" ad · "+tl(v.konsTutar),"#7c3aed"),
-          rIstat("💰 Satış",v.satAdet+" ad · "+tl(v.satTutar),"#047857"),
-          rIstat("🧾 Tahsilat",tl(v.tahToplam),"#b91c1c"),
+          rIstat("💰 Satış (ciro)",v.satAdet+" ad · "+tl(v.satTutar),"#047857"),
+          rIstat("🧾 Tahsil edilen",tl(v.satTahsil),"#047857"),
+          rIstat("💵 Alacak (kalan borç)",tl(v.satAlacak),"#b91c1c"),
           rIstat("🏭 Üreticiye ödenecek",tl(v.ureticiBorc),"#b45309"),
-          rIstat("📈 Marj (kârın)",tl(v.marj),"#047857"),
-          rIstat(v.netAlacak>=0?"💵 Net alacak":"💳 Net avans",tl(Math.abs(v.netAlacak)),v.netAlacak>=0?"#b91c1c":"#0369a1"))),
+          rIstat("📈 Marj (kârın)",tl(v.marj),"#047857")),
+        // satışın tahsilat + alacak olarak ayrıştığını net göster
+        h("div",{style:{fontSize:11.5,color:C.mut,marginTop:8,lineHeight:1.5}},
+          "💰 Satış "+tl(v.satTutar)+" = 🧾 Tahsil "+tl(v.satTahsil)+" + 💵 Alacak "+tl(v.satAlacak)
+          +(v.gerNakit>0?(" · ⚡ Gerilla nakdi "+tl(v.gerNakit)+" (tahsile dahil, borç yok)"):"")),
+        // güncel toplam açık alacak (tüm dönemler) — dönemsel alacaktan ayrı, karışmasın diye ayrı satır
+        v.netAlacak>0.5 && h("div",{style:{fontSize:11.5,color:"#b91c1c",fontWeight:700,marginTop:4}},
+          "🧾 Tüm zamanların güncel açık alacağı: "+tl(v.netAlacak))),
       h("div",{style:{...S.card,padding:"12px 14px",marginBottom:12}},
         h("div",{style:{...S.label,marginBottom:6}},"🏬 Konsinye bırakılanlar"),
         rTablo(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.konsList.map(r=>[r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)]))),
@@ -3889,8 +3903,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
         h("div",{style:{...S.label,marginBottom:6}},"💰 Satışlar"),
         rTablo(["Mekan","Ürün","Adet","Fiyat","Tutar"], v.satList.map(r=>[r.mekan,r.urun,r.adet,tl(r.fiyat),tl(r.tutar)]))),
       h("div",{style:{...S.card,padding:"12px 14px"}},
-        h("div",{style:{...S.label,marginBottom:6}},"🧾 Tahsilatlar"),
-        rTablo(["Mekan","Tutar"], v.tahList.map(r=>[r.mekan,tl(r.tutar)])))); };
+        h("div",{style:{...S.label,marginBottom:6}},"🧾 Kaleden tahsil işlemleri"+(v.tahToplam>0?(" · "+tl(v.tahToplam)):"")),
+        v.tahList.length? rTablo(["Mekan","Tutar"], v.tahList.map(r=>[r.mekan,tl(r.tutar)]))
+          : h("div",{style:{fontSize:12,color:C.mut}},"Bu dönemde ayrı tahsilat işlemi yok (satışların peşin/gerilla tahsilatı yukarıda)."))); };
 
   const viewMap={komuta: KRIPTO?piyasaView:fetihView, rapor:raporView, cephane:cephaneView, kale:kaleView, gozcu:gozcuView};
   return h("div",{className:"tk-noselect"},
