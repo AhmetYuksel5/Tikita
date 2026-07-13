@@ -1922,7 +1922,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       await harKaydet({tip:"iade",urunId:u.id,urunAd:u.ad,adet:ad,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"konsinye",tarih:iso});
       setGec(s=>({...s,adet:""})); return alert("📅 Geçmiş iade eklendi · "+gec.tarih); }
     if(gec.tip==="konsinye"){ await harKaydet({tip:"konsinye",kalan:ad,...base}); }
-    else { const bek=ad*num(gec.satis); const alinan=gec.alinan===""?bek:Math.max(0,Math.min(bek,num(gec.alinan))); await harKaydet({tip:"satis",...base,tahsil:alinan}); }
+    else { await harKaydet({tip:"satis",...base,tahsil:0}); }   // satış kaleye borç yazar; tahsilat ayrı
     setGec(s=>({...s,adet:"",alinan:""})); alert("📅 Geçmiş işlem eklendi · "+gec.tarih);
     } finally { mesgul.current=false; } }
   // AKIN — geçmişle aynı form, ama GÜNCEL tarih + gerçek stok/çanta hareketi
@@ -1966,9 +1966,9 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
     await bagDelta(u, -ad);   // atomik düş
     if(akn.tip==="konsinye"){ await harKaydet({tip:"konsinye",kalan:ad,musteriNot:musteri.not||"",lat:musteri.lat||"",lng:musteri.lng||"",fotoK:[],...base});
       setAkn(s=>({...s,adet:""})); return alert("🏬 Konsinye bırakıldı."); }
-    const bek=ad*num(akn.satis); const alinan=akn.alinan===""?bek:Math.max(0,Math.min(bek,num(akn.alinan)));
-    await harKaydet({tip:"satis",...base,tahsil:alinan});
-    setAkn(s=>({...s,adet:"",alinan:""})); alert("💰 Satış kaydedildi"+(bek-alinan>0?(" · "+tl(bek-alinan)+" alacak"):""));
+    const bek=ad*num(akn.satis);
+    await harKaydet({tip:"satis",...base,tahsil:0});   // satış kaleye borç yazar; tahsilat ayrı yapılır
+    setAkn(s=>({...s,adet:"",alinan:""})); alert("💰 Satış kaydedildi · "+tl(bek)+" kaleye borç yazıldı (çıkarken tahsil et).");
     } finally { mesgul.current=false; } }
   // ORTAK FORM — Akın (güncel) ve Geçmiş için aynı arayüz
   const tipBtn=(st,setSt,k,et,renk)=>{ const on=st.tip===k; return h("button",{type:"button",onClick:()=>setSt(s=>({...s,tip:k})),style:{flex:"1 1 88px",padding:"8px",borderRadius:8,border:"1px solid "+(on?renk:C.line),background:on?renk:"#fff",color:on?"#fff":C.txt,fontWeight:800,cursor:"pointer",fontSize:12.5}},et); };
@@ -2010,7 +2010,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
                     h(Field,{label:"Adet"}, h("input",{type:"number",min:1,style:S.input,value:st.adet,onChange:e=>setSt(s=>({...s,adet:e.target.value}))})),
                     h(Field,{label:"Satış ₺ (senin sattığın)"}, h("input",{type:"number",min:0,style:S.input,value:st.satis,onChange:e=>setSt(s=>({...s,satis:e.target.value}))})),
                     st.tip!=="konsatis" && h(Field,{label:"Alış ₺"}, h("input",{type:"number",min:0,style:S.input,value:st.alis,onChange:e=>setSt(s=>({...s,alis:e.target.value}))}))),
-                  st.tip==="satis" && h(Field,{label:"Alınan ₺ (boş = tamamı alındı; eksik = borç/alacak)"}, h("input",{type:"number",min:0,style:S.input,value:st.alinan,onChange:e=>setSt(s=>({...s,alinan:e.target.value}))})),
+                  st.tip==="satis" && h("div",{style:{fontSize:11.5,color:C.mut,marginTop:4}},"💡 Para kalenin borcuna yazılır; tahsilatı '🧾 Tahsilat' sekmesinden yaparsın."),
                   st.tip==="konsatis" && num(st.satis)>0 && num(st.alis)>0 && num(st.satis)<num(st.alis) && h("div",{style:{fontSize:12,fontWeight:800,color:"#b91c1c",marginTop:2}},"⚠ Satış fiyatı alış fiyatının altında — zarar!"))),
       tarihGoster && h(Field,{label:"Tarih"}, h("input",{type:"date",style:S.input,value:st.tarih,onChange:e=>setSt(s=>({...s,tarih:e.target.value}))})),
       h("button",{style:{...S.btn("p"),width:"100%",marginTop:6},onClick:onSubmit},btnEt)); };
@@ -2075,7 +2075,9 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
     window.open("https://wa.me/"+(tel?("9"+tel):"")+"?text="+encodeURIComponent(msg),"_blank"); }
   const sekmeBtn=(k,et)=>h("button",{type:"button",onClick:()=>setTab(k),
     style:{flex:1,padding:"8px 6px",borderRadius:9,border:"1px solid "+(tab===k?"#b45309":C.line),background:tab===k?"#b45309":"#fff",color:tab===k?"#fff":C.txt,fontWeight:800,fontSize:12.5,cursor:"pointer"}},et);
-  return h(Modal,{ baslik:"⚔️ "+(musteri.ad||"Mevki"), onKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:onKapat},"Kapat") },
+  // kaleden çıkarken tahsil edilecek tutarı hatırlat
+  const cikisKapat=()=>{ if(alacakTop>0.5) alert("🧾 "+(musteri.ad||"Bu kale")+" — çıkış özeti\n\nBu kaleden tahsil etmen gereken: "+tl(alacakTop)+"\n\nParayı aldıysan '🧾 Tahsilat' sekmesinden işle; borç kalıyorsa kalede birikir."); onKapat(); };
+  return h(Modal,{ baslik:"⚔️ "+(musteri.ad||"Mevki"), onKapat:cikisKapat, alt:h("button",{style:{...S.btn(),flex:1},onClick:cikisKapat},"Kapat") },
     h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:10,fontSize:12.5}},
       musteri.bolge && h("span",{style:{color:"#7c3aed",fontWeight:700}},"📍 "+musteri.bolge),
       musteri.telefon && h("a",{href:"tel:"+musteri.telefon,style:{color:"#0369a1",fontWeight:700,textDecoration:"none"}},"📞 "+musteri.telefon),
