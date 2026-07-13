@@ -1591,8 +1591,11 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
   const har=(hareketler||[]).filter(x=>x.seferId===sefer.id);
   const grp=t=>har.filter(x=>x.tip===t);
   const sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
-  const al=grp("al"),sat=grp("satis"),kon=grp("konsinye"),iade=grp("iade");
+  const al=grp("al"),sat=grp("satis"),kon=grp("konsinye"),iade=grp("iade"),tah=grp("tahsilat");
   const alA=sum(al,x=>num(x.adet)),satA=sum(sat,x=>num(x.adet)),konA=sum(kon,x=>num(x.adet)),iadeA=sum(iade,x=>num(x.adet));
+  const tahNakit=sum(tah,x=>num(x.tutar));                                    // bu sefer yapılan ayrı tahsilat işlemleri (eski borç dahil)
+  const gerillaCash=sum(sat.filter(x=>x.gerilla),x=>satPay(x).tahsil);        // gerilla nakdi (tahsilat kaydı üretmez)
+  const toplananNakit=tahNakit+gerillaCash;                                   // bu sefer fiilen toplanan toplam nakit
   const ciro=sum(sat,x=>satPay(x).ciro);
   const tahsil=sum(sat,x=>satPay(x).tahsil);        // kaleden alınan nakit
   const alacak=sum(sat,x=>satPay(x).alacak);        // kalelerin kalan borcu
@@ -1621,12 +1624,14 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
     L.push("🧭 SEFER RAPORU"+(pazAd?" — "+pazAd:"")); L.push(donem); L.push("");
     L.push("🎒 Çıkış "+alA+" · 💰 Satış "+satA+" · 🏬 Konsinye "+konA+" · ↩ Dönen "+iadeA); L.push("");
     L.push("💵 HESAP");
+    L.push("• 🧾 Bu sefer topladığın nakit: "+tl(toplananNakit)+((tahNakit>0&&gerillaCash>0)?(" (tahsilat "+tl(tahNakit)+" + gerilla "+tl(gerillaCash)+")"):""));
     L.push("• Toplam satış (ciro): "+tl(ciro));
     L.push("• 🏭 Üreticiye verilecek: "+tl(ureticiBorc));
     L.push("• 🫰 Sana kalan (kâr): "+tl(kar));
     if(tahsil<ciro){ L.push("• Tahsil edilen: "+tl(tahsil)); L.push("• Kalan alacak: "+tl(alacak)); }
     if(sat.length){ L.push(""); L.push("💰 SATIŞLAR"); sat.forEach(x=>L.push("• "+num(x.adet)+"× "+x.urunAd+(x.yer?(" → "+x.yer):"")+" = "+tl(num(x.adet)*num(x.satisFiyat))+(x.kaynak==="konsinye"?" (konsinyeden)":""))); }
     if(kon.length){ L.push(""); L.push("🏬 KONSİNYE BIRAKILAN"); kon.forEach(x=>L.push("• "+num(x.adet)+"× "+x.urunAd+(x.yer?(" → "+x.yer):""))); }
+    if(tah.length){ L.push(""); L.push("🧾 TAHSİLATLAR"); tah.forEach(x=>L.push("• "+(x.yer||"—")+" — "+tl(num(x.tutar)))); }
     return L.join("\n"); };
   const seferHTML=()=>{ const rows=arr=>arr.map(x=>"<tr><td>"+num(x.adet)+"× "+esc(x.urunAd)+(x.yer?(" → "+esc(x.yer)):"")+(x.kaynak==="konsinye"?" <i>(konsinyeden)</i>":"")+"</td><td style='text-align:right'>"+tl(num(x.adet)*num(x.satisFiyat))+"</td></tr>").join("");
     return "<!doctype html><html lang='tr'><head><meta charset='utf-8'><title>Sefer Raporu</title>"
@@ -1639,6 +1644,7 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
       +"<tr><td>💰 Satış</td><td style='text-align:right'>"+satA+"</td></tr>"
       +"<tr><td>🏬 Konsinye</td><td style='text-align:right'>"+konA+"</td></tr>"
       +"<tr><td>↩ Dönen</td><td style='text-align:right'>"+iadeA+"</td></tr>"
+      +"<tr><td>🧾 Bu sefer topladığın nakit</td><td style='text-align:right'>"+tl(toplananNakit)+"</td></tr>"
       +"<tr><td>Toplam satış (ciro)</td><td style='text-align:right'>"+tl(ciro)+"</td></tr>"
       +(tahsil<ciro?("<tr><td>Tahsil edilen</td><td style='text-align:right'>"+tl(tahsil)+"</td></tr><tr><td>Kalan alacak</td><td style='text-align:right'>"+tl(alacak)+"</td></tr>"):"")
       +"</table>"
@@ -1646,6 +1652,7 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
       +"<div class='box b2'><div class='t' style='color:#065f46'>🫰 Sana kalan (kâr)</div><div class='v' style='color:#047857'>"+tl(kar)+"</div></div></div>"
       +(sat.length?("<h2>💰 Satışlar</h2><table>"+rows(sat)+"</table>"):"")
       +(kon.length?("<h2>🏬 Konsinye bırakılan</h2><table>"+kon.map(x=>"<tr><td>"+num(x.adet)+"× "+esc(x.urunAd)+(x.yer?(" → "+esc(x.yer)):"")+"</td><td style='text-align:right'>"+esc(x.bolge||"")+"</td></tr>").join("")+"</table>"):"")
+      +(tah.length?("<h2>🧾 Tahsilatlar</h2><table>"+tah.map(x=>"<tr><td>"+esc(x.yer||"—")+"</td><td style='text-align:right'>"+tl(num(x.tutar))+"</td></tr>").join("")+"<tr><td><b>Toplam</b></td><td style='text-align:right'><b>"+tl(tahNakit)+"</b></td></tr></table>"):"")
       +"</body></html>"; };
   const seferPDF=()=>{ const w=window.open("","_blank"); if(!w) return alert("Açılır pencere engellendi — tarayıcı izni ver."); w.document.write(seferHTML()); w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },400); };
   const seferWA=()=>{ const t=seferMetin(); if(navigator.share){ navigator.share({text:t}).catch(()=>{}); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
@@ -1657,11 +1664,12 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
       h("button",{style:{...S.btn("p"),flex:1},onClick:seferPDF},"📄 Çıktı"),
       h("button",{style:{...S.btn(),flex:1,borderColor:"#16a34a",color:"#16a34a",fontWeight:800},onClick:seferWA},"📲 WhatsApp"),
       h("button",{style:S.btn(),onClick:onKapat},"Kapat")) },
-    // 0) Kaleden alınan (tahsilat) — sefer dönüşü getirilen nakit
+    // 0) Bu sefer topladığın nakit — tahsilat işlemleri + gerilla nakdi (eski borç tahsilatı dahil)
     h("div",{style:{...S.card,padding:"12px 10px",textAlign:"center",background:"#eff6ff",border:"1px solid #bfdbfe",marginBottom:8}},
-      h("div",{style:{fontSize:11.5,color:"#1e40af",fontWeight:700}},"🧾 Kalelerden aldığın (tahsilat)"),
-      h("div",{style:{fontSize:24,fontWeight:800,color:"#1d4ed8",marginTop:2}},tl(tahsil)),
-      ciro>0 && h("div",{style:{fontSize:11,color:C.mut,marginTop:2}},"Ciro "+tl(ciro)+" · tahsil oranı %"+Math.round((tahsil/ciro)*100))),
+      h("div",{style:{fontSize:11.5,color:"#1e40af",fontWeight:700}},"🧾 Bu sefer topladığın nakit"),
+      h("div",{style:{fontSize:24,fontWeight:800,color:"#1d4ed8",marginTop:2}},tl(toplananNakit)),
+      (tahNakit>0&&gerillaCash>0) && h("div",{style:{fontSize:11,color:C.mut,marginTop:2}},"🧾 tahsilat "+tl(tahNakit)+" · ⚡ gerilla "+tl(gerillaCash)),
+      ciro>0 && h("div",{style:{fontSize:11,color:C.mut,marginTop:2}},"Bu sefer satış (ciro) "+tl(ciro)+(alacak>0.5?(" · kalan borç "+tl(alacak)):""))),
     // 1) İKİ BÜYÜK RAKAM — tahsil edilenin bölüşümü
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
       h("div",{style:{...S.card,padding:"14px 8px",textAlign:"center",background:"#fff7ed",border:"1px solid #fed7aa"}},
@@ -1681,17 +1689,22 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
     // 3) Alacak varsa TEK kırmızı uyarı
     alacak>0 && h("div",{style:{marginTop:8,padding:"9px 12px",borderRadius:10,background:"#fff7f7",border:"1px solid #fecaca",fontSize:13,fontWeight:800,color:"#b91c1c",textAlign:"center"}},
       "🧾 Kalelerin kalan borcu: "+tl(alacak)+" — sonraki tahsilatta topla"),
-    (satA===0&&konA===0) && h("div",{style:{fontSize:12.5,color:C.mut,marginTop:10,textAlign:"center"}},"Bu seferde satış/konsinye yapılmadı."),
+    (satA===0&&konA===0&&tahNakit===0) && h("div",{style:{fontSize:12.5,color:C.mut,marginTop:10,textAlign:"center"}},"Bu seferde satış/konsinye/tahsilat yapılmadı."),
     // 4) Küçük tek satır özet (yalnız sıfır olmayanlar)
     ozetParcalar.length>0 && h("div",{style:{fontSize:12,color:C.mut,marginTop:10,textAlign:"center"}},
       ozetParcalar.map(p=>p[0]+" "+p[1]+" "+p[2]).join(" · ")),
     // 5) Ayrıntılar istenirse
-    (sat.length>0||kon.length>0) && h(React.Fragment,null,
-      h("button",{type:"button",onClick:()=>setDetay(d=>!d),style:{...S.btn(),width:"100%",marginTop:10,fontSize:12.5}}, detay?"▾ Detayı gizle":"▸ Detay — ne sattım, nereye bıraktım?"),
+    (sat.length>0||kon.length>0||tah.length>0) && h(React.Fragment,null,
+      h("button",{type:"button",onClick:()=>setDetay(d=>!d),style:{...S.btn(),width:"100%",marginTop:10,fontSize:12.5}}, detay?"▾ Detayı gizle":"▸ Detay — ne sattım, nereye bıraktım, ne tahsil ettim?"),
       detay && h(React.Fragment,null,
         h("div",{style:{fontSize:11.5,color:C.mut,marginTop:8}}, (pazAd?"👤 "+pazAd+" · ":"")+donem+" · Ciro "+tl(ciro)+(tahsil<ciro?(" · Tahsil "+tl(tahsil)):"")),
         liste("💰 Satışlar",sat,"#047857",x=>tl(num(x.adet)*num(x.satisFiyat))),
-        liste("🏬 Konsinye bırakılanlar",kon,"#7c3aed",x=>(x.bolge||"")))));
+        liste("🏬 Konsinye bırakılanlar",kon,"#7c3aed",x=>(x.bolge||"")),
+        tah.length>0 && h("div",{style:{marginTop:10}},
+          h("div",{style:{...S.label,marginBottom:4}},"🧾 Tahsilatlar · "+tl(tahNakit)),
+          tah.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).map((x,i)=>h("div",{key:x.id||i,style:{display:"flex",justifyContent:"space-between",gap:8,padding:"5px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
+            h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, (x.yer||"—")+" · "+fmtTarih(new Date(x.tarih).getTime())),
+            h("span",{style:{flexShrink:0,fontWeight:700,color:"#047857"}}, "+"+tl(num(x.tutar)))))))));
 }
 
 // MÜŞTERİ ekle / düzenle
