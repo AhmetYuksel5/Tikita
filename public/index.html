@@ -164,6 +164,11 @@ function satPay(x){ const adet=num(x.adet), sat=num(x.satisFiyat), al=num(x.alis
   const bek=adet*sat, th=(x.tahsil==null?bek:num(x.tahsil)), oran=bek>0?Math.max(0,Math.min(1,th/bek)):0;
   return { ciro:bek, tahsil:Math.max(0,Math.min(bek,th)), alacak:Math.max(0,bek-th), oran,
     ureticiTam:adet*al, karTam:adet*(sat-al), ureticiPay:adet*al*oran, pazPay:adet*(sat-al)*oran }; }
+// bir TAHSİLAT kaydının üretici payı — önce-üretici bölüşmesinden kayıtta saklanır; eski kayıtta yoksa kalenin alış/satış oranından tahmin edilir
+function tahUPay(t, har){ if(t && t.ureticiPay!=null) return num(t.ureticiPay);
+  const ss=(har||[]).filter(s=>s.tip==="satis" && ((t.musteriId&&s.musteriId===t.musteriId)||((s.yer||"")===(t.yer||""))));
+  const c=ss.reduce((a,s)=>a+num(s.adet)*num(s.satisFiyat),0), k=ss.reduce((a,s)=>a+num(s.adet)*num(s.alisFiyat),0);
+  const o=c>0?Math.max(0,Math.min(1,k/c)):0; return num(t.tutar)*o; }
 const fmtSaat = d => { const t=new Date(d); return pad(t.getHours())+":"+pad(t.getMinutes()); };
 const fmtTarih = d => { const t=new Date(d); return pad(t.getDate())+"."+pad(t.getMonth()+1); };
 const fmtTarihSaat = d => fmtTarih(d)+" "+fmtSaat(d);
@@ -1600,15 +1605,10 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
   const tahsil=sum(sat,x=>satPay(x).tahsil);        // kaleden alınan nakit
   const alacak=sum(sat,x=>satPay(x).alacak);        // kalelerin kalan borcu
   // üretici payı & pazarlamacı ücreti FİİLEN TOPLANAN nakit üzerinden bölüşülür (eski borcun tahsili de dahil, hangi seferde toplandıysa)
-  const kaleMi=(s,t)=> (t.musteriId&&s.musteriId===t.musteriId) || ((s.yer||"")===(t.yer||""));
-  const tahBol=t=>{ if(t.ureticiPay!=null||t.pazPay!=null){ const u=num(t.ureticiPay); return {u, p:num(t.tutar)-u}; }
-    // eski tahsilat kaydı (pay bilgisi yok): o kalenin satışlarının alış/satış oranından tahmin et
-    const ss=(hareketler||[]).filter(s=>s.tip==="satis"&&kaleMi(s,t));
-    const ciroT=ss.reduce((a,s)=>a+num(s.adet)*num(s.satisFiyat),0), alT=ss.reduce((a,s)=>a+num(s.adet)*num(s.alisFiyat),0);
-    const oran=ciroT>0?Math.max(0,Math.min(1,alT/ciroT)):0; const u=num(t.tutar)*oran; return {u, p:num(t.tutar)-u}; };
   const gerSat=sat.filter(x=>x.gerilla);
-  const ureticiBorc=sum(tah,t=>tahBol(t).u)+sum(gerSat,x=>satPay(x).ureticiPay);   // ÜRETİCİYE verilecek — toplanan nakdin alış payı
-  const kar=sum(tah,t=>tahBol(t).p)+sum(gerSat,x=>satPay(x).pazPay);               // SANA kalan — toplanan nakdin marjı
+  // ÖNCE ÜRETİCİ: toplanan nakdin üreticiye ait maliyet payı; kalanı pazarlamacının hakedişi
+  const ureticiBorc=sum(tah,t=>tahUPay(t,hareketler))+sum(gerSat,x=>satPay(x).ureticiPay);
+  const kar=sum(tah,t=>num(t.tutar)-tahUPay(t,hareketler))+sum(gerSat,x=>satPay(x).pazPay);
   const ureticiTam=sum(sat,x=>satPay(x).ureticiTam), karTam=sum(sat,x=>satPay(x).karTam);
   // —— üreticiye ödeme onayı (o an ödenmezse sonradan da onaylanabilir) ——
   const [odemeYuk,setOdemeYuk]=useState(false);
@@ -1617,6 +1617,14 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
     setOdemeYuk(true); try{ await save("sefer",{id:sefer.id,ureticiOdendi:true,ureticiOdenen:ureticiBorc,ureticiOdemeTarih:new Date().toISOString()}); }finally{ setOdemeYuk(false); } }
   async function ureticiGeriAl(){ if(!confirm("Üretici ödeme onayı geri alınsın mı?")) return;
     setOdemeYuk(true); try{ await save("sefer",{id:sefer.id,ureticiOdendi:false,ureticiOdenen:0,ureticiOdemeTarih:""}); }finally{ setOdemeYuk(false); } }
+  // —— pazarlamacı hakedişi (kâr) — ÜRETİCİ ÖDENDİKTEN SONRA, tamamı veya bir kısmı alınabilir ——
+  const pazAlindi=!!sefer.pazHakedisAlindi;
+  async function pazHakedisAl(){ if(!uOdendi && !confirm("Üretici ödemesi henüz onaylanmadı. Yine de hakediş alınsın mı?\n(Kural: önce üretici, sonra sen.)")) return;
+    const s=prompt("🫰 Hakedişini (kârını) al.\nBu seferde alabileceğin en fazla: "+tl(kar)+"\nNe kadar alıyorsun? (₺)", String(Math.round(kar))); if(s==null) return;
+    const m=Math.max(0,Math.min(kar,num(s)));
+    setOdemeYuk(true); try{ await save("sefer",{id:sefer.id,pazHakedisAlindi:true,pazHakedisAlinan:m,pazHakedisTarih:new Date().toISOString()}); }finally{ setOdemeYuk(false); } }
+  async function pazHakedisGeriAl(){ if(!confirm("Hakediş alımı geri alınsın mı?")) return;
+    setOdemeYuk(true); try{ await save("sefer",{id:sefer.id,pazHakedisAlindi:false,pazHakedisAlinan:0,pazHakedisTarih:""}); }finally{ setOdemeYuk(false); } }
   const pazAd=(AKTIF_KUL&&AKTIF_KUL.ad)||sefer.kullaniciAd||"";
   const bas=new Date(sefer.baslangic).getTime(), bit=sefer.bitis?new Date(sefer.bitis).getTime():Date.now();
   const donem=fmtTarihSaat(bas)+(sefer.bitis?(" — "+fmtSaat(bit)):" — (açık)")+" · "+fmtSureSaat((bit-bas)/60000);
@@ -1678,22 +1686,27 @@ function SeferRaporModal({ sefer, hareketler, onKapat }){
       h("div",{style:{fontSize:24,fontWeight:800,color:"#1d4ed8",marginTop:2}},tl(toplananNakit)),
       (tahNakit>0&&gerillaCash>0) && h("div",{style:{fontSize:11,color:C.mut,marginTop:2}},"🧾 tahsilat "+tl(tahNakit)+" · ⚡ gerilla "+tl(gerillaCash)),
       ciro>0 && h("div",{style:{fontSize:11,color:C.mut,marginTop:2}},"Bu sefer satış (ciro) "+tl(ciro)+(alacak>0.5?(" · kalan borç "+tl(alacak)):""))),
-    // 1) İKİ BÜYÜK RAKAM — tahsil edilenin bölüşümü
+    // 1) DAĞILIM — kural: önce üretici maliyeti, sonra pazarlamacı hakedişi (toplam = üreticiye ver + hakedişin)
+    h("div",{style:{fontSize:11.5,color:C.mut,margin:"2px 2px 6px",fontWeight:700}},"Kural: 1) önce üreticiye maliyeti ver  ·  2) sonra hakedişini (kârını) al"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
       h("div",{style:{...S.card,padding:"14px 8px",textAlign:"center",background:"#fff7ed",border:"1px solid #fed7aa"}},
-        h("div",{style:{fontSize:11.5,color:"#9a3412",fontWeight:700}},"🏭 Üreticiye ver"),
-        h("div",{style:{fontSize:26,fontWeight:800,color:"#b45309",marginTop:3}},tl(ureticiBorc)),
-        ureticiTam>ureticiBorc+0.5 && h("div",{style:{fontSize:9.5,color:C.mut}},"tam: "+tl(ureticiTam))),
+        h("div",{style:{fontSize:11.5,color:"#9a3412",fontWeight:700}},"🏭 Üreticiye ver (önce)"),
+        h("div",{style:{fontSize:26,fontWeight:800,color:"#b45309",marginTop:3}},tl(ureticiBorc))),
       h("div",{style:{...S.card,padding:"14px 8px",textAlign:"center",background:"#ecfdf5",border:"1px solid #a7f3d0"}},
-        h("div",{style:{fontSize:11.5,color:"#065f46",fontWeight:700}},"🫰 Senin ücretin"),
-        h("div",{style:{fontSize:26,fontWeight:800,color:"#047857",marginTop:3}},tl(kar)),
-        karTam>kar+0.5 && h("div",{style:{fontSize:9.5,color:C.mut}},"tahsilde tam: "+tl(karTam)))),
-    // 2) Ödeme onayı — hemen büyük rakamların altında
+        h("div",{style:{fontSize:11.5,color:"#065f46",fontWeight:700}},"🫰 Senin hakedişin (kâr)"),
+        h("div",{style:{fontSize:26,fontWeight:800,color:"#047857",marginTop:3}},tl(kar)))),
+    // 2a) ÖNCE üretici ödeme onayı
     ureticiBorc>0 && (uOdendi
       ? h("div",{style:{marginTop:8,padding:"10px 12px",borderRadius:10,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}},
           h("span",{style:{fontSize:13,fontWeight:800,color:"#047857",flex:1,minWidth:0}}, "✓ Üreticiye ödendi — "+tl(num(sefer.ureticiOdenen)||ureticiBorc)+(sefer.ureticiOdemeTarih?(" · "+fmtTarih(new Date(sefer.ureticiOdemeTarih).getTime())):"")),
           h("button",{type:"button",disabled:odemeYuk,onClick:ureticiGeriAl,style:{...S.btn(),padding:"5px 10px",fontSize:12,borderColor:"#b45309",color:"#b45309"}},"↩ geri al"))
-      : h("button",{type:"button",disabled:odemeYuk,onClick:ureticiOde,style:{...S.btn("p"),width:"100%",marginTop:8,background:"#b45309",borderColor:"#b45309"}}, odemeYuk?"…":("🏭 Üreticiye "+tl(ureticiBorc)+" ödedim — onayla"))),
+      : h("button",{type:"button",disabled:odemeYuk,onClick:ureticiOde,style:{...S.btn("p"),width:"100%",marginTop:8,background:"#b45309",borderColor:"#b45309"}}, odemeYuk?"…":("🏭 1) Üreticiye "+tl(ureticiBorc)+" ödedim — onayla"))),
+    // 2b) SONRA pazarlamacı hakedişini al (tamamı veya bir kısmı)
+    kar>0 && (pazAlindi
+      ? h("div",{style:{marginTop:8,padding:"10px 12px",borderRadius:10,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}},
+          h("span",{style:{fontSize:13,fontWeight:800,color:"#047857",flex:1,minWidth:0}}, "✓ Hakediş aldın — "+tl(num(sefer.pazHakedisAlinan))+(num(sefer.pazHakedisAlinan)<kar-0.5?(" / "+tl(kar)):"")+(sefer.pazHakedisTarih?(" · "+fmtTarih(new Date(sefer.pazHakedisTarih).getTime())):"")),
+          h("button",{type:"button",disabled:odemeYuk,onClick:pazHakedisGeriAl,style:{...S.btn(),padding:"5px 10px",fontSize:12,borderColor:"#047857",color:"#047857"}},"↩ geri al"))
+      : h("button",{type:"button",disabled:odemeYuk,onClick:pazHakedisAl,style:{...S.btn("p"),width:"100%",marginTop:8,background:"#047857",borderColor:"#047857"}}, odemeYuk?"…":("🫰 2) Hakedişimi al — tamamı ya da bir kısmı (en fazla "+tl(kar)+")"))),
     // 3) Alacak varsa TEK kırmızı uyarı
     alacak>0 && h("div",{style:{marginTop:8,padding:"9px 12px",borderRadius:10,background:"#fff7f7",border:"1px solid #fecaca",fontSize:13,fontWeight:800,color:"#b91c1c",textAlign:"center"}},
       "🧾 Kalelerin kalan borcu: "+tl(alacak)+" — sonraki tahsilatta topla"),
@@ -1844,7 +1857,8 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
     } finally { mesgul.current=false; }
   }
   // bir satıştan tahsil edilen d ₺'nin bölüşümü: üreticiye alış payı (al/sat oranı), pazarlamacıya kalan marj
-  const payBol=(x,d)=>{ const sat=num(x.satisFiyat), al=num(x.alisFiyat); const oran=sat>0?Math.max(0,Math.min(1,al/sat)):0; const u=d*oran; return {u, p:d-u}; };
+  const payBol=(x,d,onceki)=>{ const K=num(x.adet)*num(x.alisFiyat); const o=num(onceki);
+    const uOnce=Math.min(o,K), uSonra=Math.min(o+d,K); const u=Math.max(0,uSonra-uOnce); return {u, p:Math.max(0,d-u)}; };   // ÖNCE ÜRETİCİ: maliyet (adet×alış) kapanana kadar tahsilat üreticinin; sonrası pazarlamacının hakedişi
   // alacağı tahsil et — kalanı tahsil edilmiş işaretle (kısmi de girilebilir)
   async function tahsilEt(x, miktar){ if(mesgul.current) return; mesgul.current=true;
     try{
@@ -1853,7 +1867,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
     const d=yeni-onceki; if(d<=0) return;
     await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)});   // atomik artır (mutlak yazım eşzamanlı tahsilatı eziyordu)
     // fiilen tahsil edilen tutarı da tahsilat hareketi olarak yaz (üretici/pazarlamacı payı ile) → hangi seferde toplandıysa orada bölüşülür
-    const {u:uPay,p:pPay}=payBol(x,d);
+    const {u:uPay,p:pPay}=payBol(x,d,onceki);
     await harKaydet({tip:"tahsilat",tutar:d,ureticiPay:uPay,pazPay:pPay,yer:x.yer||musteri.ad||"",bolge:x.bolge||musteri.bolge||"",musteriId:x.musteriId||musteri.id||"",seferId:await sidAl(),tarih:new Date().toISOString()});
     } finally { mesgul.current=false; } }
   // toplu tahsilat — girilen parayı kalenin açık borcuna (en eskiden) uygula; borçtan fazlası uygulanmaz (avans yok)
@@ -1861,7 +1875,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
     if(mesgul.current) return; mesgul.current=true;
     try{
     const iso=new Date().toISOString(); const acik=acikAlacaklar.slice().sort((a,b)=>new Date(a.tarih)-new Date(b.tarih)); let uyg=0,uPay=0,pPay=0;
-    for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); const b=payBol(x,d); uPay+=b.u; pPay+=b.p; kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
+    for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); const onceki=num(x.tahsil); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); const b=payBol(x,d,onceki); uPay+=b.u; pPay+=b.p; kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
     if(uyg>0) await harKaydet({tip:"tahsilat",tutar:uyg,ureticiPay:uPay,pazPay:pPay,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso});
     let msg = uyg>0 ? ("🧾 Tahsil edildi: "+tl(uyg)) : "Bu mekanda açık borç yok.";
     if(kalan>0.5) msg += "\n⚠ "+tl(kalan)+" borçtan fazla — uygulanmadı.";
@@ -1949,7 +1963,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       setGec(s=>({...s,fiyat:""})); return alert("📅 Geçmiş stant eklendi · "+gec.tarih); }
     if(gec.tip==="tahsilat"){ let kalan=num(gec.alinan); if(kalan<=0) return alert("Tahsil edilen tutar gir.");
       const acik=acikAlacaklar.slice().sort((a,b)=>new Date(a.tarih)-new Date(b.tarih)); let uyg=0,uPay=0,pPay=0;
-      for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); const b=payBol(x,d); uPay+=b.u; pPay+=b.p; kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
+      for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); const onceki=num(x.tahsil); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); const b=payBol(x,d,onceki); uPay+=b.u; pPay+=b.p; kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
       if(uyg>0) await harKaydet({tip:"tahsilat",tutar:uyg,ureticiPay:uPay,pazPay:pPay,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",kaynak:"gecmis",tarih:iso});
       setGec(s=>({...s,alinan:""})); return alert("📅 Geçmiş tahsilat: "+tl(uyg)+(kalan>0.5?(" · ⚠ "+tl(kalan)+" borçtan fazla, uygulanmadı"):"")); }
     const konsModG=gec.tip==="konsatis"||gec.tip==="iade";
@@ -1983,7 +1997,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       setAkn(s=>({...s,fiyat:""})); return alert(akn.mod==="hediye"?"🎁 Hediye stant kaydedildi.":"💰 Stant satışı kaydedildi."); }
     if(akn.tip==="tahsilat"){ let kalan=num(akn.alinan); if(kalan<=0) return alert("Tahsil edilen tutar gir.");
       const acik=acikAlacaklar.slice().sort((a,b)=>new Date(a.tarih)-new Date(b.tarih)); let uyg=0,uPay=0,pPay=0;
-      for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); const b=payBol(x,d); uPay+=b.u; pPay+=b.p; kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
+      for(const x of acik){ if(kalan<=0)break; const borc=harAlacak(x); const d=Math.min(borc,kalan); const onceki=num(x.tahsil); await save("pazarlama_hareket",{id:x.id,tahsil:increment(d)}); const b=payBol(x,d,onceki); uPay+=b.u; pPay+=b.p; kalan-=d; uyg+=d; }   // atomik — eşzamanlı yazım ezilmez
       if(uyg>0) await harKaydet({tip:"tahsilat",tutar:uyg,ureticiPay:uPay,pazPay:pPay,yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:iso});
       setAkn(s=>({...s,alinan:""})); return alert((uyg>0?("🧾 Tahsil edildi: "+tl(uyg)):"Bu mekanda açık borç yok.")+(kalan>0.5?("\n⚠ "+tl(kalan)+" borçtan fazla, uygulanmadı"):"")); }
     const konsModA=akn.tip==="konsatis"||akn.tip==="iade";
@@ -3820,7 +3834,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     h("tbody",null, rows.length ? rows.map((r,ri)=>h("tr",{key:ri}, r.map((cell,ci)=>h("td",{key:ci,style:{textAlign:ci?"right":"left",padding:"5px 7px",borderBottom:"1px solid #f1f5f9",whiteSpace:"nowrap"}},cell))))
       : h("tr",null,h("td",{style:{padding:"8px",color:C.mut}},"(yok)")))));
   // kapatılmış ama üreticiye ödemesi onaylanmamış seferler (bu pazarlamacı) — sonradan onaylanabilir
-  const seferUreticiBorc=(sid)=>(hareketler||[]).filter(x=>x.seferId===sid&&x.tip==="satis").reduce((s,x)=>s+satPay(x).ureticiPay,0);   // tahsil oranında
+  const seferUreticiBorc=(sid)=>{ const hs=(hareketler||[]).filter(x=>x.seferId===sid);   // ÖNCE ÜRETİCİ: o seferde toplanan nakdin üretici payı (tahsilat + gerilla)
+    return hs.filter(x=>x.tip==="tahsilat").reduce((s,t)=>s+tahUPay(t,hareketler),0)
+         + hs.filter(x=>x.tip==="satis"&&x.gerilla).reduce((s,x)=>s+satPay(x).ureticiPay,0); };
   const benimSeferMi=s=> !AKTIF_KUL || !s.kullaniciId || s.kullaniciId===AKTIF_KUL.id;
   const bekleyenUretici=(seferler||[]).filter(s=>s.durum==="kapali"&&!s.ureticiOdendi&&benimSeferMi(s))
     .map(s=>({s,borc:seferUreticiBorc(s.id)})).filter(o=>o.borc>0).sort((a,b)=>new Date(b.s.bitis||0)-new Date(a.s.bitis||0));
@@ -4276,7 +4292,9 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
   const alacaklar=Object.values(alMap).map(o=>({...o,net:o.borc-o.avans})).filter(o=>Math.abs(o.net)>0.5).sort((a,b)=>b.net-a.net);
   const netAlacakTop=alacaklar.reduce((s,o)=>s+o.net,0);
   // —— üretici ödeme onayı (sefer bazlı): kapatılmış seferlerin üretici borcu ödendi mi / bekliyor mu ——
-  const seferUreticiBorc=(sid)=>H.filter(x=>x.seferId===sid&&x.tip==="satis").reduce((s,x)=>s+satPay(x).ureticiPay,0);   // tahsil oranında
+  const seferUreticiBorc=(sid)=>{ const hs=H.filter(x=>x.seferId===sid);   // ÖNCE ÜRETİCİ: o seferde toplanan nakdin üretici payı (tahsilat + gerilla)
+    return hs.filter(x=>x.tip==="tahsilat").reduce((s,t)=>s+tahUPay(t,H),0)
+         + hs.filter(x=>x.tip==="satis"&&x.gerilla).reduce((s,x)=>s+satPay(x).ureticiPay,0); };
   const kapananSeferler=(seferler||[]).filter(s=>s.durum==="kapali");
   const ureticiOdeme=pazarlamacilar.map(u=>{ let bekleyen=0,odenen=0,bekSayi=0,odeSayi=0;
     kapananSeferler.filter(s=>s.kullaniciId===u.id).forEach(s=>{ const b=seferUreticiBorc(s.id); if(b<=0) return;
