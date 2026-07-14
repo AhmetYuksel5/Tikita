@@ -3104,54 +3104,17 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   // —— 📋 GÜNLÜK BRİFİNG — zil'e basınca açılan sayfa (boğmadan; önce ödül, sonra en acil 1 iş) ——
   const kaleMus=k=>(musteriler||[]).find(m=>m.id===k.musteriId)||{ad:k.ad,bolge:k.bolge,lat:k.lat,lng:k.lng};
   const brifingGovde=()=>{
-    const bugunSon=gunBasi(now).getTime()+864e5;
-    // henüz hiç paylaşılmamış (yeni) ürün — fotoğraflı, fiyatlı
-    const paylasilanAd=new Set(); (hareketler||[]).forEach(x=>{ if(x.tip==="diplomasi"&&x.urunAdlar) String(x.urunAdlar).split(",").forEach(n=>paylasilanAd.add(n.trim().toLocaleLowerCase("tr"))); });
-    const yeniUrun=(urunler||[]).find(u=>num(u.satisFiyat)>0 && (u.foto||[]).length && !paylasilanAd.has((u.ad||"").trim().toLocaleLowerCase("tr")));
-    // 🎯 bugünkü NET görevler — SADECE gerçek durumdan üretilir (yalan "konsinye topla" yok); tıkla → o kale açılır
-    const gorevListe=[]; const eklenen=new Set();
-    // 🏬 GERÇEKTEN açık konsinyesi olan kaleler → git sat / geri topla
-    kaleler.filter(k=>k.acikKons>0).sort((a,b)=>b.gunGecti-a.gunGecti).slice(0,3).forEach(k=>{ eklenen.add(k.key);
-      gorevListe.push({ik:"🏬",ad:k.ad+" — "+k.acikKons+" konsinye sat/topla",alt:(k.gunGecti<900?(k.gunGecti+" gündür uğramadın"):"açık konsinye")+(k.alacak>0.5?(" · "+tl(k.alacak)+" borç"):""),renk:"#7c3aed",onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}); });
-    // 🧾 açık borcu olan kaleler → tahsilat yap
-    kaleler.filter(k=>k.alacak>0.5 && !eklenen.has(k.key)).sort((a,b)=>b.alacak-a.alacak).slice(0,3).forEach(k=>{ eklenen.add(k.key);
-      gorevListe.push({ik:"🧾",ad:k.ad+" — "+tl(k.alacak)+" tahsil et",alt:"açık borç"+(k.gunGecti<900?(" · "+k.gunGecti+" gündür uğramadın"):""),renk:"#b91c1c",onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}); });
-    // ⚔️ konsinye/borç YOK ama uzun süredir işlem yok → uğra, akın yap (düşmesin)
-    tehditli.filter(k=>k.gunGecti>=esik[1] && k.acikKons===0 && k.alacak<=0.5 && !eklenen.has(k.key)).slice(0,3).forEach(k=>{ eklenen.add(k.key);
-      gorevListe.push({ik:"⚔️",ad:k.ad+" — uğra, akın yap",alt:k.gunGecti+" gündür işlem yok · düşmek üzere",renk:k.tehdit[3],onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}); });
-    // 📲 yeni ürün paylaş
-    if(yeniUrun) gorevListe.push({ik:"📲",ad:"Yeni ürün: "+yeniUrun.ad+" — bir kaleyle paylaş",alt:"tanıt, iletişim payesi kazan",renk:"#0369a1",onTap:()=>{ setBrifAcik(false); setKartGonder(yeniUrun); }});
-    const gorunen=gorevListe.slice(0,6);
-    // 🎒 o gün cephane görevleri (kısa)
-    const bugunBiten=(plan||[]).filter(p=>{ const e=new Date(p.baslangic).getTime()+num(p.sureDk)*60000; return e>now && e<bugunSon; }).length;
-    const cephaneNot=[]; if((toplanacak||[]).length) cephaneNot.push("🧹 "+toplanacak.length+" tabla toplanacak"); if(bugunBiten) cephaneNot.push("🖨 "+bugunBiten+" baskı bugün bitiyor");
+    const tamamlanan=gorevler.filter(g=>num(g.deg)>=g.hedef).length;
     return h("div",null,
-      // 🏅 önce yapılanları kutla
-      basarilar.length>0 && h("div",{style:{marginBottom:14,padding:"10px 12px",background:"#ecfdf5",border:"1px solid #bbf7d0",borderRadius:10}},
-        h("div",{style:{fontSize:12,fontWeight:800,color:"#047857",marginBottom:6}},"🏅 Bu hafta başardıkların"),
-        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
-          basarilar.map((b,i)=>h("span",{key:i,style:{fontSize:12,fontWeight:700,color:"#065f46",background:"#d1fae5",borderRadius:99,padding:"3px 10px"}},b)))),
-      // 🎯 bugünkü net görevler
-      h("div",{style:{...S.label,marginBottom:8}},"🎯 Bugün — net görevler"),
-      gorunen.length
-        ? h("div",{style:{display:"grid",gap:7,marginBottom:14}},
-            gorunen.map((g,i)=>h("div",{key:i,onClick:g.onTap||undefined,
-              style:{display:"flex",alignItems:"center",gap:11,padding:"10px 12px",background:"#fff",border:"1px solid "+C.line,borderRadius:10,borderLeft:"4px solid "+g.renk,cursor:g.onTap?"pointer":"default"}},
-              h("span",{style:{width:22,height:22,borderRadius:7,background:g.renk+"1a",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}},g.ik),
-              h("div",{style:{flex:1,minWidth:0}},
-                h("div",{style:{fontSize:13.5,fontWeight:800,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.ad),
-                h("div",{style:{fontSize:11,color:C.mut}},g.alt)),
-              g.onTap && h("span",{style:{color:g.renk,fontWeight:800,flexShrink:0}},"›"))))
-        : h("div",{style:{padding:"14px",textAlign:"center",background:"#ecfdf5",border:"1px solid #bbf7d0",borderRadius:10,color:"#047857",fontWeight:700,marginBottom:14}},"✅ Bugün acil iş yok — yeni bir kale fethetmeye ne dersin?"),
-      // 🎒 bugün cephanede
-      cephaneNot.length>0 && h("div",{onClick:()=>{ setBrifAcik(false); setAlt("cephane"); },
-        style:{display:"flex",alignItems:"center",gap:9,padding:"9px 12px",marginBottom:14,background:"#fff8ef",border:"1px solid #fde3c4",borderRadius:10,cursor:"pointer"}},
-        h("span",{style:{fontSize:16}},"🎒"),
-        h("div",{style:{flex:1,minWidth:0,fontSize:12.5,fontWeight:700,color:"#7a3e00"}}, cephaneNot.join(" · ")),
-        h("span",{style:{color:"#b45309",fontWeight:800}},"›")),
-      // 📈 haftalık hedefler — ilerledikçe güncellenir
-      h("div",{style:{...S.label,marginBottom:8}},"📈 Bu haftanın hedefleri"),
-      h("div",{style:{display:"grid",gap:8}},
+      // 📋 SADECE yöneticinin verdiği görevler
+      benimGorevler.length>0
+        ? gorevKart()
+        : h("div",{style:{padding:"12px 14px",marginBottom:12,background:"#f8fafc",border:"1px solid "+C.line,borderRadius:10,fontSize:12.5,color:C.mut,textAlign:"center",fontWeight:700}},"📋 Yöneticiden açık görev yok."),
+      // 📈 genel hedefler — kısa özet (tek satır başlık + mini çubuklar)
+      h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+        h("div",{style:{...S.label,margin:0}},"📈 Haftalık hedefler"),
+        h("span",{style:{fontSize:12,fontWeight:800,color:tamamlanan>=gorevler.length?"#047857":"#b45309"}}, tamamlanan+"/"+gorevler.length+" tamam")),
+      h("div",{style:{display:"grid",gap:7}},
         gorevler.map((g,i)=>h(Gorev,{key:i,ad:g.ad,deg:g.deg,hedef:g.hedef,renk:g.renk,birim:g.birim}))));
   };
 
