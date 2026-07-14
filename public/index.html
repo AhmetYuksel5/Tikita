@@ -2245,21 +2245,27 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
       islemFormu(gec,setGec,gecmisOnayla,true,"📅 Geçmiş işlemi ekle")),
     duzenHar && h(HareketDuzenModal,{hareket:duzenHar,onSil:geriAl,onKapat:()=>setDuzenHar(null)}),
     hakedisAcik && (()=>{
-      const m={}; har.filter(x=>x.tip==="satis").forEach(x=>{ const ad=x.urunAd||"?"; const adet=num(x.adet); const bk=num(x.satisFiyat)-num(x.alisFiyat); const o=m[ad]||(m[ad]={urun:ad,adet:0,kar:0}); o.adet+=adet; o.kar+=adet*bk; });
-      const kalem=Object.values(m).filter(o=>o.adet>0).sort((a,b)=>b.kar-a.kar);
+      // gün gün öbekle: her gün → o günün ürün kalemleri + günlük kâr
+      const gunler={}; har.filter(x=>x.tip==="satis").forEach(x=>{ const d=new Date(x.tarih);
+        const key=d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+        const g=gunler[key]||(gunler[key]={key,ts:new Date(key+"T00:00:00").getTime(),urun:{},kar:0});
+        const ad=x.urunAd||"?", adet=num(x.adet), bk=num(x.satisFiyat)-num(x.alisFiyat);
+        const o=g.urun[ad]||(g.urun[ad]={urun:ad,adet:0,kar:0}); o.adet+=adet; o.kar+=adet*bk; g.kar+=adet*bk; });
+      const gunList=Object.values(gunler).sort((a,b)=>b.ts-a.ts).map(g=>({...g,kalem:Object.values(g.urun).filter(o=>o.adet>0).sort((a,b)=>b.kar-a.kar)}));
       return h(Modal,{baslik:"🫰 Hakediş dökümü · "+(musteri.ad||""), onKapat:()=>setHakedisAcik(false), alt:h("button",{style:{...S.btn("p"),flex:1},onClick:()=>setHakedisAcik(false)},"Kapat")},
-        h("div",{style:{fontSize:12,color:C.mut,marginBottom:8}},"Bu kaleye yaptığın satışlardan kâr (satış − alış). Önce üretici maliyeti kapanır, kalanı senin hakedişin."),
-        h("div",{style:{...S.card,padding:"4px 12px"}},
-          h("div",{style:{display:"flex",gap:8,padding:"7px 0",borderBottom:"2px solid "+C.line,fontSize:11.5,fontWeight:800,color:C.mut}},
-            h("div",{style:{flex:1}},"Ürün"), h("div",{style:{width:42,textAlign:"right"}},"Adet"), h("div",{style:{width:66,textAlign:"right"}},"Birim kâr"), h("div",{style:{width:72,textAlign:"right"}},"Toplam")),
-          kalem.map((r,i)=>h("div",{key:i,style:{display:"flex",gap:8,padding:"7px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
+        h("div",{style:{fontSize:12,color:C.mut,marginBottom:10}},"Bu kaleye yaptığın satışlardan kâr (satış − alış), gün gün. Önce üretici maliyeti kapanır, kalanı senin hakedişin."),
+        gunList.map((g,gi)=>h("div",{key:g.key,style:{...S.card,padding:"6px 12px 8px",marginBottom:8}},
+          h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"2px solid "+C.line}},
+            h("div",{style:{fontSize:12.5,fontWeight:800,color:"#7c3aed"}},"📅 "+fmtTarih(g.ts)),
+            h("div",{style:{fontSize:13,fontWeight:800,color:"#047857"}},tl(g.kar))),
+          g.kalem.map((r,i)=>h("div",{key:i,style:{display:"flex",gap:8,padding:"6px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
             h("div",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.urun),
-            h("div",{style:{width:42,textAlign:"right",fontWeight:700}},r.adet),
-            h("div",{style:{width:66,textAlign:"right",color:C.mut}},tl(r.adet>0?r.kar/r.adet:0)),
-            h("div",{style:{width:72,textAlign:"right",fontWeight:800,color:"#047857"}},tl(r.kar)))),
-          h("div",{style:{display:"flex",gap:8,padding:"9px 0 4px",borderTop:"2px solid "+C.line,fontSize:13.5,fontWeight:800}},
-            h("div",{style:{flex:1}},"Toplam kâr (hakediş)"), h("div",{style:{color:"#047857"}},tl(satMarj)))),
-        h("div",{style:{display:"flex",gap:8,marginTop:10}},
+            h("div",{style:{width:42,textAlign:"right",fontWeight:700}},"×"+r.adet),
+            h("div",{style:{width:66,textAlign:"right",color:C.mut}},tl(r.adet>0?r.kar/r.adet:0)+"/ad"),
+            h("div",{style:{width:72,textAlign:"right",fontWeight:800,color:"#047857"}},tl(r.kar)))))),
+        h("div",{style:{...S.card,padding:"9px 14px",marginBottom:10,display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:800,background:"#f0fdf4",border:"1px solid #bbf7d0"}},
+          h("div",null,"Toplam kâr (hakediş)"), h("div",{style:{color:"#047857"}},tl(satMarj))),
+        h("div",{style:{display:"flex",gap:8,marginTop:2}},
           h("div",{style:{flex:1,...S.card,padding:"9px 11px",background:"#ecfdf5",border:"1px solid #a7f3d0",textAlign:"center"}},
             h("div",{style:{fontSize:10.5,color:"#065f46",fontWeight:700}},"✓ Alınan hakediş"), h("div",{style:{fontSize:17,fontWeight:800,color:"#047857"}},tl(hakedisAlinan))),
           h("div",{style:{flex:1,...S.card,padding:"9px 11px",background:"#fff7ed",border:"1px solid #fed7aa",textAlign:"center"}},
