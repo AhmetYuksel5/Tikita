@@ -2091,7 +2091,10 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
     await harKaydet({tip:"stant",mod,fiyat,adet:1,urunAd:"Stant",yer:musteri.ad||"",bolge:musteri.bolge||"",musteriId:musteri.id||"",seferId:await sidAl(),tarih:new Date().toISOString()});
     alert(mod==="hediye"?"🎁 Hediye stant kaydedildi.":"💰 Stant satışı kaydedildi · "+tl(fiyat)); }
   const satToplam=har.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0)+standGelir;
-  const satMarj=har.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);
+  const satMarj=har.filter(x=>x.tip==="satis").reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);   // bu kaleye satışlardan TOPLAM hakediş (kâr)
+  // hakedişin fiilen alınan kısmı — ÖNCE ÜRETİCİ: tahsil, alış maliyetini aştıkça pazarlamacıya geçer
+  const hakedisAlinan=har.filter(x=>x.tip==="satis").reduce((s,x)=>{ const bek=num(x.adet)*num(x.satisFiyat), K=num(x.adet)*num(x.alisFiyat); const th=x.tahsil==null?bek:num(x.tahsil); return s+Math.max(0,Math.min(bek,th)-K); },0);
+  const hakedisBekleyen=Math.max(0,satMarj-hakedisAlinan);
   const acikKonsAdet=burada.reduce((s,p)=>s+p.kalan,0);
   const bakiye=burada.reduce((s,p)=>s+p.kalan*(p.satisFiyat||0),0);
   // ALACAK — satıldı ama parası tam alınmamış (tahsil < beklenen)
@@ -2170,6 +2173,12 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
         background:alacakTop>0?"#fef2f2":"#f0fdf4",border:"1px solid "+(alacakTop>0?"#fecaca":"#bbf7d0")}},
         h("div",{style:{fontSize:12.5,fontWeight:800,color:alacakTop>0?"#b91c1c":"#047857"}}, alacakTop>0?"🧾 "+(musteri.ad||"Bu kale")+" — toplam borç":"✅ Bu kalenin borcu yok"),
         h("div",{style:{fontSize:34,fontWeight:800,marginTop:4,color:alacakTop>0?"#b91c1c":"#047857"}}, tl(alacakTop))),
+      // pazarlamacının bu kaleden hakedişi (kâr) — önce üretici: tahsil ilerledikçe alınır
+      satMarj>0.5 && h("div",{style:{...S.card,padding:"11px 14px",marginBottom:12,background:"#ecfdf5",border:"1px solid #a7f3d0"}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
+          h("div",{style:{fontSize:12.5,fontWeight:800,color:"#065f46"}},"🫰 Senin hakedişin (kâr)"),
+          h("div",{style:{fontSize:20,fontWeight:800,color:"#047857"}},tl(satMarj))),
+        h("div",{style:{fontSize:11,color:C.mut,marginTop:3}},"✓ alınan "+tl(hakedisAlinan)+" · ⏳ bekleyen "+tl(hakedisBekleyen)+" — önce üretici maliyeti, sonra hakediş")),
       alacakTop>0 && h("div",{style:{...S.card,padding:"12px"}},
         h("div",{style:{...S.label,marginBottom:8}},"💵 Tahsilat — kaleden alınan parayı yaz"),
         h("div",{style:{display:"flex",gap:8}},
