@@ -1947,6 +1947,7 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
   const [tahsil,setTahsil]=useState({});  // konsinye satıldı: alınan tutar (urunId->₺)
   const [tahsilGir,setTahsilGir]=useState("");  // Alacak sekmesi: toplu tahsil edilen ₺
   const [duzenHar,setDuzenHar]=useState(null);  // düzenlenen hareket
+  const [hakedisAcik,setHakedisAcik]=useState(false);  // hakediş kâr dökümü modalı
   const [tamAlindi,setTamAlindi]=useState(true); const [alinanYeni,setAlinanYeni]=useState(""); // yeni satış tahsilatı
   // GEÇMİŞ İŞLEM GİRİŞİ (geçici yetki) — eski satış/konsinyeleri tarihiyle ekle
   const gecmisYetki = !!(AKTIF_KUL && AKTIF_KUL.gecmisEkle);
@@ -2173,12 +2174,12 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
         background:alacakTop>0?"#fef2f2":"#f0fdf4",border:"1px solid "+(alacakTop>0?"#fecaca":"#bbf7d0")}},
         h("div",{style:{fontSize:12.5,fontWeight:800,color:alacakTop>0?"#b91c1c":"#047857"}}, alacakTop>0?"🧾 "+(musteri.ad||"Bu kale")+" — toplam borç":"✅ Bu kalenin borcu yok"),
         h("div",{style:{fontSize:34,fontWeight:800,marginTop:4,color:alacakTop>0?"#b91c1c":"#047857"}}, tl(alacakTop))),
-      // pazarlamacının bu kaleden hakedişi (kâr) — önce üretici: tahsil ilerledikçe alınır
-      satMarj>0.5 && h("div",{style:{...S.card,padding:"11px 14px",marginBottom:12,background:"#ecfdf5",border:"1px solid #a7f3d0"}},
+      // pazarlamacının bu kaleden hakedişi (kâr) — önce üretici: tahsil ilerledikçe alınır · tıkla → ürün bazında döküm
+      satMarj>0.5 && h("div",{onClick:()=>setHakedisAcik(true),style:{...S.card,padding:"11px 14px",marginBottom:12,background:"#ecfdf5",border:"1px solid #a7f3d0",cursor:"pointer"}},
         h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
-          h("div",{style:{fontSize:12.5,fontWeight:800,color:"#065f46"}},"🫰 Senin hakedişin (kâr)"),
+          h("div",{style:{fontSize:12.5,fontWeight:800,color:"#065f46"}},"🫰 Senin hakedişin (kâr)  ›"),
           h("div",{style:{fontSize:20,fontWeight:800,color:"#047857"}},tl(satMarj))),
-        h("div",{style:{fontSize:11,color:C.mut,marginTop:3}},"✓ alınan "+tl(hakedisAlinan)+" · ⏳ bekleyen "+tl(hakedisBekleyen)+" — önce üretici maliyeti, sonra hakediş")),
+        h("div",{style:{fontSize:11,color:C.mut,marginTop:3}},"✓ alınan "+tl(hakedisAlinan)+" · ⏳ bekleyen "+tl(hakedisBekleyen)+" — dökümü için dokun")),
       alacakTop>0 && h("div",{style:{...S.card,padding:"12px"}},
         h("div",{style:{...S.label,marginBottom:8}},"💵 Tahsilat — kaleden alınan parayı yaz"),
         h("div",{style:{display:"flex",gap:8}},
@@ -2242,7 +2243,27 @@ function MevkiModal({ musteri, bagItems, urunler, hareketler, aktifSeferId, sefe
     tab==="gecmis" && gecmisYetki && h("div",null,
       h("div",{style:{fontSize:12.5,color:C.mut,marginBottom:10,lineHeight:1.5}},"📅 Eski işlemlerini ",h("b",null,"tarihiyle")," ekle. Stok/çantayı etkilemez; sadece bu kalenin geçmişine ve güç hesabına işler."),
       islemFormu(gec,setGec,gecmisOnayla,true,"📅 Geçmiş işlemi ekle")),
-    duzenHar && h(HareketDuzenModal,{hareket:duzenHar,onSil:geriAl,onKapat:()=>setDuzenHar(null)}));
+    duzenHar && h(HareketDuzenModal,{hareket:duzenHar,onSil:geriAl,onKapat:()=>setDuzenHar(null)}),
+    hakedisAcik && (()=>{
+      const m={}; har.filter(x=>x.tip==="satis").forEach(x=>{ const ad=x.urunAd||"?"; const adet=num(x.adet); const bk=num(x.satisFiyat)-num(x.alisFiyat); const o=m[ad]||(m[ad]={urun:ad,adet:0,kar:0}); o.adet+=adet; o.kar+=adet*bk; });
+      const kalem=Object.values(m).filter(o=>o.adet>0).sort((a,b)=>b.kar-a.kar);
+      return h(Modal,{baslik:"🫰 Hakediş dökümü · "+(musteri.ad||""), onKapat:()=>setHakedisAcik(false), alt:h("button",{style:{...S.btn("p"),flex:1},onClick:()=>setHakedisAcik(false)},"Kapat")},
+        h("div",{style:{fontSize:12,color:C.mut,marginBottom:8}},"Bu kaleye yaptığın satışlardan kâr (satış − alış). Önce üretici maliyeti kapanır, kalanı senin hakedişin."),
+        h("div",{style:{...S.card,padding:"4px 12px"}},
+          h("div",{style:{display:"flex",gap:8,padding:"7px 0",borderBottom:"2px solid "+C.line,fontSize:11.5,fontWeight:800,color:C.mut}},
+            h("div",{style:{flex:1}},"Ürün"), h("div",{style:{width:42,textAlign:"right"}},"Adet"), h("div",{style:{width:66,textAlign:"right"}},"Birim kâr"), h("div",{style:{width:72,textAlign:"right"}},"Toplam")),
+          kalem.map((r,i)=>h("div",{key:i,style:{display:"flex",gap:8,padding:"7px 0",borderTop:i?"1px solid "+C.line:"none",fontSize:12.5}},
+            h("div",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.urun),
+            h("div",{style:{width:42,textAlign:"right",fontWeight:700}},r.adet),
+            h("div",{style:{width:66,textAlign:"right",color:C.mut}},tl(r.adet>0?r.kar/r.adet:0)),
+            h("div",{style:{width:72,textAlign:"right",fontWeight:800,color:"#047857"}},tl(r.kar)))),
+          h("div",{style:{display:"flex",gap:8,padding:"9px 0 4px",borderTop:"2px solid "+C.line,fontSize:13.5,fontWeight:800}},
+            h("div",{style:{flex:1}},"Toplam kâr (hakediş)"), h("div",{style:{color:"#047857"}},tl(satMarj)))),
+        h("div",{style:{display:"flex",gap:8,marginTop:10}},
+          h("div",{style:{flex:1,...S.card,padding:"9px 11px",background:"#ecfdf5",border:"1px solid #a7f3d0",textAlign:"center"}},
+            h("div",{style:{fontSize:10.5,color:"#065f46",fontWeight:700}},"✓ Alınan hakediş"), h("div",{style:{fontSize:17,fontWeight:800,color:"#047857"}},tl(hakedisAlinan))),
+          h("div",{style:{flex:1,...S.card,padding:"9px 11px",background:"#fff7ed",border:"1px solid #fed7aa",textAlign:"center"}},
+            h("div",{style:{fontSize:10.5,color:"#9a3412",fontWeight:700}},"⏳ Bekleyen"), h("div",{style:{fontSize:17,fontWeight:800,color:"#b45309"}},tl(hakedisBekleyen))))); })());
 }
 
 /* ============================================================
