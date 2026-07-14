@@ -3543,7 +3543,15 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
           : h("button",{style:{...S.ibtn,color:"#fff",background:"#b45309",borderColor:"#b45309",fontWeight:700},onClick:()=>setMusteriBag(m)},"⚔️ Akın"))); };
   const kaleView=()=>{
     // KALE = satış/konsinye görmüş müşteri; henüz işlem yapılmamış kayıtlar GÖZCÜ adayıdır (🔭 sekmesinde)
-    const aktifMus=(musteriler||[]).filter(m=>!m.arsiv && kaleMi(m)).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+    // sıralama için: her kalenin toplam satış cirosu + son hareket tarihi
+    const musByAd={}; (musteriler||[]).forEach(m=>{ if(m.ad) musByAd[m.ad]=m; });
+    const kInfo={}; (hareketler||[]).forEach(x=>{ const m = (x.musteriId&&musById[x.musteriId]) || (x.yer&&musByAd[x.yer]); if(!m) return;
+      const s=kInfo[m.id]||(kInfo[m.id]={ciro:0,son:0}); const t=new Date(x.tarih).getTime()||0;
+      if(x.tip==="satis") s.ciro+=num(x.adet)*num(x.satisFiyat);
+      if(t>s.son && ["satis","konsinye","tahsilat","stant","iade","diplomasi"].includes(x.tip)) s.son=t; });
+    const kv=m=>kInfo[m.id]||{ciro:0,son:0};
+    // önce en çok satış yapan, sonra en yeni (son işlem tarihi)
+    const aktifMus=(musteriler||[]).filter(m=>!m.arsiv && kaleMi(m)).slice().sort((a,b)=>{ const A=kv(a),B=kv(b); return (B.ciro-A.ciro) || (B.son-A.son) || (a.ad||"").localeCompare(b.ad||"","tr"); });
     const adaySayi=(musteriler||[]).filter(m=>!m.arsiv && !kaleMi(m)).length;
     const arsivMus=(musteriler||[]).filter(m=>m.arsiv).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
     return h("div",null,
