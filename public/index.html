@@ -2731,6 +2731,12 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     if(!ilkAkinMap[key]||t<ilkAkinMap[key]) ilkAkinMap[key]=t; });
   kaleler.forEach(k=>{ k.sonAkin=sonAkinMap[k.key]||0; k.ilkAkin=ilkAkinMap[k.key]||0;
     k.gunGecti = k.sonAkin ? Math.floor((now-k.sonAkin)/86400000) : 999; k.tehdit=tehditOfDin(k.gunGecti); });
+  // her kalenin GERÇEK açık konsinyesi (kalan>0) ve açık borcu (alacak) — brifing bunları doğru kullanır (yalan "konsinye topla" olmasın)
+  const _acikKonsMap={}, _alacakMap={};
+  (hareketler||[]).forEach(x=>{ if(x.gerilla) return; const key=_kaleKey(x);
+    if(x.tip==="konsinye" && num(x.kalan)>0) _acikKonsMap[key]=(_acikKonsMap[key]||0)+num(x.kalan);
+    else if(x.tip==="satis"){ const bek=num(x.adet)*num(x.satisFiyat); const t=x.tahsil==null?bek:num(x.tahsil); const borc=Math.max(0,bek-t); if(borc>0) _alacakMap[key]=(_alacakMap[key]||0)+borc; } });
+  kaleler.forEach(k=>{ k.acikKons=_acikKonsMap[k.key]||0; k.alacak=Math.max(0,_alacakMap[k.key]||0); });
   const tehditli = kaleler.filter(k=>k.gunGecti>=esik[0]).sort((a,b)=>b.gunGecti-a.gunGecti);
   const tehditSay = { huzur:kaleler.filter(k=>k.gunGecti>=esik[0]&&k.gunGecti<esik[1]).length,
                       tehdit:kaleler.filter(k=>k.gunGecti>=esik[1]&&k.gunGecti<esik[2]).length,
@@ -2760,7 +2766,9 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
   // ACİL (zil rozeti bunları sayar) — kullanıcıyı boğmasın diye yalnız gerçekten önemli olanlar
   const dusSaf=Math.max(0,tehditSay.dus-terkKaleler.length);   // 30-39 gün (terk hariç)
   const acilUyari=[], nazikUyari=[];
-  if(terkKaleler.length) acilUyari.push(["🏳️",terkKaleler.length+" kalede "+terkEsik+"+ gündür yoksun","Git konsinyeleri topla, hesabı kapat","#7f1d1d"]);
+  if(terkKaleler.length) acilUyari.push(["🏳️",terkKaleler.length+" kalede "+terkEsik+"+ gündür yoksun","uğra, hesabı gözden geçir","#7f1d1d"]);
+  const konsBekKale=kaleler.filter(k=>k.acikKons>0);   // GERÇEKTEN açık konsinyesi olan kaleler
+  if(konsBekKale.length) acilUyari.push(["🏬",konsBekKale.reduce((s,k)=>s+k.acikKons,0)+" konsinye "+konsBekKale.length+" kalede bekliyor","git sat ya da geri topla","#7c3aed"]);
   if(dusSaf)          acilUyari.push(["🔴",dusSaf+" kale düşmek üzere",esik[2]+"+ gündür akın yok","#dc2626"]);
   if(tehditSay.tehdit)acilUyari.push(["🟠",tehditSay.tehdit+" kale tehdit altında",esik[1]+"+ gündür akın yok","#ea580c"]);
   if(alacakGenel>0)   acilUyari.push(["🧾",tl(alacakGenel)+" tahsil edilecek","açık alacak","#b91c1c"]);
@@ -3107,12 +3115,19 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
     // henüz hiç paylaşılmamış (yeni) ürün — fotoğraflı, fiyatlı
     const paylasilanAd=new Set(); (hareketler||[]).forEach(x=>{ if(x.tip==="diplomasi"&&x.urunAdlar) String(x.urunAdlar).split(",").forEach(n=>paylasilanAd.add(n.trim().toLocaleLowerCase("tr"))); });
     const yeniUrun=(urunler||[]).find(u=>num(u.satisFiyat)>0 && (u.foto||[]).length && !paylasilanAd.has((u.ad||"").trim().toLocaleLowerCase("tr")));
-    // 🎯 bugünkü NET görevler — tıkla, yap; yapıldıkça listeden düşer
-    const gorevListe=[];
-    terkKaleler.slice(0,2).forEach(k=>gorevListe.push({ik:"🏳️",ad:k.ad+" — git konsinyeyi topla",alt:k.gunGecti+" gündür yoksun · hesabı kapat",renk:"#7f1d1d",onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}));
-    tehditli.filter(k=>k.gunGecti>=esik[1] && k.gunGecti<terkEsik).slice(0,3).forEach(k=>gorevListe.push({ik:"⚔️",ad:k.ad+" komutanıyla görüş",alt:k.gunGecti+" gündür akın yok",renk:k.tehdit[3],onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}));
+    // 🎯 bugünkü NET görevler — SADECE gerçek durumdan üretilir (yalan "konsinye topla" yok); tıkla → o kale açılır
+    const gorevListe=[]; const eklenen=new Set();
+    // 🏬 GERÇEKTEN açık konsinyesi olan kaleler → git sat / geri topla
+    kaleler.filter(k=>k.acikKons>0).sort((a,b)=>b.gunGecti-a.gunGecti).slice(0,3).forEach(k=>{ eklenen.add(k.key);
+      gorevListe.push({ik:"🏬",ad:k.ad+" — "+k.acikKons+" konsinye sat/topla",alt:(k.gunGecti<900?(k.gunGecti+" gündür uğramadın"):"açık konsinye")+(k.alacak>0.5?(" · "+tl(k.alacak)+" borç"):""),renk:"#7c3aed",onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}); });
+    // 🧾 açık borcu olan kaleler → tahsilat yap
+    kaleler.filter(k=>k.alacak>0.5 && !eklenen.has(k.key)).sort((a,b)=>b.alacak-a.alacak).slice(0,3).forEach(k=>{ eklenen.add(k.key);
+      gorevListe.push({ik:"🧾",ad:k.ad+" — "+tl(k.alacak)+" tahsil et",alt:"açık borç"+(k.gunGecti<900?(" · "+k.gunGecti+" gündür uğramadın"):""),renk:"#b91c1c",onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}); });
+    // ⚔️ konsinye/borç YOK ama uzun süredir işlem yok → uğra, akın yap (düşmesin)
+    tehditli.filter(k=>k.gunGecti>=esik[1] && k.acikKons===0 && k.alacak<=0.5 && !eklenen.has(k.key)).slice(0,3).forEach(k=>{ eklenen.add(k.key);
+      gorevListe.push({ik:"⚔️",ad:k.ad+" — uğra, akın yap",alt:k.gunGecti+" gündür işlem yok · düşmek üzere",renk:k.tehdit[3],onTap:()=>{ setBrifAcik(false); setMusteriBag(kaleMus(k)); }}); });
+    // 📲 yeni ürün paylaş
     if(yeniUrun) gorevListe.push({ik:"📲",ad:"Yeni ürün: "+yeniUrun.ad+" — bir kaleyle paylaş",alt:"tanıt, iletişim payesi kazan",renk:"#0369a1",onTap:()=>{ setBrifAcik(false); setKartGonder(yeniUrun); }});
-    if(alacakGenel>0) gorevListe.push({ik:"🧾",ad:tl(alacakGenel)+" alacağını tahsil et",alt:"açık alacaklar",renk:"#b91c1c",onTap:null});
     const gorunen=gorevListe.slice(0,6);
     // 🎒 o gün cephane görevleri (kısa)
     const bugunBiten=(plan||[]).filter(p=>{ const e=new Date(p.baslangic).getTime()+num(p.sureDk)*60000; return e>now && e<bugunSon; }).length;
