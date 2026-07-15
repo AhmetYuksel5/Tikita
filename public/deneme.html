@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Tikita · Deneme (Emir)</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+  :root{
+    --bg:#0e1014; --bg2:#0b0d11;
+    --surf:#171a21; --surf2:#1f232c; --line:rgba(255,255,255,.07);
+    --txt:#f2f3f5; --mut:#8b909a; --mut2:#5f636d;
+    --gold:#f5a623; --gold2:#e08a1e;
+    --cyan:#38bdf8; --violet:#a78bfa; --green:#34d399; --red:#f87171;
+    --r:20px;
+  }
+  html,body{background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
+  #root{max-width:520px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:96px}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  .fade{animation:fade .5s cubic-bezier(.2,.7,.2,1) both}
+  .rise{animation:rise .55s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @keyframes barfill{from{width:0}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  ::-webkit-scrollbar{display:none}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
+const db=getFirestore(initializeApp(cfg));
+const {useState,useEffect,useMemo}=React; const h=React.createElement;
+
+/* ————— aynı iş mantığı, birebir korunuyor ————— */
+const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+const tl=n=>{const x=Math.round(num(n)); return x.toLocaleString("tr-TR")+" ₺";};
+const KOMUTAN=[[0,"Acemi Er","🌱"],[50,"Onbaşı","🎖️"],[150,"Çavuş","🏅"],[400,"Teğmen","⭐"],[900,"Yüzbaşı","🔥"],[2000,"Binbaşı","⚔️"],[4500,"Paşa","🏰"],[9000,"Serdar-ı Ekrem","👑"]];
+const ASKER_TIER=[[0,1],[50,2],[100,3],[250,5],[1000,9]];
+const SILAH_TIER=[[0,1],[500,2],[1000,3],[2500,5],[5000,9]];
+const katOf=(t,v)=>{let r=t[0];for(const x of t)if(v>=x[0])r=x;return r;};
+const gunFark=t=>{const d=new Date(t).getTime();return d?Math.floor((Date.now()-d)/864e5):999;};
+
+function useColl(name){ const [rows,setRows]=useState(null);
+  useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error(name,e);setRows([]);}),[]);
+  return rows; }
+
+function hesap(hareketler,musteriler,kullanicilar){
+  const emir=(kullanicilar||[]).find(u=>(u.ad||"").trim().toLocaleLowerCase("tr")==="emir") || {id:"mr14ih8vc39wug",ad:"Emir",simge:"🎖️"};
+  const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
+  const kaleKey=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
+  // kaleler
+  const kM={};
+  (hareketler||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||x.gerilla) return;
+    const k=kM[kaleKey(x)]||(kM[kaleKey(x)]={key:kaleKey(x),musteriId:x.musteriId||"",ad:x.yer||"",bolge:x.bolge||"",lat:x.lat||"",lng:x.lng||"",satisAdet:0,ciro:0,konsAdet:0});
+    if(x.tip==="satis"){k.satisAdet+=num(x.adet);k.ciro+=num(x.adet)*num(x.satisFiyat);} else k.konsAdet+=num(x.adet);
+    if(!k.ad&&x.yer)k.ad=x.yer; if(!k.bolge&&x.bolge)k.bolge=x.bolge; });
+  // per-kale açık konsinye · borç · son ziyaret
+  const acikK={},borcK={},sonK={};
+  (hareketler||[]).forEach(x=>{ if(x.gerilla) return; const k=kaleKey(x); const t=new Date(x.tarih).getTime()||0;
+    if(["satis","konsinye","iade","tahsilat","stant"].includes(x.tip)) sonK[k]=Math.max(sonK[k]||0,t);
+    if(x.tip==="konsinye"&&num(x.kalan)>0) acikK[k]=(acikK[k]||0)+num(x.kalan);
+    else if(x.tip==="satis"){const bek=num(x.adet)*num(x.satisFiyat);const th=x.tahsil==null?bek:num(x.tahsil);const b=Math.max(0,bek-th);if(b>0)borcK[k]=(borcK[k]||0)+b;} });
+  const kaleler=Object.values(kM).map(k=>{ const m=k.musteriId&&musById[k.musteriId];
+    if(m){k.ad=m.ad||k.ad;k.bolge=m.bolge||k.bolge;if(!k.lat&&m.lat){k.lat=m.lat;k.lng=m.lng;}}
+    const silah=Math.floor(k.ciro/250);
+    k.guc=Math.round(k.satisAdet*katOf(ASKER_TIER,k.satisAdet)[1] + k.konsAdet*1 + silah*katOf(SILAH_TIER,k.ciro)[1]);
+    k.acikKons=acikK[k.key]||0; k.borc=Math.max(0,borcK[k.key]||0); k.son=sonK[k.key]||0; k.gunGecti=k.son?gunFark(k.son):999;
+    return k; }).filter(k=>k.ad).sort((a,b)=>b.guc-a.guc);
+  const toplamGuc=kaleler.reduce((s,k)=>s+k.guc,0);
+  const komutan=katOf(KOMUTAN,toplamGuc); const sonraki=KOMUTAN.find(x=>x[0]>toplamGuc)||null;
+  // kaynaklar
+  const gerillaGanimet=(hareketler||[]).filter(x=>x.gerilla&&x.tip==="satis").reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+  const satisGun=new Set((hareketler||[]).filter(x=>x.tip==="satis").map(x=>{const d=new Date(x.tarih);return d.getFullYear()+"-"+d.getMonth()+"-"+d.getDate();}));
+  // streak
+  let streak=0; { const g=new Date(); const key=d=>d.getFullYear()+"-"+d.getMonth()+"-"+d.getDate();
+    if(!satisGun.has(key(g))) g.setDate(g.getDate()-1);
+    while(satisGun.has(key(g))){streak++; g.setDate(g.getDate()-1);} }
+  // bu hafta ciro/kâr (7 gün)
+  const haf=Date.now()-7*864e5;
+  const hs=(hareketler||[]).filter(x=>x.tip==="satis"&&new Date(x.tarih).getTime()>=haf);
+  const hafCiro=hs.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+  const hafKar=hs.reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);
+  // görevler — SADECE gerçek durum, tek öncelik
+  const gorevler=[];
+  kaleler.filter(k=>k.borc>0.5).sort((a,b)=>b.borc-a.borc).forEach(k=>gorevler.push({tip:"tahsil",renk:"var(--gold)",ik:"🧾",kale:k,baslik:k.ad,aksiyon:tl(k.borc)+" tahsil et",alt:(k.gunGecti<900?k.gunGecti+" gündür uğramadın":"açık borç")}));
+  kaleler.filter(k=>k.acikKons>0&&k.borc<=0.5).sort((a,b)=>b.acikKons-a.acikKons).forEach(k=>gorevler.push({tip:"konsinye",renk:"var(--violet)",ik:"🏬",kale:k,baslik:k.ad,aksiyon:k.acikKons+" konsinye sat / topla",alt:(k.gunGecti<900?k.gunGecti+" gündür uğramadın":"açık konsinye")}));
+  kaleler.filter(k=>k.acikKons<=0&&k.borc<=0.5&&k.gunGecti>=14&&k.gunGecti<900).sort((a,b)=>b.guc-a.guc).forEach(k=>gorevler.push({tip:"ziyaret",renk:"var(--cyan)",ik:"⚔️",kale:k,baslik:k.ad,aksiyon:"uğra, akın yap",alt:k.gunGecti+" gündür işlem yok"}));
+  return {emir,kaleler,toplamGuc,komutan,sonraki,gerillaGanimet,streak,hafCiro,hafKar,gorevler,
+    konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0)};
+}
+
+/* ————— UI ————— */
+function Toast({msg}){ if(!msg) return null;
+  return h("div",{className:"fade",style:{position:"fixed",left:"50%",bottom:110,transform:"translateX(-50%)",zIndex:50,
+    background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--txt)",padding:"12px 18px",borderRadius:14,
+    fontSize:13.5,fontWeight:600,boxShadow:"0 12px 40px rgba(0,0,0,.5)",maxWidth:"88%",textAlign:"center"}},msg); }
+
+function Chip({ik,val,sub,renk}){ return h("div",{style:{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,.09)",
+    padding:"7px 11px",borderRadius:12,backdropFilter:"blur(4px)"}},
+  h("span",{style:{fontSize:15}},ik),
+  h("div",{style:{lineHeight:1.1}},
+    h("div",{style:{fontSize:13.5,fontWeight:800,color:renk||"#fff"}},val),
+    sub&&h("div",{style:{fontSize:9.5,color:"rgba(255,255,255,.6)",fontWeight:600,letterSpacing:.3}},sub))); }
+
+function Home({d,toast}){
+  const {emir,komutan,sonraki,toplamGuc,kaleler,gerillaGanimet,streak,hafCiro,hafKar,gorevler,konsToplam}=d;
+  const taban=komutan[0], tavan=sonraki?sonraki[0]:komutan[0];
+  const oran=tavan>taban?Math.max(4,Math.min(100,Math.round((toplamGuc-taban)/(tavan-taban)*100))):100;
+  const kalanGuc=sonraki?(sonraki[0]-toplamGuc):0;
+  const primary=gorevler[0]; const digerler=gorevler.slice(1,4);
+  const say=(t)=>toast("⚔️ "+t+" — tam sürümde bu ekran açılacak");
+
+  return h("div",null,
+    // ——— 1) KOMUTAN HUD ———
+    h("div",{className:"fade",style:{background:"linear-gradient(150deg,#3a1414 0%,#7c2d12 52%,#b45309 130%)",
+      padding:"calc(env(safe-area-inset-top,0px) + 20px) 20px 22px",borderRadius:"0 0 28px 28px",
+      boxShadow:"0 10px 34px rgba(124,45,18,.45)",position:"relative",overflow:"hidden"}},
+      h("div",{style:{position:"absolute",top:-40,right:-30,fontSize:150,opacity:.08,transform:"rotate(-12deg)"}},"⚔️"),
+      h("div",{style:{display:"flex",alignItems:"center",gap:14,position:"relative"}},
+        h("div",{style:{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,.15)",border:"2px solid rgba(255,255,255,.35)",
+          display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,flexShrink:0}},emir.simge||"🎖️"),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:11,fontWeight:700,letterSpacing:1,color:"rgba(255,255,255,.7)"}},"KOMUTAN · "+(emir.ad||"—").toUpperCase()),
+          h("div",{style:{fontSize:23,fontWeight:800,color:"#fff",lineHeight:1.1,marginTop:2}},komutan[2]+" "+komutan[1])),
+        h("button",{onClick:()=>toast("🔔 "+gorevler.length+" görevin var"),style:{position:"relative",width:42,height:42,borderRadius:12,
+          background:"rgba(0,0,0,.22)",border:"1px solid rgba(255,255,255,.18)",fontSize:18}},"🔔",
+          gorevler.length>0&&h("span",{style:{position:"absolute",top:-5,right:-5,minWidth:19,height:19,borderRadius:10,background:"var(--gold)",
+            color:"#3a1414",fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",animation:"pulse 1.6s infinite"}},gorevler.length))),
+      // güç bar
+      h("div",{style:{marginTop:16,position:"relative"}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,color:"rgba(255,255,255,.8)",fontWeight:600,marginBottom:5}},
+          h("span",null,"💪 "+toplamGuc.toLocaleString("tr-TR")+" güç"),
+          sonraki?h("span",null,kalanGuc.toLocaleString("tr-TR")+" → "+sonraki[2]+" "+sonraki[1]):h("span",null,"en yüksek rütbe 👑")),
+        h("div",{style:{height:9,borderRadius:99,background:"rgba(0,0,0,.28)",overflow:"hidden"}},
+          h("div",{style:{height:"100%",width:oran+"%",borderRadius:99,background:"linear-gradient(90deg,#ffd479,#f5a623)",
+            boxShadow:"0 0 12px rgba(245,166,35,.6)",animation:"barfill 1s cubic-bezier(.2,.7,.2,1)"}}))),
+      // kaynak çipleri
+      h("div",{style:{display:"flex",gap:9,marginTop:16}},
+        h(Chip,{ik:"🏰",val:kaleler.length,sub:"KALE"}),
+        h(Chip,{ik:"🔥",val:streak+" gün",sub:"SERİ",renk:streak>0?"#ffd479":"#fff"}),
+        h(Chip,{ik:"⚡",val:tl(gerillaGanimet),sub:"GANİMET"}))),
+
+    // ——— 2) BUGÜNKÜ GÖREVİN (tek birincil aksiyon) ———
+    h("div",{style:{padding:"22px 16px 0"}},
+      h("div",{style:{fontSize:12,fontWeight:800,letterSpacing:1.2,color:"var(--mut)",marginBottom:11,paddingLeft:2}},"BUGÜNKÜ GÖREVİN"),
+      primary
+        ? h("div",{className:"rise",style:{background:"linear-gradient(160deg,var(--surf) 0%,var(--surf2) 100%)",borderRadius:24,
+            padding:20,border:"1px solid var(--line)",boxShadow:"0 14px 40px rgba(0,0,0,.4)",position:"relative",overflow:"hidden"}},
+            h("div",{style:{position:"absolute",top:-24,right:-10,fontSize:96,opacity:.06}},primary.ik),
+            h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:4}},
+              h("div",{style:{width:48,height:48,borderRadius:14,background:primary.renk+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}},primary.ik),
+              h("div",{style:{minWidth:0}},
+                h("div",{style:{fontSize:11,fontWeight:700,color:primary.renk,letterSpacing:.5,textTransform:"uppercase"}},
+                  primary.tip==="tahsil"?"Tahsilat":primary.tip==="konsinye"?"Konsinye":"Ziyaret"),
+                h("div",{style:{fontSize:19,fontWeight:800,color:"var(--txt)",lineHeight:1.15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},primary.baslik))),
+            h("div",{style:{fontSize:14.5,color:"var(--mut)",margin:"10px 0 18px",lineHeight:1.4}},
+              h("b",{style:{color:"var(--txt)"}},primary.aksiyon)," · ",primary.alt),
+            h("button",{onClick:()=>say(primary.baslik+" — "+primary.aksiyon),
+              style:{width:"100%",padding:"16px",borderRadius:16,background:"linear-gradient(90deg,#f7b733,#e08a1e)",
+                color:"#2a1408",fontSize:16.5,fontWeight:800,boxShadow:"0 8px 22px rgba(245,166,35,.35)",
+                display:"flex",alignItems:"center",justifyContent:"center",gap:8}},
+              (primary.tip==="tahsil"?"🧾 Tahsil et":primary.tip==="konsinye"?"🏬 Sat / Topla":"⚔️ Akına git")," →"))
+        : h("div",{className:"rise",style:{background:"var(--surf)",borderRadius:24,padding:"26px 20px",border:"1px solid var(--line)",textAlign:"center"}},
+            h("div",{style:{fontSize:40,marginBottom:8}},"🏆"),
+            h("div",{style:{fontSize:17,fontWeight:800}},"Tüm hesaplar temiz!"),
+            h("div",{style:{fontSize:14,color:"var(--mut)",marginTop:4}},"Yeni bir kale fethetmeye ne dersin?"),
+            h("button",{onClick:()=>say("Keşfet"),style:{marginTop:16,width:"100%",padding:"15px",borderRadius:16,
+              background:"linear-gradient(90deg,#f7b733,#e08a1e)",color:"#2a1408",fontSize:16,fontWeight:800}},"🧭 Keşfet →"))),
+
+    // ——— 3) SIRADAKI (ikincil, sessiz) ———
+    digerler.length>0 && h("div",{style:{padding:"20px 16px 0"}},
+      h("div",{style:{fontSize:12,fontWeight:800,letterSpacing:1,color:"var(--mut2)",marginBottom:10,paddingLeft:2}},"SIRADAKİ"),
+      h("div",{style:{display:"grid",gap:8}},
+        digerler.map((g,i)=>h("button",{key:i,onClick:()=>say(g.baslik+" — "+g.aksiyon),
+          style:{display:"flex",alignItems:"center",gap:13,padding:"13px 14px",background:"var(--surf)",borderRadius:16,
+            border:"1px solid var(--line)",textAlign:"left",width:"100%"}},
+          h("div",{style:{width:38,height:38,borderRadius:11,background:g.renk+"1e",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}},g.ik),
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:14.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.baslik),
+            h("div",{style:{fontSize:12,color:"var(--mut)",marginTop:1}},g.aksiyon)),
+          h("span",{style:{color:"var(--mut2)",fontSize:20,flexShrink:0}},"›"))))),
+
+    // ——— 4) İLERLEME (üçüncül) ———
+    h("div",{style:{padding:"22px 16px 0"}},
+      h("div",{style:{fontSize:12,fontWeight:800,letterSpacing:1,color:"var(--mut2)",marginBottom:10,paddingLeft:2}},"BU HAFTA"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}},
+        [["💰",tl(hafCiro),"ciro","var(--green)"],["🫰",tl(hafKar),"hakediş","var(--gold)"],["🏬",konsToplam,"açık kons.","var(--violet)"]]
+          .map((s,i)=>h("div",{key:i,style:{background:"var(--surf)",borderRadius:16,padding:"14px 10px",border:"1px solid var(--line)",textAlign:"center"}},
+            h("div",{style:{fontSize:17,marginBottom:4}},s[0]),
+            h("div",{style:{fontSize:15,fontWeight:800,color:s[3],lineHeight:1.1}},s[1]),
+            h("div",{style:{fontSize:10.5,color:"var(--mut)",marginTop:3,fontWeight:600}},s[2]))))));
+}
+
+function Nav({aktif,setAktif,toast}){
+  const items=[["us","⛺","Üs"],["kaleler","🏰","Kaleler"],["harita","🗺️","Harita"],["cephane","🎒","Cephane"],["rapor","📊","Rapor"]];
+  return h("div",{style:{position:"fixed",bottom:0,left:0,right:0,zIndex:40}},
+    h("div",{style:{maxWidth:520,margin:"0 auto",background:"rgba(14,16,20,.86)",backdropFilter:"blur(14px)",
+      borderTop:"1px solid var(--line)",display:"grid",gridTemplateColumns:"repeat(5,1fr)",
+      padding:"8px 8px calc(env(safe-area-inset-bottom,0px) + 8px)"}},
+      items.map(([k,ik,ad])=>{const on=aktif===k;
+        return h("button",{key:k,onClick:()=>{ if(k==="us"){setAktif(k);} else {toast(ad+" — tam sürümde gelecek");} },
+          style:{display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"6px 0",borderRadius:12,
+            color:on?"var(--gold)":"var(--mut2)",transition:"color .2s"}},
+          h("span",{style:{fontSize:21,filter:on?"none":"grayscale(.4)",opacity:on?1:.75,transform:on?"scale(1.08)":"none",transition:"transform .2s"}},ik),
+          h("span",{style:{fontSize:10.5,fontWeight:on?800:600,letterSpacing:.2}},ad),
+          on&&h("span",{style:{width:5,height:5,borderRadius:5,background:"var(--gold)",marginTop:1}}))})));
+}
+
+function App(){
+  const hareketler=useColl("pazarlama_hareket");
+  const musteriler=useColl("musteri");
+  const kullanicilar=useColl("kullanici");
+  const [aktif,setAktif]=useState("us");
+  const [toastMsg,setToastMsg]=useState("");
+  const toast=(m)=>{ setToastMsg(m); clearTimeout(window.__tt); window.__tt=setTimeout(()=>setToastMsg(""),2200); };
+  const yukleniyor = hareketler===null||musteriler===null||kullanicilar===null;
+  const d=useMemo(()=>yukleniyor?null:hesap(hareketler,musteriler,kullanicilar),[hareketler,musteriler,kullanicilar]);
+
+  if(yukleniyor) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
+    h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid rgba(255,255,255,.12)",borderTopColor:"var(--gold)",animation:"spin .8s linear infinite"}}),
+    h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Karargâh hazırlanıyor…"));
+
+  return h("div",null,
+    h(Home,{d,toast}),
+    h(Nav,{aktif,setAktif,toast}),
+    h(Toast,{msg:toastMsg}),
+    h("div",{style:{textAlign:"center",padding:"18px 0 4px",color:"var(--mut2)",fontSize:11}},"🧪 Deneme tasarımı · Emir hesabı · canlı veri"));
+}
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+</body>
+</html>
