@@ -30,6 +30,10 @@
   @keyframes barfill{from{width:0}}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
   @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes sheetup{from{transform:translateY(101%)}to{transform:none}}
+  @keyframes bdin{from{opacity:0}to{opacity:1}}
+  @keyframes pop{0%{transform:scale(.55);opacity:0}62%{transform:scale(1.07)}100%{transform:scale(1);opacity:1}}
+  @keyframes conf{to{transform:translateY(140px) rotate(400deg);opacity:0}}
   ::-webkit-scrollbar{display:none}
   .leaflet-container{background:#e8eef2;font-family:inherit}
   .kmark{display:flex;align-items:center;justify-content:center;border-radius:50% 50% 50% 4px;
@@ -144,7 +148,7 @@ function Hud({d,onBell}){ const {emir,komutan,sonraki,toplamGuc,kaleler,gerillaG
       h(HudChip,{ik:"⚡",val:tl(gerillaGanimet),sub:"GANİMET"}))); }
 
 /* ————— HOME (Üs) ————— */
-function Home({d,say,openKale}){
+function Home({d,say,openKale,openSheet,stype}){
   const primary=d.gorevler[0]; const digerler=d.gorevler.slice(1,4);
   return h("div",null,
     h(Hud,{d,onBell:()=>say("🔔 "+d.gorevler.length+" görevin var")}),
@@ -159,7 +163,8 @@ function Home({d,say,openKale}){
                 h("div",{style:{fontSize:11,fontWeight:800,color:primary.durum.renk,letterSpacing:.5,textTransform:"uppercase"}},primary.durum.label),
                 h("div",{style:{fontSize:19,fontWeight:800,lineHeight:1.15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},primary.ad))),
             h("div",{style:{fontSize:14,color:"var(--mut)",margin:"11px 0 18px"}},h("b",{style:{color:"var(--txt)"}},primary.durum.aksiyon)),
-            h("button",{onClick:()=>openKale(primary),style:{width:"100%",padding:16,borderRadius:16,background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:16.5,fontWeight:800,boxShadow:"0 8px 20px rgba(217,123,18,.28)"}},primary.durum.cta+" →"))
+            h("button",{onClick:()=>openSheet(stype(primary),primary),style:{width:"100%",padding:16,borderRadius:16,background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:16.5,fontWeight:800,boxShadow:"0 8px 20px rgba(217,123,18,.28)"}},primary.durum.cta+" →"),
+            h("button",{onClick:()=>openKale(primary),style:{width:"100%",padding:"11px 0 2px",fontSize:12.5,fontWeight:700,color:"var(--mut)"}},"kale detayına git →"))
         : h("div",{className:"rise card",style:{padding:"26px 20px",textAlign:"center"}},
             h("div",{style:{fontSize:40,marginBottom:8}},"🏆"),
             h("div",{style:{fontSize:17,fontWeight:800}},"Tüm hesaplar temiz!"),
@@ -208,9 +213,10 @@ function Kaleler({d,openKale,say}){
 }
 
 /* ————— KALE DETAYI ————— */
-function KaleDetay({k,back,say}){ const D=k.durum;
+function KaleDetay({k,back,say,openSheet}){ const D=k.durum;
   const zt=k.son?(k.gunGecti===0?"bugün":k.gunGecti+" gün önce"):"hiç";
-  const aksiyonlar=[["🧾","Tahsil et","var(--gold)"],["🏬","Konsinye bırak","var(--violet)"],["💰","Satış yap","var(--green)"],["⚔️","Ziyaret","var(--cyan)"]];
+  const stype=D.key==="borc"?"tahsilat":D.key==="konsinye"?"konsinye":D.key==="ihmal"?"ziyaret":"satis";
+  const aksiyonlar=[["🧾","Tahsil et","var(--gold)","tahsilat"],["🏬","Konsinye","var(--violet)","konsinye"],["💰","Satış yap","var(--green)","satis"],["⚔️","Ziyaret","var(--cyan)","ziyaret"]];
   return h("div",{className:"fade"},
     h("div",{style:{background:"linear-gradient(150deg,var(--hud1),var(--hud2) 60%,"+D.hex+" 150%)",
       padding:"calc(env(safe-area-inset-top,0px) + 14px) 18px 22px",borderRadius:"0 0 26px 26px",color:"#fff",position:"relative",overflow:"hidden"}},
@@ -224,7 +230,7 @@ function KaleDetay({k,back,say}){ const D=k.durum;
         (k.bolge?("📍 "+k.bolge+"  ·  "):"")+"🕘 son ziyaret: "+zt)),
     h("div",{style:{padding:"18px 16px 0"}},
       // birincil aksiyon
-      h("button",{onClick:()=>say(k.ad+" — "+D.aksiyon),style:{width:"100%",padding:16,borderRadius:16,marginBottom:16,
+      h("button",{onClick:()=>openSheet(stype,k),style:{width:"100%",padding:16,borderRadius:16,marginBottom:16,
         background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:16.5,fontWeight:800,boxShadow:"0 8px 20px rgba(217,123,18,.25)"}},D.cta+" →"),
       // durum kartları
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
@@ -237,7 +243,7 @@ function KaleDetay({k,back,say}){ const D=k.durum;
         k.konsKalem.map((c,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:14}},
           h("span",null,c.ad),h("span",{style:{fontWeight:800,color:"var(--violet)"}},c.adet+" adet")))),
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,paddingBottom:8}},
-        aksiyonlar.map(([ik,ad,renk],i)=>h("button",{key:i,onClick:()=>say(k.ad+" · "+ad),className:"card",style:{padding:"14px 10px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,boxShadow:"none"}},
+        aksiyonlar.map(([ik,ad,renk,st],i)=>h("button",{key:i,onClick:()=>openSheet(st,k),className:"card",style:{padding:"14px 10px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,boxShadow:"none"}},
           h("span",{style:{fontSize:22}},ik),
           h("span",{style:{fontSize:12.5,fontWeight:700,color:renk}},ad))))));
 }
@@ -274,13 +280,13 @@ function Harita({d,openKale,say}){
 }
 
 /* ————— CEPHANE ————— */
-function Cephane({d,say}){
+function Cephane({d,say,openSheet}){
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"🎒 Cephane"),
       h("div",{style:{fontSize:13,color:"var(--mut)",fontWeight:600}},"çantanda "+d.cantaTop+" varlık")),
-    h("button",{onClick:()=>say("Çantayı doldur"),style:{width:"100%",padding:15,borderRadius:16,marginBottom:16,
-      background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:15.5,fontWeight:800}},"🎒 Çantayı doldur → sahaya çık"),
+    h("button",{onClick:()=>openSheet("satis",null),style:{width:"100%",padding:15,borderRadius:16,marginBottom:16,
+      background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:15.5,fontWeight:800}},"⚡ Gerilla satış · anında ganimet"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       d.cephane.map((u,i)=>h("div",{key:i,className:"card",style:{padding:"15px 14px",position:"relative",overflow:"hidden"}},
         u.canta>0&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"var(--gold)",background:"#d97b1218",padding:"2px 8px",borderRadius:8}},"🎒 "+u.canta),
@@ -319,14 +325,116 @@ function Nav({aktif,go}){ const items=[["us","⛺","Üs"],["kaleler","🏰","Kal
           h("span",{style:{width:5,height:5,borderRadius:5,background:on?"var(--gold)":"transparent",marginTop:1}}))})));
 }
 
+/* ————— ETKİLEŞİM: alttan işlem paneli + ödül ————— */
+const inp={width:"100%",padding:"13px 14px",borderRadius:13,border:"1px solid var(--line)",background:"var(--surf2)",fontSize:17,fontWeight:800,color:"var(--txt)",fontFamily:"inherit",outline:"none"};
+function Chip({on,onClick,children}){ return h("button",{onClick,style:{flexShrink:0,padding:"9px 13px",borderRadius:11,fontSize:13,fontWeight:800,
+  background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},children); }
+
+// işlem tipi → XP (his için; veriye yazmıyor)
+const XP={tahsilat:120,satis:180,konsinye:90,ziyaret:40};
+function Sheet({ik,hex,baslik,alt,onClose,children,cta,onCta,disabled}){
+  return h("div",{onClick:onClose,style:{position:"fixed",inset:0,zIndex:70,background:"rgba(20,15,10,.44)",
+      animation:"bdin .22s ease",display:"flex",alignItems:"flex-end",justifyContent:"center"}},
+    h("div",{onClick:e=>e.stopPropagation(),style:{width:"100%",maxWidth:520,background:"var(--surf)",borderRadius:"26px 26px 0 0",
+        padding:"10px 18px calc(env(safe-area-inset-bottom,0px) + 18px)",animation:"sheetup .34s cubic-bezier(.2,.8,.2,1)",
+        boxShadow:"0 -14px 44px rgba(0,0,0,.24)",maxHeight:"90vh",overflowY:"auto"}},
+      h("div",{style:{width:40,height:5,borderRadius:5,background:"var(--line)",margin:"2px auto 16px"}}),
+      h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:18}},
+        h("div",{style:{width:46,height:46,borderRadius:14,background:hex+"1a",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}},ik),
+        h("div",{style:{minWidth:0}},
+          h("div",{style:{fontSize:18,fontWeight:800,lineHeight:1.15}},baslik),
+          alt&&h("div",{style:{fontSize:12.5,color:"var(--mut)",marginTop:2}},alt))),
+      children,
+      h("button",{onClick:disabled?null:onCta,disabled,style:{width:"100%",padding:16,borderRadius:16,marginTop:20,
+        background:disabled?"var(--line)":"linear-gradient(90deg,"+hex+","+hex+"cc)",color:disabled?"var(--mut2)":"#fff",
+        fontSize:16.5,fontWeight:800,boxShadow:disabled?"none":"0 8px 20px "+hex+"44"}},cta)));
+}
+function ActionSheet({type,k,d,onClose,onFire}){
+  const konsList=(k&&k.konsKalem)||[];
+  const [tut,setTut]=useState(type==="tahsilat"?Math.round(k?k.borc:0):0);
+  const [urun,setUrun]=useState((d.cephane.find(u=>u.canta>0)||d.cephane[0]||{ad:"",fiyat:0}));
+  const [adet,setAdet]=useState(1);
+  const [fiyat,setFiyat]=useState(num((d.cephane.find(u=>u.canta>0)||d.cephane[0]||{}).fiyat)||0);
+  const [kmod,setKmod]=useState("sat"); const [kkalem,setKkalem]=useState(konsList[0]||{ad:"",adet:0});
+  const [not,setNot]=useState("");
+  const fire=(mesaj,xp)=>onFire({mesaj,xp});
+
+  if(type==="tahsilat"){ const borc=k?k.borc:0;
+    return h(Sheet,{ik:"🧾",hex:"#d97b12",baslik:"Tahsilat · "+(k?k.ad:""),alt:"Bu kalenin borcu "+tl(borc),
+      onClose,cta:"🧾 "+tl(tut)+" tahsil et",disabled:tut<=0,
+      onCta:()=>fire(tl(tut)+" tahsilat işlendi · "+(k?k.ad:""),XP.tahsilat)},
+      h("div",{className:"lbl",style:{marginBottom:8}},"Alınan tutar"),
+      h("input",{type:"number",inputMode:"numeric",value:tut||"",onChange:e=>setTut(num(e.target.value)),style:inp}),
+      h("div",{style:{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}},
+        h(Chip,{on:tut===Math.round(borc),onClick:()=>setTut(Math.round(borc))},"Tümü · "+tl(borc)),
+        borc>1&&h(Chip,{on:tut===Math.round(borc/2),onClick:()=>setTut(Math.round(borc/2))},"Yarısı"),
+        h(Chip,{on:false,onClick:()=>setTut(0)},"Temizle")));
+  }
+  if(type==="satis"){
+    const secUrun=u=>{setUrun(u);setFiyat(num(u.fiyat));};
+    const toplam=adet*fiyat;
+    return h(Sheet,{ik:"💰",hex:"#16a34a",baslik:"Satış · "+(k?k.ad:"Gerilla"),alt:"çantandan sat, borç oluşsun",
+      onClose,cta:"💰 "+tl(toplam)+" satış işle",disabled:!urun.ad||adet<=0,
+      onCta:()=>fire(adet+" × "+urun.ad+" satıldı ("+tl(toplam)+")",XP.satis)},
+      h("div",{className:"lbl",style:{marginBottom:8}},"Ürün"),
+      h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:14}},
+        d.cephane.slice(0,8).map((u,i)=>h(Chip,{key:i,on:urun.ad===u.ad,onClick:()=>secUrun(u)},(u.canta>0?"🎒 ":"")+u.ad))),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
+          h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp})),
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Birim ₺"),
+          h("input",{type:"number",inputMode:"numeric",value:fiyat||"",onChange:e=>setFiyat(num(e.target.value)),style:inp}))),
+      h("div",{style:{textAlign:"center",marginTop:14,fontSize:14,color:"var(--mut)"}},"Toplam ",h("b",{style:{color:"var(--green)",fontSize:17}},tl(toplam))));
+  }
+  if(type==="konsinye"){
+    return h(Sheet,{ik:"🏬",hex:"#7c46e6",baslik:"Konsinye · "+(k?k.ad:""),alt:(k?k.acikKons:0)+" adet açık konsinye",
+      onClose,cta:(kmod==="sat"?"💰 Sattığını işle":"↩️ Geri al"),disabled:adet<=0,
+      onCta:()=>fire(adet+" konsinye "+(kmod==="sat"?"satıldı":"geri alındı")+" · "+(k?k.ad:""),XP.konsinye)},
+      h("div",{style:{display:"flex",gap:8,marginBottom:16}},
+        h(Chip,{on:kmod==="sat",onClick:()=>setKmod("sat")},"💰 Sattım"),
+        h(Chip,{on:kmod==="topla",onClick:()=>setKmod("topla")},"↩️ Geri aldım")),
+      konsList.length>0&&h("div",{style:{marginBottom:14}},
+        h("div",{className:"lbl",style:{marginBottom:8}},"Ürün"),
+        h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
+          konsList.map((c,i)=>h(Chip,{key:i,on:kkalem.ad===c.ad,onClick:()=>{setKkalem(c);setAdet(c.adet);}},c.ad+" ("+c.adet+")")))),
+      h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
+      h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp}));
+  }
+  // ziyaret
+  return h(Sheet,{ik:"⚔️",hex:"#0e8fce",baslik:"Ziyaret · "+(k?k.ad:""),alt:"uğradığını kaydet, ilişkiyi taze tut",
+    onClose,cta:"⚔️ Ziyareti kaydet",onCta:()=>fire("Ziyaret kaydedildi · "+(k?k.ad:""),XP.ziyaret)},
+    h("div",{className:"lbl",style:{marginBottom:8}},"Not (isteğe bağlı)"),
+    h("textarea",{value:not,onChange:e=>setNot(e.target.value),placeholder:"örn. yeni sipariş konuştuk…",
+      style:{...inp,minHeight:80,fontSize:15,fontWeight:600,resize:"none"}}));
+}
+function Reward({xp,mesaj,onDone}){
+  useEffect(()=>{const t=setTimeout(onDone,1750);return ()=>clearTimeout(t);},[]);
+  const renk=["#f4a63a","#d97b12","#16a34a","#7c46e6","#0e8fce","#ffd479"];
+  return h("div",{style:{position:"fixed",inset:0,zIndex:80,display:"flex",alignItems:"center",justifyContent:"center",
+      background:"rgba(20,15,10,.5)",animation:"bdin .2s ease",overflow:"hidden"}},
+    Array.from({length:16}).map((_,i)=>h("span",{key:i,style:{position:"absolute",top:"38%",left:(8+i*5.6)+"%",
+      width:9,height:14,borderRadius:2,background:renk[i%6],opacity:.95,
+      transform:"translateY(-40px)",animation:"conf "+(1+(i%5)*.18)+"s cubic-bezier(.2,.7,.3,1) "+(i%4*.05)+"s forwards"}})),
+    h("div",{style:{textAlign:"center",animation:"pop .5s cubic-bezier(.2,.8,.2,1) both",position:"relative"}},
+      h("div",{style:{fontSize:66,filter:"drop-shadow(0 8px 18px rgba(0,0,0,.35))"}},"🎖️"),
+      h("div",{style:{marginTop:6,display:"inline-block",padding:"7px 18px",borderRadius:99,
+        background:"linear-gradient(90deg,#ffd479,#f5a623)",color:"#3a1414",fontSize:22,fontWeight:800,
+        boxShadow:"0 8px 24px rgba(245,166,35,.5)"}},"+"+xp+" XP"),
+      h("div",{style:{marginTop:14,color:"#fff",fontSize:14.5,fontWeight:700,maxWidth:280,margin:"14px auto 0",lineHeight:1.35}},mesaj)));
+}
+
 function App(){
   const hareketler=useColl("pazarlama_hareket"), musteriler=useColl("musteri"), kullanicilar=useColl("kullanici"), urunler=useColl("stok_urun");
   const [view,setView]=useState("us"); const [kale,setKale]=useState(null); const [toastMsg,setToastMsg]=useState("");
+  const [sheet,setSheet]=useState(null); const [reward,setReward]=useState(null);
   const say=m=>{ setToastMsg(m); clearTimeout(window.__t); window.__t=setTimeout(()=>setToastMsg(""),2200); };
   const yuk=[hareketler,musteriler,kullanicilar,urunler].some(x=>x===null);
   const d=useMemo(()=>yuk?null:hesap(hareketler,musteriler,kullanicilar,urunler),[hareketler,musteriler,kullanicilar,urunler]);
   const openKale=k=>{ setKale(k); window.scrollTo(0,0); };
   const go=v=>{ setKale(null); setView(v); window.scrollTo(0,0); };
+  const stype=k=>k?({borc:"tahsilat",konsinye:"konsinye",ihmal:"ziyaret",saglam:"satis"}[k.durum.key]||"satis"):"satis";
+  const openSheet=(type,k)=>setSheet({type,k});
+  const fire=({mesaj,xp})=>{ setSheet(null); setReward({mesaj,xp}); };
 
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--gold)",animation:"spin .8s linear infinite"}}),
@@ -335,17 +443,19 @@ function App(){
   // güncel kale nesnesini tazele (canlı veri değişince)
   const kaleGuncel=kale?(d.kaleler.find(x=>x.key===kale.key)||kale):null;
   let ekran;
-  if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say});
-  else if(view==="us") ekran=h(Home,{d,say,openKale});
+  if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet});
+  else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say});
   else if(view==="harita") ekran=h(Harita,{d,openKale,say});
-  else if(view==="cephane") ekran=h(Cephane,{d,say});
+  else if(view==="cephane") ekran=h(Cephane,{d,say,openSheet});
   else ekran=h(Rapor,{d,say});
 
   return h("div",null, ekran,
     h(Nav,{aktif:kaleGuncel?"kaleler":view,go}),
     h(Toast,{msg:toastMsg}),
-    !kaleGuncel&&view!=="harita"&&h("div",{style:{textAlign:"center",padding:"20px 0 6px",color:"var(--mut2)",fontSize:11}},"🧪 Deneme tasarımı · Emir · canlı veri"));
+    !kaleGuncel&&view!=="harita"&&h("div",{style:{textAlign:"center",padding:"20px 0 6px",color:"var(--mut2)",fontSize:11}},"🧪 Deneme tasarımı · Emir · canlı veri"),
+    sheet&&h(ActionSheet,{type:sheet.type,k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire}),
+    reward&&h(Reward,{xp:reward.xp,mesaj:reward.mesaj,onDone:()=>{const m=reward.mesaj;setReward(null);say("✅ "+m);}}));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(h(App));
 </script>
