@@ -551,7 +551,7 @@ function HakedisPanel({k,kaleHar,onClose}){
 }
 
 /* ————— HARİTA ————— */
-function Harita({d,openKale,say,adaylar,openAday}){
+function Harita({d,openKale,say,adaylar,openAday,onYeniKale,onYeniKaleAt}){
   const ref=useRef(null); const mapRef=useRef(null);
   const [f,setF]=useState("all");
   const konumlu=d.kaleler.filter(k=>k.lat&&k.lng);
@@ -562,6 +562,8 @@ function Harita({d,openKale,say,adaylar,openAday}){
     const L=window.L; const map=L.map(ref.current,{zoomControl:false,attributionControl:false});
     mapRef.current=map; L.control.zoom({position:"bottomright"}).addTo(map);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
+    // uzun bas → o noktadan yeni kale (koordinat dolu gelir)
+    map.on("contextmenu",e=>{ if(onYeniKaleAt) onYeniKaleAt(e.latlng.lat,e.latlng.lng); });
     return ()=>{ map.remove(); mapRef.current=null; }; },[]);
   useEffect(()=>{ const map=mapRef.current; if(!map||!window.L) return; const L=window.L;
     map.eachLayer(l=>{ if(l instanceof L.Marker) map.removeLayer(l); });
@@ -578,7 +580,13 @@ function Harita({d,openKale,say,adaylar,openAday}){
     h("div",{style:{position:"absolute",top:"calc(env(safe-area-inset-top,0px) + 12px)",left:12,right:12,zIndex:500,display:"flex",gap:7,overflowX:"auto"}},
       filtreler.map(([k,ad,n])=>h("button",{key:k,onClick:()=>setF(k),style:{flexShrink:0,padding:"9px 13px",borderRadius:99,fontSize:12.5,fontWeight:700,
         background:f===k?"#1b1e25":"rgba(255,255,255,.95)",color:f===k?"#fff":"var(--txt)",boxShadow:"0 3px 12px rgba(0,0,0,.15)",backdropFilter:"blur(6px)"}},ad+" "+n))),
-    d.kaleler.length>konumlu.length&&h("div",{style:{position:"absolute",bottom:16,left:12,zIndex:500,background:"rgba(255,255,255,.95)",padding:"8px 12px",borderRadius:12,fontSize:11.5,color:"var(--mut)",fontWeight:600,boxShadow:"0 3px 12px rgba(0,0,0,.15)"}},"📍 "+(d.kaleler.length-konumlu.length)+" kalenin konumu yok"));
+    d.kaleler.length>konumlu.length&&h("div",{style:{position:"absolute",bottom:16,left:12,zIndex:500,background:"rgba(255,255,255,.95)",padding:"8px 12px",borderRadius:12,fontSize:11.5,color:"var(--mut)",fontWeight:600,boxShadow:"0 3px 12px rgba(0,0,0,.15)"}},"📍 "+(d.kaleler.length-konumlu.length)+" kalenin konumu yok"),
+    // ➕ haritadan yeni kale — uzun basarak noktadan da eklenebilir
+    h("button",{onClick:onYeniKale,style:{position:"absolute",bottom:16,left:"50%",transform:"translateX(-50%)",zIndex:500,
+      padding:"13px 22px",borderRadius:99,background:"linear-gradient(90deg,#22c55e,#16a34a)",color:"#fff",fontSize:14,fontWeight:800,
+      boxShadow:"0 10px 26px rgba(22,163,74,.4)",whiteSpace:"nowrap"}},"➕ Yeni kale"),
+    h("div",{style:{position:"absolute",bottom:66,left:"50%",transform:"translateX(-50%)",zIndex:500,background:"rgba(255,255,255,.92)",
+      padding:"5px 11px",borderRadius:99,fontSize:10.5,color:"var(--mut)",fontWeight:700,boxShadow:"0 3px 10px rgba(0,0,0,.12)",whiteSpace:"nowrap"}},"💡 haritaya uzun bas → o noktaya kale"));
 }
 
 /* ————— CEPHANE ————— */
@@ -890,7 +898,7 @@ function GerillaSheet({d,onClose,onFire}){
               paraN>=maliyet?("🫰 Marjın: "+tl(paraN-maliyet)):("⚠ Maliyetin altında — en az "+tl(maliyet))):null):null));
 }
 /* ————— YENİ KALE (müşteri) ekle — konumlu (ana uygulamadaki KonumSec sistemi) ————— */
-function YeniKaleSheet({onClose,onKaydet,bekle}){
+function YeniKaleSheet({onClose,onKaydet,bekle,ilk}){
   const [ad,setAd]=useState(""); const [bolge,setBolge]=useState(""); const [tel,setTel]=useState("");
   const [lat,setLat]=useState(""); const [lng,setLng]=useState("");
   const [sonuc,setSonuc]=useState([]); const [ara,setAra]=useState(false); const [bos,setBos]=useState(false);
@@ -900,6 +908,8 @@ function YeniKaleSheet({onClose,onKaydet,bekle}){
   // açılışta cihaz konumunu sessizce al → aramaları yakına öncele
   useEffect(()=>{ if(!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(p=>setMerkez({lat:p.coords.latitude,lng:p.coords.longitude}),()=>{},{enableHighAccuracy:true,timeout:8000,maximumAge:300000}); },[]);
+  // haritadan gelen başlangıç noktası (uzun basma) — koordinat + ad/bölge otomatik dolar
+  useEffect(()=>{ if(ilk&&ilk.lat&&ilk.lng) konumdan(ilk.lat,ilk.lng,false); },[]);
   async function tersCoz(la,lo){ let nm="",bl="";
     try{ const r=await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&accept-language=tr&lat="+la+"&lon="+lo);
       const j=await r.json(); nm=j.name||(j.display_name||"").split(",")[0]||""; bl=ilceOf(j.address); }catch(e){}
@@ -1386,7 +1396,8 @@ function App(){
   if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar});
   else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype,openBrif:()=>setBrifAcik(true),goView:go,openBilgi});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say,onYeniKale:()=>setYeniKale(true),adaylar:adayGoster,openAday:a=>setAdaySec(a)});
-  else if(view==="harita") ekran=h(Harita,{d,openKale,say,adaylar:adayGoster,openAday:a=>setAdaySec(a)});
+  else if(view==="harita") ekran=h(Harita,{d,openKale,say,adaylar:adayGoster,openAday:a=>setAdaySec(a),
+    onYeniKale:()=>setYeniKale(true),onYeniKaleAt:(la,lo)=>setYeniKale({lat:la,lng:lo})});
   else if(view==="cephane") ekran=h(Cephane,{d,say,cantaAc:()=>setCantaSheet(true),openUrun:u=>setUrunSec(u)});
   else ekran=h(Rapor,{d,say,raporVer,ovList:ov.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),temizle:temizleDeneme,geriAl:geriAlKayit});
 
@@ -1399,7 +1410,7 @@ function App(){
       : sheet.type==="gecmis"
       ? h(GecmisSheet,{k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})
       : h(ActionSheet,{type:sheet.type,k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})),
-    yeniKale&&h(YeniKaleSheet,{bekle:ykBekle,onClose:()=>setYeniKale(false),onKaydet:yeniKaleKaydet}),
+    yeniKale&&h(YeniKaleSheet,{bekle:ykBekle,ilk:(typeof yeniKale==="object")?yeniKale:null,onClose:()=>setYeniKale(false),onKaydet:yeniKaleKaydet}),
     urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),
       recs:hareketler.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
       kaleler:d.kaleler,say,
