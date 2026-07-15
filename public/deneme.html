@@ -975,6 +975,10 @@ function UrunSheet({u,recs,kaleler,fotolar,onClose,onFiyat,onTanitim,onFotoEkle,
   const fmt=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"});};
   const son=recs.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,30);
   const [fEdit,setFEdit]=useState(false); const [fyt,setFyt]=useState("");
+  const iptalRef=useRef(false);
+  const fiyatKaydet=()=>{ if(iptalRef.current){ iptalRef.current=false; setFEdit(false); return; }
+    const v=num(fyt); setFEdit(false);
+    if(v>0&&Math.round(v*100)!==Math.round(num(u.fiyat)*100)) onFiyat(v); };
   const [tEdit,setTEdit]=useState(false); const [tTxt,setTTxt]=useState("");
   const [pay,setPay]=useState(false); const [tel,setTel]=useState(""); const [pyuk,setPyuk]=useState(false);
   const fileRef=useRef(null);
@@ -1007,15 +1011,24 @@ function UrunSheet({u,recs,kaleler,fotolar,onClose,onFiyat,onTanitim,onFotoEkle,
       h("button",{onClick:()=>fileRef.current&&fileRef.current.click(),style:{flexShrink:0,width:78,height:78,marginTop:6,borderRadius:14,border:"1.5px dashed var(--gold)",color:"var(--gold)",fontSize:24,background:"var(--surf2)"}},"+"),
       h("input",{ref:fileRef,type:"file",accept:"image/*",style:{display:"none"},
         onChange:e=>{const f=e.target.files&&e.target.files[0]; if(f) onFotoEkle(f); e.target.value="";}})),
-    // fiyat kartları — satış fiyatı düzenlenebilir
+    // fiyat kartları — satış fiyatı YERİNDE düzenlenir (rakama dokun → kutu yazılabilir olur)
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
-      h(Stat,{ik:"💰",v:tl(u.fiyat),l:"Satış fiyatı · düzenle ✎",renk:"var(--green)",onClick:()=>{setFyt(u.fiyat||"");setFEdit(v=>!v);}}),
+      h(fEdit?"div":"button",{onClick:fEdit?null:()=>{setFyt(String(num(u.fiyat)||""));iptalRef.current=false;setFEdit(true);},
+          className:"card",style:{padding:"14px 13px",boxShadow:"none",textAlign:"left",width:"100%",
+          ...(fEdit?{border:"1.5px dashed var(--green)",background:"#f0fdf4"}:{})}},
+        h("div",{style:{fontSize:16,marginBottom:5}},"💰"),
+        fEdit
+          ? h("input",{autoFocus:true,type:"number",inputMode:"decimal",value:fyt,
+              onChange:e=>setFyt(e.target.value),
+              onFocus:e=>e.target.select(),
+              onKeyDown:e=>{ if(e.key==="Enter") e.target.blur(); if(e.key==="Escape"){ iptalRef.current=true; e.target.blur(); } },
+              onBlur:fiyatKaydet,
+              style:{width:"100%",border:"none",outline:"none",background:"transparent",fontSize:18,fontWeight:800,color:"var(--green)",fontFamily:"inherit",padding:0,lineHeight:1.1}})
+          : h("div",{style:{fontSize:18,fontWeight:800,color:"var(--green)",lineHeight:1.1}},tl(u.fiyat)),
+        h("div",{style:{fontSize:11,color:"var(--gold)",marginTop:2,fontWeight:800}},fEdit?"✓ Enter ile kaydet · Esc iptal":"Satış fiyatı · düzenle ✎")),
       h(Stat,{ik:"🏭",v:tl(u.pazFiyat),l:"Alış (üretici payı)",renk:"var(--txt)"}),
       h(Stat,{ik:"🫰",v:tl(marjBirim),l:"Birim hakediş",renk:"var(--gold)"}),
       h(Stat,{ik:"⚔️",v:satAdet+" adet",l:"Toplam satıldı",renk:"var(--txt)"})),
-    fEdit?h("div",{style:{display:"flex",gap:8,marginBottom:12}},
-      h("input",{type:"number",inputMode:"numeric",value:fyt,onChange:e=>setFyt(e.target.value),style:{...inp,flex:1}}),
-      h("button",{onClick:()=>{onFiyat(num(fyt));setFEdit(false);},style:{padding:"0 18px",borderRadius:13,background:"var(--green)",color:"#fff",fontWeight:800,fontSize:14}},"✓ Kaydet")):null,
     // düzenli özet — 3'lü grid
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:12}},
       ozet.map((s,i)=>h("div",{key:i,className:"card",style:{padding:"12px 6px",textAlign:"center",boxShadow:"none"}},
