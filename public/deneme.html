@@ -961,7 +961,7 @@ function urunKartCiz(u,tanitim,fotoData){ return new Promise(res=>{
   else { x.save(); rr(); x.fillStyle="#ffffff"; x.fill(); x.restore();
     x.font="300px system-ui"; x.textAlign="center"; x.fillText("📦",W/2,py+ps/2+100); devam(); }
 }); }
-function UrunSheet({u,recs,kaleler,fotolar,onClose,onFiyat,onTanitim,onFotoEkle,onFotoSil,say}){
+function UrunSheet({u,recs,kaleler,fotolar,kisiler,onClose,onFiyat,onTanitim,onFotoEkle,onFotoSil,say}){
   const sat=recs.filter(x=>x.tip==="satis");
   const satAdet=sat.reduce((s,x)=>s+num(x.adet),0);
   const ciro=sat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
@@ -1049,7 +1049,11 @@ function UrunSheet({u,recs,kaleler,fotolar,onClose,onFiyat,onTanitim,onFotoEkle,
     // 📲 görsel olarak paylaş
     h("button",{onClick:()=>setPay(v=>!v),style:{width:"100%",padding:14,borderRadius:16,marginBottom:12,background:"#16a34a",color:"#fff",fontSize:14.5,fontWeight:800,boxShadow:"0 8px 20px rgba(22,163,74,.25)"}},"📲 WhatsApp'ta görsel olarak paylaş"),
     pay?h("div",{className:"card",style:{padding:"13px 15px",marginBottom:12,boxShadow:"none",background:"var(--surf2)"}},
-      h("div",{className:"lbl",style:{marginBottom:8}},"Telefon (isteğe bağlı)"),
+      (kisiler&&kisiler.length)?h("div",{style:{marginBottom:12}},
+        h("div",{className:"lbl",style:{marginBottom:8}},"📞 Kayıtlı kaleler — dokun, numarası seçilsin"),
+        h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
+          kisiler.slice(0,20).map((p,i)=>h(Chip,{key:i,on:tel===p.tel,onClick:()=>setTel(tel===p.tel?"":p.tel)},(tel===p.tel?"✓ ":"")+p.ad)))):null,
+      h("div",{className:"lbl",style:{marginBottom:8}},(kisiler&&kisiler.length)?"ya da numara yaz":"Telefon (isteğe bağlı)"),
       h("input",{value:tel,onChange:e=>setTel(e.target.value),inputMode:"tel",placeholder:"05xx xxx xx xx",style:{...inp,marginBottom:10}}),
       h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:10,lineHeight:1.5}},"Fotoğraf + fiyat + tanıtımdan satış kartı üretilir. Paylaşım penceresi açılırsa kişiyi orada seç; açılmazsa görsel indirilir, numara girdiysen WhatsApp sohbeti açılır."),
       h("button",{onClick:paylas,disabled:pyuk,style:{width:"100%",padding:13,borderRadius:13,background:pyuk?"var(--line)":"#1b1e25",color:pyuk?"var(--mut2)":"#fff",fontWeight:800,fontSize:14}},pyuk?"⏳ Görsel hazırlanıyor…":"🖼️ Görseli oluştur & paylaş")):null,
@@ -1287,6 +1291,11 @@ function App(){
     urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),
       recs:hareketler.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
       kaleler:d.kaleler,say,
+      kisiler:(()=>{ const tm={}; (tumMus||[]).forEach(m=>{const t=(m.telefon||"").trim(); if(t) tm[m.id]=t;});
+        const out=[],seen=new Set();
+        d.kaleler.forEach(k=>{ const t=k.musteriId&&tm[k.musteriId]; if(t&&!seen.has(t)){ seen.add(t); out.push({ad:k.ad,tel:t}); } });
+        (tumMus||[]).forEach(m=>{ const t=(m.telefon||"").trim(); if(t&&!seen.has(t)){ seen.add(t); out.push({ad:m.ad||t,tel:t}); } });
+        return out; })(),
       fotolar:(urunFoto||[]).filter(f=>f.urunId===urunSec.id).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),
       onFiyat:v=>urunEkKaydet(urunSec.id,{satisFiyat:v},"💰 Satış fiyatı güncellendi: "+tl(v)),
       onTanitim:t=>urunEkKaydet(urunSec.id,{tanitim:t},"📝 Tanıtım kaydedildi"),
