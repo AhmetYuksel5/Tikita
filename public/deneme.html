@@ -89,6 +89,27 @@ function liderHesap(hareketler,kullanicilar){
     const ka=kad[uid]||{}; return {uid,ad:ka.ad||"?",simge:ka.simge||"🎖️",guc,ciro,komutan:katOf(KOMUTAN,guc)}; })
     .filter(x=>x.guc>0).sort((a,b)=>b.guc-a.guc); }
 
+// günün eğlenceli + işlevsel sorusu — pazarlamacının kendi verisinden üretilir
+function gunlukSoru(kaleler){
+  if(!kaleler||kaleler.length<2) return null;
+  const gun=new Date().getDate();
+  const byCiro=[...kaleler].sort((a,b)=>b.ciro-a.ciro);
+  const byGuc=[...kaleler].sort((a,b)=>b.guc-a.guc);
+  const byKons=[...kaleler].filter(k=>k.acikKons>0).sort((a,b)=>b.acikKons-a.acikKons);
+  const byIhmal=[...kaleler].filter(k=>k.gunGecti<900&&k.gunGecti>0).sort((a,b)=>b.gunGecti-a.gunGecti);
+  const yap=(arr,correct,q)=>{ if(!correct) return null;
+    const others=arr.filter(k=>k.key!==correct.key).slice(0,3); if(!others.length) return null;
+    const opts=[{t:correct.ad,ok:true},...others.map(k=>({t:k.ad,ok:false}))];
+    const rot=gun%opts.length; return {q,opts:opts.slice(rot).concat(opts.slice(0,rot))}; };
+  const types=[
+    ()=>yap(byCiro,byCiro[0],"💰 En çok ciro yaptığın kale hangisi?"),
+    ()=>yap(byGuc,byGuc[0],"💪 En güçlü kalen hangisi?"),
+    ()=>byKons.length?yap(byKons,byKons[0],"🏬 En çok açık konsinye hangi kalede duruyor?"):null,
+    ()=>byIhmal.length?yap(byIhmal,byIhmal[0],"⚔️ En uzun süredir uğramadığın kale hangisi?"):null];
+  for(let i=0;i<types.length;i++){ const s=types[(gun+i)%types.length](); if(s&&s.opts.length>=2) return s; }
+  return null;
+}
+
 function useColl(name){ const [rows,setRows]=useState(null);
   useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error(name,e);setRows([]);}),[]);
   return rows; }
@@ -199,10 +220,10 @@ function Hud({d,onBell}){ const {emir,komutan,sonraki,toplamGuc,kaleler,gerillaG
       h(HudChip,{ik:"⚡",val:tl(gerillaGanimet),sub:"GANİMET"}))); }
 
 /* ————— HOME (Üs) ————— */
-function Home({d,say,openKale,openSheet,stype}){
+function Home({d,say,openKale,openSheet,stype,openBrif}){
   const primary=d.gorevler[0]; const digerler=d.gorevler.slice(1,4);
   return h("div",null,
-    h(Hud,{d,onBell:()=>say("🔔 "+d.gorevler.length+" görevin var")}),
+    h(Hud,{d,onBell:openBrif}),
     h("div",{style:{padding:"22px 16px 0"}},
       h("div",{className:"lbl",style:{marginBottom:11,paddingLeft:2}},"Bugünkü görevin"),
       primary
@@ -248,6 +269,44 @@ function Home({d,say,openKale,openSheet,stype}){
       h("div",{className:"lbl",style:{marginBottom:10,paddingLeft:2,color:"var(--mut2)"}},"🏆 Komuta sıralaması"),
       h("div",{className:"card",style:{padding:"6px 4px",boxShadow:"none"}},
         d.lider.slice(0,5).map((u,i)=>h(LiderSatir,{key:u.uid,u,sira:i,ben:u.uid===d.emir.id})))));
+}
+// GÜNLÜK BRİFİNG — komutandan görevler + haftalık özet + eğlenceli soru
+function Briefing({d,hedefler,soru,onClose,say}){
+  const [cevap,setCevap]=useState(null);
+  const primary=d.gorevler[0];
+  const bugun=new Date().toLocaleDateString("tr-TR",{weekday:"long",day:"numeric",month:"long"});
+  return h(Sheet,{ik:"📋",hex:"#7c2d12",baslik:"Günlük brifing",alt:bugun,onClose,cta:"Anlaşıldı, komutanım ✓",onCta:onClose},
+    // bugünkü öncelik
+    primary&&h("div",{style:{padding:"13px 15px",borderRadius:14,marginBottom:16,background:primary.durum.hex+"12",border:"1px solid "+primary.durum.hex+"33"}},
+      h("div",{style:{fontSize:11,fontWeight:800,color:primary.durum.renk,letterSpacing:.4,textTransform:"uppercase",marginBottom:3}},primary.durum.ik+" Bugünkü öncelik"),
+      h("div",{style:{fontSize:15,fontWeight:800}},primary.ad),
+      h("div",{style:{fontSize:12.5,color:"var(--mut)",marginTop:2}},primary.durum.aksiyon)),
+    // komutandan görevler
+    h("div",{className:"lbl",style:{marginBottom:8}},"📋 Komutandan görevler"),
+    (hedefler&&hedefler.length)
+      ? h("div",{style:{display:"grid",gap:8,marginBottom:16}}, hedefler.slice(0,4).map((g,i)=>h("div",{key:g.id||i,className:"card",style:{padding:"11px 14px",display:"flex",alignItems:"center",gap:11,boxShadow:"none"}},
+          h("span",{style:{fontSize:18}},"🎯"),
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.ad||"Görev bölgesi"),
+            h("div",{style:{fontSize:11.5,color:"var(--mut)"}},((g.duraklar||[]).length||0)+" durak"+(g.bolge?(" · 📍 "+g.bolge):""))))))
+      : h("div",{style:{padding:"12px 14px",marginBottom:16,background:"var(--surf2)",borderRadius:12,fontSize:12.5,color:"var(--mut)",textAlign:"center",fontWeight:600}},"Komutandan açık görev yok."),
+    // haftalık özet
+    h("div",{className:"lbl",style:{marginBottom:8}},"📈 Bu hafta"),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}},
+      [["💰",tl(d.hafCiro),"ciro"],["🫰",tl(d.hafKar),"hakediş"],["🔥",d.streak+"g","seri"]].map((s,i)=>
+        h("div",{key:i,style:{textAlign:"center",padding:"10px 4px",background:"var(--surf2)",borderRadius:12}},
+          h("div",{style:{fontSize:15}},s[0]),h("div",{style:{fontSize:13.5,fontWeight:800,marginTop:2}},s[1]),h("div",{style:{fontSize:10,color:"var(--mut)",marginTop:1}},s[2])))),
+    // günün sorusu
+    soru&&h("div",{className:"card",style:{padding:"15px 16px",boxShadow:"none",background:"linear-gradient(150deg,#fff8ee,#fff)"}},
+      h("div",{style:{fontSize:11,fontWeight:800,color:"var(--gold)",letterSpacing:.4,marginBottom:8}},"🎲 GÜNÜN SORUSU"),
+      h("div",{style:{fontSize:14.5,fontWeight:700,marginBottom:12}},soru.q),
+      h("div",{style:{display:"grid",gap:8}},
+        soru.opts.map((o,i)=>{ const secildi=cevap!=null;
+          const bg=!secildi?"var(--surf2)":o.ok?"#e9f9ee":(i===cevap?"#fdecea":"var(--surf2)");
+          const bd=!secildi?"var(--line)":o.ok?"var(--green)":(i===cevap?"var(--red)":"var(--line)");
+          return h("button",{key:i,disabled:secildi,onClick:()=>{ setCevap(i); say(o.ok?"🎉 Doğru! +10 XP":"Yakındı — doğrusu işaretli"); },
+            style:{padding:"12px 14px",borderRadius:12,textAlign:"left",fontSize:14,fontWeight:700,background:bg,border:"1.5px solid "+bd,color:"var(--txt)"}},
+            o.t+(secildi&&o.ok?"  ✓":(secildi&&i===cevap?"  ✕":""))); }))));
 }
 function LiderSatir({u,sira,ben}){ const madalya=["🥇","🥈","🥉"][sira]||("#"+(sira+1));
   return h("div",{style:{display:"flex",alignItems:"center",gap:11,padding:"10px 12px",borderRadius:12,background:ben?"var(--surf2)":"transparent"}},
@@ -652,11 +711,13 @@ function Reward({xp,mesaj,onDone}){
 
 function App(){
   const canliHar=useColl("pazarlama_hareket"), musteriler=useColl("musteri"), kullanicilar=useColl("kullanici"), urunler=useColl("stok_urun");
+  const hedefler=useColl("hedef");
   const ovHar=useColl("demo_pazarlama_hareket");   // deneme (overlay) yazımları
   const seferler=useColl("demo_sefer"), cantaRows=useColl("demo_canta");
   const [view,setView]=useState("us"); const [kale,setKale]=useState(null); const [toastMsg,setToastMsg]=useState("");
   const [sheet,setSheet]=useState(null); const [reward,setReward]=useState(null);
   const [seferSheet,setSeferSheet]=useState(null); const [cantaSheet,setCantaSheet]=useState(false); const [sbekle,setSbekle]=useState(false);
+  const [brifAcik,setBrifAcik]=useState(false);
   const say=m=>{ setToastMsg(m); clearTimeout(window.__t); window.__t=setTimeout(()=>setToastMsg(""),2200); };
   const yuk=[canliHar,musteriler,kullanicilar,urunler].some(x=>x===null);
   const ov=(ovHar||[]).map(x=>({...x,_ov:true}));
@@ -666,6 +727,8 @@ function App(){
   const emirId=(d&&d.emir&&d.emir.id)||"mr14ih8vc39wug";
   const aktifSefer=(seferler||[]).filter(s=>s.durum==="acik").sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))[0]||null;
   const donemOzet=aktifSefer?donemRapor(ov.filter(x=>new Date(x.tarih)>=new Date(aktifSefer.sonRapor||aktifSefer.baslangic))):null;
+  const emirHedef=(hedefler||[]).filter(g=>!g.arsiv&&(!g.kullaniciId||g.kullaniciId===emirId));
+  const soru=useMemo(()=>d?gunlukSoru(d.kaleler):null,[d]);
   const openKale=k=>{ setKale(k); window.scrollTo(0,0); };
   const go=v=>{ setKale(null); setView(v); window.scrollTo(0,0); };
   const stype=k=>k?({borc:"tahsilat",konsinye:"konsinye",ihmal:"ziyaret",saglam:"satis"}[k.durum.key]||"satis"):"satis";
@@ -736,7 +799,7 @@ function App(){
   const kaleHar=kaleGuncel?hareketler.filter(x=>kkOf(x)===kaleGuncel.key&&["satis","konsinye","iade","tahsilat","stant","diplomasi"].includes(x.tip)).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
   let ekran;
   if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar});
-  else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype});
+  else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype,openBrif:()=>setBrifAcik(true)});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say});
   else if(view==="harita") ekran=h(Harita,{d,openKale,say});
   else if(view==="cephane") ekran=h(Cephane,{d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,seferBitir,cantaAc:()=>setCantaSheet(true)});
@@ -749,6 +812,7 @@ function App(){
     sheet&&h(ActionSheet,{type:sheet.type,k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire}),
     seferSheet&&h(SeferRaporSheet,{mod:seferSheet.mod,veri:seferSheet.veri,bekle:sbekle,onClose:()=>setSeferSheet(null),onOnay:seferOnay}),
     cantaSheet&&h(CantaSheet,{d,bekle:sbekle,onClose:()=>setCantaSheet(false),onConfirm:cantaEkle}),
+    brifAcik&&h(Briefing,{d,hedefler:emirHedef,soru,say,onClose:()=>setBrifAcik(false)}),
     reward&&h(Reward,{xp:reward.xp,mesaj:reward.mesaj,onDone:()=>{const m=reward.mesaj;setReward(null);say("✅ "+m);}}));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(h(App));
