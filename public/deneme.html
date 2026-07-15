@@ -546,7 +546,7 @@ function Harita({d,openKale,say,adaylar,openAday}){
 }
 
 /* ————— CEPHANE ————— */
-function Cephane({d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,seferBitir,cantaAc}){
+function Cephane({d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,seferBitir,cantaAc,openUrun}){
   const geldi=aktifSefer?gunFark(aktifSefer.baslangic):null;
   const o=donemOzet||{};
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
@@ -572,7 +572,7 @@ function Cephane({d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,sefe
     h("button",{onClick:()=>openSheet("gerilla",null),style:{width:"100%",padding:15,borderRadius:16,marginBottom:16,
       background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:15.5,fontWeight:800}},"⚡ Gerilla satış · anında ganimet"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-      d.cephane.map((u,i)=>h("div",{key:i,className:"card",style:{padding:"15px 14px",position:"relative",overflow:"hidden"}},
+      d.cephane.map((u,i)=>h("button",{key:i,onClick:()=>openUrun(u),className:"card",style:{padding:"15px 14px",position:"relative",overflow:"hidden",textAlign:"left"}},
         u.canta>0&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"var(--gold)",background:"#d97b1218",padding:"2px 8px",borderRadius:8}},"🎒 "+u.canta),
         h("div",{style:{fontSize:26,marginBottom:8}},"📦"),
         h("div",{style:{fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
@@ -936,6 +936,51 @@ function AdaySheet({a,onClose,onAkin,onKons,onGizle}){
       (a.lat&&a.lng)?h("a",{href:"https://www.google.com/maps/search/?api=1&query="+a.lat+","+a.lng,target:"_blank",className:"card",style:{padding:"12px 14px",textDecoration:"none",fontSize:14,fontWeight:700,color:"var(--cyan)",boxShadow:"none",display:"block"}},"🗺️ Haritada aç"):null,
       h("button",{onClick:onGizle,className:"card",style:{padding:"12px 14px",textAlign:"left",fontSize:14,fontWeight:700,color:"var(--red)",boxShadow:"none"}},"🙈 Listeden gizle")));
 }
+/* ————— 📦 ÜRÜN DETAYI — fiyatlar, kimde ne var, hareket geçmişi ————— */
+function UrunSheet({u,recs,kaleler,onClose}){
+  const sat=recs.filter(x=>x.tip==="satis");
+  const satAdet=sat.reduce((s,x)=>s+num(x.adet),0);
+  const ciro=sat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+  const marjTop=sat.reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);
+  const gerAdet=sat.filter(x=>x.gerilla).reduce((s,x)=>s+num(x.adet),0);
+  const iadeAdet=recs.filter(x=>x.tip==="iade").reduce((s,x)=>s+num(x.adet),0);
+  const konsVer=recs.filter(x=>x.tip==="konsinye").reduce((s,x)=>s+num(x.adet),0);
+  const kimde=(kaleler||[]).map(k=>{const c=(k.konsKalem||[]).find(c2=>c2.ad===u.ad);return c?{ad:k.ad,adet:c.adet,son:k.son}:null;}).filter(Boolean).sort((a,b)=>b.adet-a.adet);
+  const acikTop=kimde.reduce((s,x)=>s+x.adet,0);
+  const marjBirim=num(u.fiyat)-num(u.pazFiyat);
+  const fmt=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"});};
+  const son=recs.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,30);
+  return h(Sheet,{ik:"📦",hex:"#d97b12",baslik:u.ad,alt:"🎒 çantanda "+u.canta+" · 🏭 atölyede "+u.stokta,onClose,cta:"Kapat",onCta:onClose},
+    // fiyat / özet kartları
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
+      h(Stat,{ik:"💰",v:tl(u.fiyat),l:"Satış fiyatı",renk:"var(--green)"}),
+      h(Stat,{ik:"🏭",v:tl(u.pazFiyat),l:"Alış (üretici payı)",renk:"var(--txt)"}),
+      h(Stat,{ik:"🫰",v:tl(marjBirim),l:"Birim hakediş",renk:"var(--gold)"}),
+      h(Stat,{ik:"⚔️",v:satAdet+" adet",l:"Toplam satıldı",renk:"var(--txt)"})),
+    h("div",{className:"card",style:{padding:"12px 14px",marginBottom:12,boxShadow:"none",background:"var(--surf2)",fontSize:12.5,lineHeight:1.8}},
+      "💰 Toplam ciro: ",h("b",null,tl(ciro)),"  ·  🫰 toplam marj: ",h("b",{style:{color:"var(--gold)"}},tl(marjTop)),h("br"),
+      "🏬 Konsinye verilen: ",h("b",null,konsVer+" adet"),"  ·  açıkta: ",h("b",{style:{color:"var(--violet)"}},acikTop+" adet"),
+      iadeAdet>0?("  ·  ↩ iade: "+iadeAdet):null,
+      gerAdet>0?("  ·  ⚡ seyyar: "+gerAdet):null),
+    // şu an kimde ne var
+    kimde.length>0?h("div",{className:"card",style:{padding:"14px 16px",marginBottom:12,boxShadow:"none"}},
+      h("div",{className:"lbl",style:{marginBottom:8}},"🏬 Şu an kimde ne var · "+acikTop+" adet"),
+      kimde.map((x,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
+        h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",paddingRight:8}},x.ad),
+        h("span",{style:{fontWeight:800,color:"var(--violet)",flexShrink:0}},x.adet+" adet")))):null,
+    // hareket geçmişi (kime, ne zaman, kaça)
+    h("div",{className:"lbl",style:{margin:"4px 0 8px"}},"🕘 Hareket geçmişi · kime, ne zaman"),
+    son.length?son.map((x,i)=>{const o=ovOzet(x);
+      return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
+        h("span",{style:{fontSize:16}},o.ik),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(x.yer||"—")+(x._ov?" · 🧪":"")),
+          h("div",{style:{fontSize:11,color:"var(--mut)"}},fmt(x.tarih)+" · "+o.t)),
+        h("div",{style:{textAlign:"right",flexShrink:0}},
+          h("div",{style:{fontSize:13,fontWeight:800}},num(x.adet)+" ad."),
+          x.tip==="satis"?h("div",{style:{fontSize:11,color:"var(--green)",fontWeight:700}},tl(num(x.adet)*num(x.satisFiyat))):null));})
+      :h("div",{style:{padding:"12px 0",color:"var(--mut)",fontSize:13}},"Bu ürünle ilgili hareket yok."));
+}
 function Reward({xp,mesaj,onDone}){
   useEffect(()=>{const t=setTimeout(onDone,1750);return ()=>clearTimeout(t);},[]);
   const renk=["#f4a63a","#d97b12","#16a34a","#7c46e6","#0e8fce","#ffd479"];
@@ -1058,6 +1103,7 @@ function App(){
   const redSet=new Set((kesifRed||[]).map(r=>r.id));
   const adayGoster=d?d.adaylar.filter(a=>!redSet.has(a.id)):[];
   const [adaySec,setAdaySec]=useState(null);
+  const [urunSec,setUrunSec]=useState(null);   // 📦 ürün detay modalı
   const synthK=a=>({key:"m:"+a.id,musteriId:a.id,ad:a.ad,bolge:a.bolge,borc:0,acikKons:0,konsKalem:[],ciro:0,satisAdet:0});
   // — yeni kale (müşteri) ekle — izole demo_musteri
   const [yeniKale,setYeniKale]=useState(false); const [ykBekle,setYkBekle]=useState(false);
@@ -1068,7 +1114,7 @@ function App(){
     }catch(e){ console.error(e); say("⚠ Eklenemedi — tekrar dene"); } finally{ setYkBekle(false); } }
   // — GERİ TUŞU: en üstteki katmanı kapat → kale → alt sekme → Üs'te çıkış onayı
   const backRef=useRef({});
-  backRef.current={sheet,bilgi,brifAcik,seferSheet,cantaSheet,yeniKale,adaySec,kale,view};
+  backRef.current={sheet,bilgi,brifAcik,seferSheet,cantaSheet,yeniKale,adaySec,urunSec,kale,view};
   useEffect(()=>{
     history.pushState({tk:1},"");
     const onPop=()=>{ const s=backRef.current; let handled=true;
@@ -1079,6 +1125,7 @@ function App(){
       else if(s.cantaSheet) setCantaSheet(false);
       else if(s.yeniKale) setYeniKale(false);
       else if(s.adaySec) setAdaySec(null);
+      else if(s.urunSec) setUrunSec(null);
       else if(s.kale) setKale(null);
       else if(s.view!=="us") setView("us");
       else handled=false;
@@ -1114,7 +1161,7 @@ function App(){
   else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype,openBrif:()=>setBrifAcik(true),goView:go,openBilgi});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say,onYeniKale:()=>setYeniKale(true),adaylar:adayGoster,openAday:a=>setAdaySec(a)});
   else if(view==="harita") ekran=h(Harita,{d,openKale,say,adaylar:adayGoster,openAday:a=>setAdaySec(a)});
-  else if(view==="cephane") ekran=h(Cephane,{d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,seferBitir,cantaAc:()=>setCantaSheet(true)});
+  else if(view==="cephane") ekran=h(Cephane,{d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,seferBitir,cantaAc:()=>setCantaSheet(true),openUrun:u=>setUrunSec(u)});
   else ekran=h(Rapor,{d,say,ovList:ov.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),temizle:temizleDeneme,geriAl:geriAlKayit});
 
   return h("div",null, ekran,
@@ -1127,6 +1174,9 @@ function App(){
       ? h(GecmisSheet,{k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})
       : h(ActionSheet,{type:sheet.type,k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})),
     yeniKale&&h(YeniKaleSheet,{bekle:ykBekle,onClose:()=>setYeniKale(false),onKaydet:yeniKaleKaydet}),
+    urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),
+      recs:hareketler.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
+      kaleler:d.kaleler,onClose:()=>setUrunSec(null)}),
     adaySec&&h(AdaySheet,{a:adaySec,onClose:()=>setAdaySec(null),
       onAkin:()=>{const a=adaySec;setAdaySec(null);openSheet("satis",synthK(a));},
       onKons:()=>{const a=adaySec;setAdaySec(null);openSheet("konsinye",synthK(a));},
