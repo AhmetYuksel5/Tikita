@@ -49,6 +49,43 @@ import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "ht
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const db=getFirestore(initializeApp(cfg));
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
+let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
+
+// Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
+async function placesText(t,merkez){ const key=GKEY; if(!key) return null;
+  try{
+    const r=await fetch("https://places.googleapis.com/v1/places:searchText",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,
+        "X-Goog-FieldMask":"places.displayName,places.location,places.formattedAddress,places.addressComponents"},
+      body:JSON.stringify({textQuery:t,languageCode:"tr",regionCode:"TR",pageSize:10,
+        locationBias:{circle:{center:{latitude:(merkez&&merkez.lat)||41.0082,longitude:(merkez&&merkez.lng)||28.9784},radius:30000}}})});
+    if(!r.ok) return null;
+    const j=await r.json();
+    return (j.places||[]).map(p=>{ const comp=p.addressComponents||[]; const f=t2=>{ const c=comp.find(x=>(x.types||[]).includes(t2)); return c?(c.longText||c.shortText||""):""; };
+      return { ad:(p.displayName&&p.displayName.text)||"", lat:p.location&&p.location.latitude, lng:p.location&&p.location.longitude,
+        tam:p.formattedAddress||"", bolge:f("administrative_area_level_2")||f("sublocality_level_1")||f("sublocality")||"" }; })
+      .filter(x=>x.ad&&x.lat!=null);
+  }catch(e){ return null; }
+}
+// Overpass/OSM isimle mekan arama (anahtarsız yedek)
+async function overpassAdAra(t,merkez){
+  try{
+    const esc=t.replace(/[.*+?^${}()|[\]\\"]/g,"\\$&");
+    const la=(merkez&&merkez.lat)||41.0082, lo=(merkez&&merkez.lng)||28.9784;
+    const q='[out:json][timeout:15];nwr["name"~"'+esc+'",i](around:25000,'+la+','+lo+');out center 15;';
+    const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});
+    if(!r.ok) return null;
+    const j=await r.json(); const gor=new Set(), out=[];
+    (j.elements||[]).forEach(el=>{ const tg=el.tags||{}; const ad=tg.name; if(!ad) return;
+      const la2=el.lat!=null?el.lat:(el.center&&el.center.lat), lo2=el.lon!=null?el.lon:(el.center&&el.center.lon);
+      if(la2==null||lo2==null) return;
+      const key=el.type+"/"+el.id; if(gor.has(key)) return; gor.add(key);
+      const adres=[tg["addr:street"],tg["addr:housenumber"],tg["addr:suburb"]||tg["addr:district"],tg["addr:city"]].filter(Boolean).join(" ");
+      out.push({ad,lat:la2,lng:lo2,tam:adres||("OSM · "+(tg.shop||tg.amenity||"")),bolge:tg["addr:district"]||tg["addr:suburb"]||""}); });
+    return out;
+  }catch(e){ return null; }
+}
+const ilceOf=a=>a?(a.town||a.district||a.city_district||a.suburb||a.county||""):"";
 
 /* ————— YAZMA katmanı — izole (demo_) · gerçek defter korunur ————— */
 const OV="demo_";  // deneme yazımları ayrı koleksiyonlarda durur
@@ -852,13 +889,86 @@ function GerillaSheet({d,onClose,onFire}){
             paraN>0?h("div",{style:{color:paraN>=maliyet?"var(--green)":"var(--red)",fontWeight:800}},
               paraN>=maliyet?("🫰 Marjın: "+tl(paraN-maliyet)):("⚠ Maliyetin altında — en az "+tl(maliyet))):null):null));
 }
-/* ————— YENİ KALE (müşteri) ekle ————— */
+/* ————— YENİ KALE (müşteri) ekle — konumlu (ana uygulamadaki KonumSec sistemi) ————— */
 function YeniKaleSheet({onClose,onKaydet,bekle}){
   const [ad,setAd]=useState(""); const [bolge,setBolge]=useState(""); const [tel,setTel]=useState("");
+  const [lat,setLat]=useState(""); const [lng,setLng]=useState("");
+  const [sonuc,setSonuc]=useState([]); const [ara,setAra]=useState(false); const [bos,setBos]=useState(false);
+  const [merkez,setMerkez]=useState({lat:41.0082,lng:28.9784});   // varsayılan İstanbul
+  const touched=useRef(false);
+  const mapDiv=useRef(null), mapObj=useRef(null), mkRef=useRef(null);
+  // açılışta cihaz konumunu sessizce al → aramaları yakına öncele
+  useEffect(()=>{ if(!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(p=>setMerkez({lat:p.coords.latitude,lng:p.coords.longitude}),()=>{},{enableHighAccuracy:true,timeout:8000,maximumAge:300000}); },[]);
+  async function tersCoz(la,lo){ let nm="",bl="";
+    try{ const r=await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&accept-language=tr&lat="+la+"&lon="+lo);
+      const j=await r.json(); nm=j.name||(j.display_name||"").split(",")[0]||""; bl=ilceOf(j.address); }catch(e){}
+    return {nm,bl}; }
+  async function konumdan(la,lo,adKoru){ la=(+la).toFixed(6); lo=(+lo).toFixed(6);
+    setLat(la); setLng(lo); setMerkez({lat:+la,lng:+lo});
+    const r=await tersCoz(la,lo);
+    if(r.nm) setAd(p=>(adKoru||p.trim())?p:r.nm);
+    if(r.bl) setBolge(p=>p.trim()?p:r.bl); }
+  function gps(){ if(!navigator.geolocation) return alert("Cihaz konum desteklemiyor.");
+    navigator.geolocation.getCurrentPosition(p=>konumdan(p.coords.latitude,p.coords.longitude,false),
+      e=>alert("Konum alınamadı: "+e.message),{enableHighAccuracy:true,timeout:10000,maximumAge:0}); }
+  // arama: Google Places (anahtar varsa) → Nominatim → Overpass
+  async function aramaYap(t){ t=(t||"").trim(); if(t.length<2) return; setAra(true); setBos(false);
+    try{
+      const gj=await placesText(t,merkez);
+      if(gj&&gj.length){ gj.sort((a,b)=>Math.hypot(+a.lat-merkez.lat,+a.lng-merkez.lng)-Math.hypot(+b.lat-merkez.lat,+b.lng-merkez.lng)); setSonuc(gj); return; }
+      const d2=0.6, vb=(merkez.lng-d2)+","+(merkez.lat+d2)+","+(merkez.lng+d2)+","+(merkez.lat-d2);
+      let r=await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&countrycodes=tr&accept-language=tr&viewbox="+vb+"&bounded=1&q="+encodeURIComponent(t));
+      let j=await r.json();
+      if(!j.length){ r=await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&countrycodes=tr&accept-language=tr&q="+encodeURIComponent(t)); j=await r.json(); }
+      if(!j.length){ const oj=await overpassAdAra(t,merkez);
+        if(oj&&oj.length){ oj.sort((a,b)=>Math.hypot(+a.lat-merkez.lat,+a.lng-merkez.lng)-Math.hypot(+b.lat-merkez.lat,+b.lng-merkez.lng)); setSonuc(oj); return; } }
+      setSonuc(j.map(x=>({ad:(x.display_name||"").split(",")[0],lat:x.lat,lng:x.lon,tam:x.display_name,bolge:ilceOf(x.address)})));
+      if(!j.length) setBos(true);
+    }catch(e){ setBos(true); } finally{ setAra(false); } }
+  // yazarken otomatik ara (debounce) — ana uygulama ile aynı
+  useEffect(()=>{ if(!touched.current) return; const t=ad.trim();
+    if(t.length<2){ setSonuc([]); return; }
+    const id=setTimeout(()=>aramaYap(t),450); return ()=>clearTimeout(id); },[ad,merkez]);
+  function sec(r){ setAd(r.ad); if(r.bolge) setBolge(p=>p.trim()?p:r.bolge);
+    setLat((+r.lat).toFixed(6)); setLng((+r.lng).toFixed(6)); setMerkez({lat:+r.lat,lng:+r.lng});
+    setSonuc([]); touched.current=false; }
+  // mini pin haritası — dokun/sürükle ile iğnele
+  useEffect(()=>{ if(!window.L||!mapDiv.current||mapObj.current) return;
+    const L=window.L, c=[merkez.lat,merkez.lng];
+    const map=L.map(mapDiv.current,{attributionControl:false,zoomControl:false}).setView(c,12);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
+    const pin=L.divIcon({className:"",iconSize:[30,30],iconAnchor:[15,28],html:"<div style='color:#dc2626'><svg width='30' height='30' viewBox='0 0 24 24' fill='currentColor'><path d='M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z'/></svg></div>"});
+    const mk=L.marker(c,{draggable:true,icon:pin}).addTo(map);
+    mkRef.current=mk; mapObj.current=map;
+    map.on("click",e=>{ mk.setLatLng(e.latlng); konumdan(e.latlng.lat,e.latlng.lng,true); });
+    mk.on("dragend",()=>{ const p=mk.getLatLng(); konumdan(p.lat,p.lng,true); });
+    setTimeout(()=>{ try{ map.invalidateSize(); }catch(e){} },250);
+    return ()=>{ try{ map.remove(); }catch(e){} mapObj.current=null; };
+  },[]);
+  useEffect(()=>{ if(!mapObj.current||!mkRef.current) return;
+    if(lat&&lng){ const ll=[+lat,+lng]; mkRef.current.setLatLng(ll); mapObj.current.setView(ll,16); }
+    else mapObj.current.setView([merkez.lat,merkez.lng],mapObj.current.getZoom());
+  },[lat,lng,merkez]);
   return h(Sheet,{ik:"🏰",hex:"#16a34a",baslik:"Yeni kale (müşteri)",alt:"ilk satış/konsinyeyle kaleye dönüşür",onClose,
-    cta:bekle?"⏳…":"🏰 Ekle ve ilk akını yap",disabled:!ad.trim()||bekle,onCta:()=>onKaydet({ad:ad.trim(),bolge:bolge.trim(),telefon:tel.trim()})},
-    h("div",{className:"lbl",style:{marginBottom:8}},"Mekan adı *"),
-    h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Moda Kafe",style:{...inp,fontSize:15,fontWeight:600,marginBottom:14}}),
+    cta:bekle?"⏳…":"🏰 Ekle ve ilk akını yap",disabled:!ad.trim()||bekle,
+    onCta:()=>onKaydet({ad:ad.trim(),bolge:bolge.trim(),telefon:tel.trim(),lat,lng})},
+    h("div",{className:"lbl",style:{marginBottom:8}},"Mekan adı * — yaz, konumuyla bulunsun"),
+    h("div",{style:{display:"flex",gap:8,marginBottom:6}},
+      h("input",{value:ad,onChange:e=>{touched.current=true;setAd(e.target.value);},placeholder:"örn. Moda Kafe",
+        style:{...inp,flex:1,fontSize:15,fontWeight:600}}),
+      h("button",{onClick:gps,style:{flexShrink:0,padding:"0 14px",borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--cyan)"}},"📍 Konumum")),
+    ara?h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:6}},"⏳ aranıyor…"):null,
+    bos?h("div",{style:{fontSize:11.5,color:"var(--red)",fontWeight:700,marginBottom:6}},"Sonuç çıkmadı — haritadan iğnele ya da 📍 kullan"):null,
+    sonuc.length>0?h("div",{className:"card",style:{marginBottom:10,maxHeight:200,overflowY:"auto",boxShadow:"none"}},
+      sonuc.map((r,i)=>h("button",{key:i,onClick:()=>sec(r),style:{display:"block",width:"100%",textAlign:"left",padding:"10px 13px",borderTop:i?"1px solid var(--line)":"none"}},
+        h("div",{style:{fontSize:13.5,fontWeight:700}},r.ad),
+        h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.tam||r.bolge||"")))):null,
+    h("div",{ref:mapDiv,style:{height:160,borderRadius:14,overflow:"hidden",border:"1px solid var(--line)",marginBottom:8}}),
+    (lat&&lng)
+      ? h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:12,fontSize:12,fontWeight:700,color:"var(--green)"}},"📍 Konum seçildi ✓",
+          h("button",{onClick:()=>{setLat("");setLng("");},style:{marginLeft:"auto",fontSize:11.5,fontWeight:800,color:"var(--red)"}},"kaldır"))
+      : h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:12}},"Haritaya dokunarak ya da iğneyi sürükleyerek de seçebilirsin."),
     h("div",{className:"lbl",style:{marginBottom:8}},"Bölge"),
     h("input",{value:bolge,onChange:e=>setBolge(e.target.value),placeholder:"örn. Kadıköy",style:{...inp,fontSize:15,fontWeight:600,marginBottom:14}}),
     h("div",{className:"lbl",style:{marginBottom:8}},"Telefon (isteğe bağlı)"),
@@ -1095,6 +1205,8 @@ function Reward({xp,mesaj,onDone}){
 function App(){
   const canliHar=useColl("pazarlama_hareket"), musteriler=useColl("musteri"), kullanicilar=useColl("kullanici"), urunler=useColl("stok_urun");
   const hedefler=useColl("hedef");
+  const ayarlar=useColl("ayar");
+  GKEY=(((ayarlar||[]).find(a=>a.id==="genel")||{}).googleKey||"").trim();   // Places anahtarı — ana uygulama ile aynı kaynak
   const ovHar=useColl("demo_pazarlama_hareket");   // deneme (overlay) yazımları
   const seferler=useColl("demo_sefer"), cantaRows=useColl("demo_canta"), demoMus=useColl("demo_musteri"), kesifRed=useColl("demo_kesif_red");
   const urunEk=useColl("demo_urun_ek"), urunFoto=useColl("demo_urun_foto");   // 📦 ürün fiyat/tanıtım + fotoğraflar (izole)
@@ -1214,8 +1326,8 @@ function App(){
   const synthK=a=>({key:"m:"+a.id,musteriId:a.id,ad:a.ad,bolge:a.bolge,borc:0,acikKons:0,konsKalem:[],ciro:0,satisAdet:0});
   // — yeni kale (müşteri) ekle — izole demo_musteri
   const [yeniKale,setYeniKale]=useState(false); const [ykBekle,setYkBekle]=useState(false);
-  async function yeniKaleKaydet({ad,bolge,telefon}){ if(ykBekle) return; setYkBekle(true);
-    try{ const id=await save("musteri",{ad,bolge,telefon,tarih:new Date().toISOString()});
+  async function yeniKaleKaydet({ad,bolge,telefon,lat,lng}){ if(ykBekle) return; setYkBekle(true);
+    try{ const id=await save("musteri",{ad,bolge,telefon,lat:lat||"",lng:lng||"",tarih:new Date().toISOString()});
       setYeniKale(false); say("🏰 "+ad+" eklendi — ilk akınla kaleye dönüşür");
       openSheet("satis",{key:"m:"+id,musteriId:id,ad,bolge,borc:0,acikKons:0,konsKalem:[],ciro:0,satisAdet:0});
     }catch(e){ console.error(e); say("⚠ Eklenemedi — tekrar dene"); } finally{ setYkBekle(false); } }
