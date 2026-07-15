@@ -78,7 +78,7 @@ function useColl(name){ const [rows,setRows]=useState(null);
   useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error(name,e);setRows([]);}),[]);
   return rows; }
 
-function hesap(hareketler,musteriler,kullanicilar,urunler){
+function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
   const emir=(kullanicilar||[]).find(u=>(u.ad||"").trim().toLocaleLowerCase("tr")==="emir")||{id:"mr14ih8vc39wug",ad:"Emir",simge:"🎖️"};
   const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
   const kk=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
@@ -125,7 +125,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const gorevler=kaleler.filter(k=>k.durum.key!=="saglam").sort((a,b)=>oncelik[a.durum.key]-oncelik[b.durum.key]||b.guc-a.guc);
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
-  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:num(u.pazFiyat)}))
+  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid])+num((cantaOv||{})[u.id]),fiyat:num(u.satisFiyat),pazFiyat:num(u.pazFiyat)}))
     .filter(u=>u.ad!=="?").sort((a,b)=>(b.canta-a.canta)||(b.stokta-a.stokta));
   const cantaTop=cephane.reduce((s,u)=>s+u.canta,0);
   return {emir,kaleler,toplamGuc,komutan,sonraki,gerillaGanimet,streak,hafCiro,hafKar,gorevler,cephane,cantaTop,
@@ -338,11 +338,29 @@ function Harita({d,openKale,say}){
 }
 
 /* ————— CEPHANE ————— */
-function Cephane({d,say,openSheet}){
+function Cephane({d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,seferBitir,cantaAc}){
+  const geldi=aktifSefer?gunFark(aktifSefer.baslangic):null;
+  const o=donemOzet||{};
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"🎒 Cephane"),
       h("div",{style:{fontSize:13,color:"var(--mut)",fontWeight:600}},"çantanda "+d.cantaTop+" varlık")),
+    // SEFER durumu
+    aktifSefer
+      ? h("div",{className:"rise",style:{borderRadius:20,padding:"16px 16px 14px",marginBottom:16,color:"#fff",position:"relative",overflow:"hidden",
+          background:"linear-gradient(150deg,var(--hud1),var(--hud2) 60%,var(--hud3) 140%)",boxShadow:"0 8px 22px rgba(124,45,18,.3)"}},
+          h("div",{style:{position:"absolute",top:-24,right:-10,fontSize:96,opacity:.1}},"⚔️"),
+          h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10}},
+            h("span",{style:{fontSize:11,fontWeight:800,letterSpacing:1,background:"rgba(255,255,255,.18)",padding:"3px 10px",borderRadius:8}},"⚔️ SEFERDESİN"),
+            h("span",{style:{fontSize:12,color:"rgba(255,255,255,.8)"}},geldi===0?"bugün çıktın":geldi+" gün önce çıktın")),
+          h("div",{style:{fontSize:12.5,color:"rgba(255,255,255,.88)",marginBottom:12}},"Son rapordan beri: ",
+            h("b",null,o.satAd+" satış · "+tl(o.ciro)+" ciro · "+tl(o.tah)+" tahsilat")),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+            h("button",{onClick:cantaAc,style:{padding:"11px 6px",borderRadius:12,background:"rgba(255,255,255,.16)",color:"#fff",fontSize:12.5,fontWeight:800}},"🎒 Cephane ekle"),
+            h("button",{onClick:raporVer,style:{padding:"11px 6px",borderRadius:12,background:"rgba(255,255,255,.16)",color:"#fff",fontSize:12.5,fontWeight:800}},"📡 Rapor ver"),
+            h("button",{onClick:seferBitir,style:{padding:"11px 6px",borderRadius:12,background:"rgba(0,0,0,.24)",color:"#fff",fontSize:12.5,fontWeight:800}},"🏭 Seferi bitir")))
+      : h("button",{onClick:seferBaslat,style:{width:"100%",padding:16,borderRadius:16,marginBottom:16,
+          background:"linear-gradient(150deg,var(--hud1),var(--hud2) 70%,var(--hud3))",color:"#fff",fontSize:16,fontWeight:800,boxShadow:"0 8px 20px rgba(124,45,18,.28)"}},"⚔️ Sefere çık — orduyu hazırla"),
     h("button",{onClick:()=>openSheet("satis",null),style:{width:"100%",padding:15,borderRadius:16,marginBottom:16,
       background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:15.5,fontWeight:800}},"⚡ Gerilla satış · anında ganimet"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
@@ -408,6 +426,43 @@ function OvSatir({x,geriAl}){ const o=ovOzet(x);
       h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},(x.yer||"—")+(o.v?(" · "+o.v):""))),
     h("button",{onClick:()=>geriAl(x),style:{padding:"7px 11px",borderRadius:10,fontSize:12,fontWeight:800,
       background:"#fff",border:"1px solid var(--line)",color:"var(--red)",flexShrink:0}},"↩️ Geri al"));
+}
+
+/* ————— SEFER: dönem raporu + çanta doldurma ————— */
+function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,hak=0,ganimet=0,iade=0;
+  (recs||[]).forEach(x=>{
+    if(x.tip==="satis"){ if(x.gerilla) ganimet+=num(x.adet)*num(x.satisFiyat); else {satAd+=num(x.adet);ciro+=num(x.adet)*num(x.satisFiyat);} }
+    else if(x.tip==="tahsilat"){ tah+=num(x.tutar); hak+=(x.pazPay!=null?num(x.pazPay):0); }
+    else if(x.tip==="konsinye"){ konsAd+=num(x.adet); }
+    else if(x.tip==="iade"){ iade+=num(x.adet); } });
+  return {satAd,ciro,tah,konsAd,hak,ganimet,iade,bos:!(satAd||tah||konsAd||ganimet||iade)}; }
+function SeferRaporSheet({mod,veri,onClose,onOnay,bekle}){ const v=veri||{};
+  const bitir=mod==="bitir";
+  return h(Sheet,{ik:bitir?"🏭":"📡",hex:bitir?"#b45309":"#0e8fce",
+    baslik:bitir?"Seferi bitir":"Komuta'ya rapor",alt:bitir?"çanta atölyeye döner, dönem kapanır":"çanta durur, yeni rapor dönemi başlar",
+    onClose,cta:bekle?"⏳…":(bitir?"🏭 Seferi bitir":"📡 Raporu onayla"),disabled:bekle,onCta:onOnay},
+    v.bos&&h("div",{style:{padding:"10px 14px",marginBottom:14,borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)",textAlign:"center"}},"Bu dönemde kayıtlı işlem yok."),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      h(Stat,{ik:"💰",v:v.satAd+" satış",l:tl(v.ciro)+" ciro",renk:"var(--green)"}),
+      h(Stat,{ik:"🧾",v:tl(v.tah),l:"tahsil edilen",renk:"var(--gold)"}),
+      h(Stat,{ik:"🫰",v:tl(v.hak),l:"hakedişin",renk:"var(--gold)"}),
+      h(Stat,{ik:"🏬",v:v.konsAd+" adet",l:"konsinye bırakılan",renk:"var(--violet)"}),
+      v.ganimet>0&&h(Stat,{ik:"⚡",v:tl(v.ganimet),l:"gerilla ganimet",renk:"var(--cyan)"}),
+      v.iade>0&&h(Stat,{ik:"↩️",v:v.iade+" adet",l:"iade alınan",renk:"var(--mut)"})));
+}
+function CantaSheet({d,onClose,onConfirm,bekle}){
+  const [lines,setLines]=useState({});
+  const secili=d.cephane.filter(u=>num(lines[u.id])>0);
+  const toplam=secili.reduce((s,u)=>s+num(lines[u.id]),0);
+  return h(Sheet,{ik:"🎒",hex:"#d97b12",baslik:"Çantayı doldur",alt:"atölyeden sahaya ürün al",onClose,
+    cta:bekle?"⏳…":("🎒 "+toplam+" ürünü çantaya al"),disabled:!secili.length||bekle,
+    onCta:()=>onConfirm(secili.map(u=>({id:u.id,ad:u.ad,adet:num(lines[u.id])})))},
+    d.cephane.slice(0,24).map((u,i)=>h("div",{key:u.id||i,style:{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i?"1px solid var(--line)":"none"}},
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},"atölyede "+u.stokta+" · 🎒 "+u.canta)),
+      h("input",{type:"number",inputMode:"numeric",placeholder:"0",value:lines[u.id]||"",onChange:e=>setLines(s=>({...s,[u.id]:e.target.value})),
+        style:{...inp,width:76,textAlign:"center",padding:"10px 8px"}}))));
 }
 
 /* ————— ETKİLEŞİM: alttan işlem paneli + ödül ————— */
@@ -522,14 +577,19 @@ function Reward({xp,mesaj,onDone}){
 function App(){
   const canliHar=useColl("pazarlama_hareket"), musteriler=useColl("musteri"), kullanicilar=useColl("kullanici"), urunler=useColl("stok_urun");
   const ovHar=useColl("demo_pazarlama_hareket");   // deneme (overlay) yazımları
+  const seferler=useColl("demo_sefer"), cantaRows=useColl("demo_canta");
   const [view,setView]=useState("us"); const [kale,setKale]=useState(null); const [toastMsg,setToastMsg]=useState("");
   const [sheet,setSheet]=useState(null); const [reward,setReward]=useState(null);
+  const [seferSheet,setSeferSheet]=useState(null); const [cantaSheet,setCantaSheet]=useState(false); const [sbekle,setSbekle]=useState(false);
   const say=m=>{ setToastMsg(m); clearTimeout(window.__t); window.__t=setTimeout(()=>setToastMsg(""),2200); };
   const yuk=[canliHar,musteriler,kullanicilar,urunler].some(x=>x===null);
   const ov=(ovHar||[]).map(x=>({...x,_ov:true}));
+  const cantaOv={}; (cantaRows||[]).forEach(r=>cantaOv[r.id]=num(r.adet));
   const hareketler=useMemo(()=>[...(canliHar||[]),...ov],[canliHar,ovHar]);
-  const d=useMemo(()=>yuk?null:hesap(hareketler,musteriler,kullanicilar,urunler),[hareketler,musteriler,kullanicilar,urunler,yuk]);
+  const d=useMemo(()=>yuk?null:hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv),[hareketler,musteriler,kullanicilar,urunler,cantaRows,yuk]);
   const emirId=(d&&d.emir&&d.emir.id)||"mr14ih8vc39wug";
+  const aktifSefer=(seferler||[]).filter(s=>s.durum==="acik").sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))[0]||null;
+  const donemOzet=aktifSefer?donemRapor(ov.filter(x=>new Date(x.tarih)>=new Date(aktifSefer.sonRapor||aktifSefer.baslangic))):null;
   const openKale=k=>{ setKale(k); window.scrollTo(0,0); };
   const go=v=>{ setKale(null); setView(v); window.scrollTo(0,0); };
   const stype=k=>k?({borc:"tahsilat",konsinye:"konsinye",ihmal:"ziyaret",saglam:"satis"}[k.durum.key]||"satis"):"satis";
@@ -576,6 +636,19 @@ function App(){
     for(const x of ov){ try{ await remove("pazarlama_hareket",x.id); }catch(e){} } say("🧹 Deneme kayıtları temizlendi"); }
   const geriAlKayit=async(x)=>{ const o=ovOzet(x); if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
     try{ await remove("pazarlama_hareket",x.id); say("↩️ Geri alındı · "+o.t); }catch(e){ console.error(e); say("⚠ Geri alınamadı — tekrar dene"); } };
+  // — SEFER döngüsü (izole demo) —
+  async function seferBaslat(){ const now=new Date().toISOString();
+    try{ await save("sefer",{baslangic:now,sonRapor:now,durum:"acik",kullaniciId:emirId}); say("⚔️ Sefere çıktın!"); }catch(e){ console.error(e); say("⚠ Sefer başlatılamadı"); } }
+  function raporVer(){ if(!aktifSefer) return; setSeferSheet({mod:"rapor",veri:donemOzet||donemRapor([])}); }
+  function seferBitir(){ if(!aktifSefer) return; setSeferSheet({mod:"bitir",veri:donemRapor(ov.filter(x=>new Date(x.tarih)>=new Date(aktifSefer.baslangic)))}); }
+  async function seferOnay(){ if(!aktifSefer||sbekle) return; setSbekle(true);
+    try{ if(seferSheet&&seferSheet.mod==="bitir"){ await save("sefer",{id:aktifSefer.id,durum:"kapali",bitis:new Date().toISOString()});
+        for(const r of (cantaRows||[])){ try{ await remove("canta",r.id); }catch(e){} } say("🏭 Sefer bitti — çanta atölyeye döndü"); }
+      else { await save("sefer",{id:aktifSefer.id,sonRapor:new Date().toISOString()}); say("📡 Rapor verildi — çanta duruyor"); }
+      setSeferSheet(null); }catch(e){ console.error(e); say("⚠ İşlem tamamlanamadı"); } finally{ setSbekle(false); } }
+  async function cantaEkle(items){ if(sbekle) return; setSbekle(true);
+    try{ for(const it of items){ if(num(it.adet)>0){ const cur=num(cantaOv[it.id]); await save("canta",{id:it.id,adet:cur+num(it.adet),urunAd:it.ad}); } }
+      setCantaSheet(false); say("🎒 Çantaya eklendi"); }catch(e){ console.error(e); say("⚠ Eklenemedi"); } finally{ setSbekle(false); } }
 
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--gold)",animation:"spin .8s linear infinite"}}),
@@ -590,7 +663,7 @@ function App(){
   else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say});
   else if(view==="harita") ekran=h(Harita,{d,openKale,say});
-  else if(view==="cephane") ekran=h(Cephane,{d,say,openSheet});
+  else if(view==="cephane") ekran=h(Cephane,{d,say,openSheet,aktifSefer,donemOzet,seferBaslat,raporVer,seferBitir,cantaAc:()=>setCantaSheet(true)});
   else ekran=h(Rapor,{d,say,ovList:ov.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),temizle:temizleDeneme,geriAl:geriAlKayit});
 
   return h("div",null, ekran,
@@ -598,6 +671,8 @@ function App(){
     h(Toast,{msg:toastMsg}),
     !kaleGuncel&&view!=="harita"&&h("div",{style:{textAlign:"center",padding:"20px 0 6px",color:"var(--mut2)",fontSize:11}},"🧪 Deneme tasarımı · Emir · canlı veri"),
     sheet&&h(ActionSheet,{type:sheet.type,k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire}),
+    seferSheet&&h(SeferRaporSheet,{mod:seferSheet.mod,veri:seferSheet.veri,bekle:sbekle,onClose:()=>setSeferSheet(null),onOnay:seferOnay}),
+    cantaSheet&&h(CantaSheet,{d,bekle:sbekle,onClose:()=>setCantaSheet(false),onConfirm:cantaEkle}),
     reward&&h(Reward,{xp:reward.xp,mesaj:reward.mesaj,onDone:()=>{const m=reward.mesaj;setReward(null);say("✅ "+m);}}));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(h(App));
