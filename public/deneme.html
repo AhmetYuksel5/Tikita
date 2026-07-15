@@ -228,7 +228,7 @@ function Kaleler({d,openKale,say}){
 }
 
 /* ————— KALE DETAYI ————— */
-function KaleDetay({k,back,say,openSheet}){ const D=k.durum;
+function KaleDetay({k,back,say,openSheet,ovList,geriAl}){ const D=k.durum;
   const zt=k.son?(k.gunGecti===0?"bugün":k.gunGecti+" gün önce"):"hiç";
   const stype=D.key==="borc"?"tahsilat":D.key==="konsinye"?"konsinye":D.key==="ihmal"?"ziyaret":"satis";
   const aksiyonlar=[["🧾","Tahsil et","var(--gold)","tahsilat"],["🏬","Konsinye","var(--violet)","konsinye"],["💰","Satış yap","var(--green)","satis"],["⚔️","Ziyaret","var(--cyan)","ziyaret"]];
@@ -260,7 +260,11 @@ function KaleDetay({k,back,say,openSheet}){ const D=k.durum;
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,paddingBottom:8}},
         aksiyonlar.map(([ik,ad,renk,st],i)=>h("button",{key:i,onClick:()=>openSheet(st,k),className:"card",style:{padding:"14px 10px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,boxShadow:"none"}},
           h("span",{style:{fontSize:22}},ik),
-          h("span",{style:{fontSize:12.5,fontWeight:700,color:renk}},ad))))));
+          h("span",{style:{fontSize:12.5,fontWeight:700,color:renk}},ad)))),
+      (ovList&&ovList.length>0)&&h("div",{className:"card",style:{padding:"14px 16px",margin:"12px 0 8px",boxShadow:"none",background:"var(--surf2)"}},
+        h("div",{className:"lbl",style:{marginBottom:2,display:"flex",alignItems:"center",gap:6}},"🧪 Bu kaledeki deneme işlemlerin"),
+        h("div",{style:{fontSize:11,color:"var(--mut)",margin:"2px 0 6px"}},"yanlış yaptıysan tek dokunuşla geri al"),
+        ovList.map((x,i)=>h(OvSatir,{key:x.id||i,x,geriAl})))));
 }
 function Stat({ik,v,l,renk}){ return h("div",{className:"card",style:{padding:"14px 13px",boxShadow:"none"}},
   h("div",{style:{fontSize:16,marginBottom:5}},ik),
@@ -313,7 +317,7 @@ function Cephane({d,say,openSheet}){
 }
 
 /* ————— RAPOR ————— */
-function Rapor({d,say,ovN,temizle}){
+function Rapor({d,say,ovList,temizle,geriAl}){ const ovN=(ovList||[]).length;
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:14}},"📊 Rapor"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
@@ -326,11 +330,13 @@ function Rapor({d,say,ovN,temizle}){
       h("div",null,h("div",{style:{fontSize:14.5,fontWeight:800,color:"var(--green)"}},"Üreticiye borç yok"),
         h("div",{style:{fontSize:12,color:"var(--mut)",marginTop:1}},"tüm hesaplar kapalı"))),
     h("button",{onClick:()=>say("Detaylı rapor"),style:{width:"100%",padding:14,borderRadius:16,marginTop:14,background:"var(--surf)",border:"1px solid var(--line)",fontSize:14,fontWeight:700,color:"var(--mut)"}},"📄 Detaylı dönem raporu →"),
-    ovN>0&&h("div",{className:"card",style:{padding:"14px 16px",marginTop:14,display:"flex",alignItems:"center",gap:12,boxShadow:"none",background:"var(--surf2)"}},
-      h("span",{style:{fontSize:20}},"🧪"),
-      h("div",{style:{flex:1,minWidth:0}},h("div",{style:{fontSize:13.5,fontWeight:800}},ovN+" deneme kaydı"),
-        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},"izole test verisi · gerçek deftere yazılmadı")),
-      h("button",{onClick:temizle,style:{padding:"9px 13px",borderRadius:11,fontSize:12.5,fontWeight:800,background:"#fff",border:"1px solid var(--line)",color:"var(--red)"}},"🧹 Temizle")));
+    ovN>0&&h("div",{className:"card",style:{padding:"14px 16px",marginTop:14,boxShadow:"none",background:"var(--surf2)"}},
+      h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:2}},
+        h("span",{style:{fontSize:20}},"🧪"),
+        h("div",{style:{flex:1,minWidth:0}},h("div",{style:{fontSize:13.5,fontWeight:800}},ovN+" deneme işlemi"),
+          h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},"izole test verisi · gerçek deftere yazılmadı")),
+        h("button",{onClick:temizle,style:{padding:"9px 13px",borderRadius:11,fontSize:12.5,fontWeight:800,background:"#fff",border:"1px solid var(--line)",color:"var(--red)"}},"🧹 Tümü")),
+      ovList.slice(0,12).map((x,i)=>h(OvSatir,{key:x.id||i,x,geriAl}))));
 }
 
 /* ————— NAV ————— */
@@ -343,6 +349,26 @@ function Nav({aktif,go}){ const items=[["us","⛺","Üs"],["kaleler","🏰","Kal
           h("span",{style:{fontSize:21,opacity:on?1:.7,transform:on?"scale(1.08)":"none",transition:"transform .2s"}},ik),
           h("span",{style:{fontSize:10.5,fontWeight:on?800:600}},ad),
           h("span",{style:{width:5,height:5,borderRadius:5,background:on?"var(--gold)":"transparent",marginTop:1}}))})));
+}
+
+// bir deneme (overlay) kaydını insanca özetle
+function ovOzet(x){
+  if(x.tip==="tahsilat") return {ik:"🧾",t:"Tahsilat",v:tl(x.tutar)};
+  if(x.tip==="iade") return {ik:"↩️",t:"İade",v:num(x.adet)+" × "+(x.urunAd||"?")};
+  if(x.tip==="satis"&&x.kaynak==="konsinye") return {ik:"🏬",t:"Konsinye satış",v:num(x.adet)+" × "+(x.urunAd||"?")};
+  if(x.tip==="satis"&&x.gerilla) return {ik:"⚡",t:"Gerilla satış",v:num(x.adet)+" × "+(x.urunAd||"?")};
+  if(x.tip==="satis") return {ik:"💰",t:"Satış",v:num(x.adet)+" × "+(x.urunAd||"?")};
+  if(x.tip==="diplomasi") return {ik:"⚔️",t:"Ziyaret",v:x.not?("“"+String(x.not).slice(0,24)+"”"):""};
+  return {ik:"•",t:x.tip||"kayıt",v:""};
+}
+function OvSatir({x,geriAl}){ const o=ovOzet(x);
+  return h("div",{style:{display:"flex",alignItems:"center",gap:11,padding:"10px 0",borderTop:"1px solid var(--line)"}},
+    h("span",{style:{fontSize:18}},o.ik),
+    h("div",{style:{flex:1,minWidth:0}},
+      h("div",{style:{fontSize:13.5,fontWeight:700}},o.t),
+      h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},(x.yer||"—")+(o.v?(" · "+o.v):""))),
+    h("button",{onClick:()=>geriAl(x),style:{padding:"7px 11px",borderRadius:10,fontSize:12,fontWeight:800,
+      background:"#fff",border:"1px solid var(--line)",color:"var(--red)",flexShrink:0}},"↩️ Geri al"));
 }
 
 /* ————— ETKİLEŞİM: alttan işlem paneli + ödül ————— */
@@ -494,6 +520,8 @@ function App(){
     setSheet(null); setReward({mesaj:p.mesaj,xp:p.xp}); };
   async function temizleDeneme(){ if(!ov.length) return; if(!confirm("🧪 "+ov.length+" deneme kaydı silinsin mi? (gerçek defter etkilenmez)")) return;
     for(const x of ov){ try{ await remove("pazarlama_hareket",x.id); }catch(e){} } say("🧹 Deneme kayıtları temizlendi"); }
+  const geriAlKayit=async(x)=>{ const o=ovOzet(x); if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
+    try{ await remove("pazarlama_hareket",x.id); say("↩️ Geri alındı · "+o.t); }catch(e){ console.error(e); say("⚠ Geri alınamadı — tekrar dene"); } };
 
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--gold)",animation:"spin .8s linear infinite"}}),
@@ -501,13 +529,14 @@ function App(){
 
   // güncel kale nesnesini tazele (canlı veri değişince)
   const kaleGuncel=kale?(d.kaleler.find(x=>x.key===kale.key)||kale):null;
+  const kaleOv=kaleGuncel?ov.filter(x=>kkOf(x)===kaleGuncel.key).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
   let ekran;
-  if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet});
+  if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit});
   else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say});
   else if(view==="harita") ekran=h(Harita,{d,openKale,say});
   else if(view==="cephane") ekran=h(Cephane,{d,say,openSheet});
-  else ekran=h(Rapor,{d,say,ovN:ov.length,temizle:temizleDeneme});
+  else ekran=h(Rapor,{d,say,ovList:ov.slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),temizle:temizleDeneme,geriAl:geriAlKayit});
 
   return h("div",null, ekran,
     h(Nav,{aktif:kaleGuncel?"kaleler":view,go}),
