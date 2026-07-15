@@ -74,6 +74,21 @@ function kaleDurum(k){
   return {key:"saglam",label:"Sağlam",renk:"var(--green)",hex:"#16a34a",ik:"🛡️",aksiyon:"ilişki güçlü — yeni akın",cta:"⚔️ Akına git"};
 }
 
+// takım lider tablosu — her pazarlamacının toplam gücü (kale bazında, HUD ile aynı formül)
+function liderHesap(hareketler,kullanicilar){
+  const kk=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
+  const U={};
+  (hareketler||[]).forEach(x=>{ if((x.tip!=="satis"&&x.tip!=="konsinye")||x.gerilla) return;
+    const uid=x.kullaniciId||"?"; const u=U[uid]||(U[uid]={km:{}}); const key=kk(x);
+    const k=u.km[key]||(u.km[key]={s:0,c:0,ko:0});
+    if(x.tip==="satis"){k.s+=num(x.adet);k.c+=num(x.adet)*num(x.satisFiyat);} else k.ko+=num(x.adet); });
+  const kad={}; (kullanicilar||[]).forEach(u=>kad[u.id]={ad:u.ad||"?",simge:u.simge||"🎖️"});
+  return Object.entries(U).map(([uid,u])=>{ let guc=0,ciro=0;
+    Object.values(u.km).forEach(k=>{ const silah=Math.floor(k.c/250);
+      guc+=Math.round(k.s*katOf(ASKER_TIER,k.s)[1]+k.ko+silah*katOf(SILAH_TIER,k.c)[1]); ciro+=k.c; });
+    const ka=kad[uid]||{}; return {uid,ad:ka.ad||"?",simge:ka.simge||"🎖️",guc,ciro,komutan:katOf(KOMUTAN,guc)}; })
+    .filter(x=>x.guc>0).sort((a,b)=>b.guc-a.guc); }
+
 function useColl(name){ const [rows,setRows]=useState(null);
   useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error(name,e);setRows([]);}),[]);
   return rows; }
@@ -122,13 +137,29 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
   const hs=(hareketler||[]).filter(x=>x.tip==="satis"&&new Date(x.tarih).getTime()>=haf);
   const hafCiro=hs.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
   const hafKar=hs.reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);
+  const hafSatAd=hs.reduce((s,x)=>s+num(x.adet),0);
+  const hafKons=(hareketler||[]).filter(x=>x.tip==="konsinye"&&!x.gerilla&&new Date(x.tarih).getTime()>=haf).reduce((s,x)=>s+num(x.adet),0);
+  const gorevHaf=[
+    {ad:"Bu hafta 20 satış",deg:hafSatAd,hedef:20,renk:"var(--green)"},
+    {ad:"Bu hafta 5.000 ₺ ciro",deg:Math.round(hafCiro),hedef:5000,renk:"var(--gold)",birim:"tl"},
+    {ad:"15 konsinye bırak",deg:hafKons,hedef:15,renk:"var(--violet)"}];
   const gorevler=kaleler.filter(k=>k.durum.key!=="saglam").sort((a,b)=>oncelik[a.durum.key]-oncelik[b.durum.key]||b.guc-a.guc);
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
   const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid])+num((cantaOv||{})[u.id]),fiyat:num(u.satisFiyat),pazFiyat:num(u.pazFiyat)}))
     .filter(u=>u.ad!=="?").sort((a,b)=>(b.canta-a.canta)||(b.stokta-a.stokta));
   const cantaTop=cephane.reduce((s,u)=>s+u.canta,0);
+  // rozetler (kazanılan başarımlar)
+  const rozetler=[]; const rz=(ok,ik,ad)=>{ if(ok) rozetler.push({ik,ad}); };
+  rz(kaleler.length>=1,"🏰","İlk kale"); rz(kaleler.length>=5,"⚔️","Fatih · 5 kale"); rz(kaleler.length>=15,"👑","İmparator · 15 kale");
+  rz(streak>=3,"🔥","3 gün seri"); rz(streak>=7,"⚡","7 gün seri");
+  rz(toplamGuc>=900,"🎖️","Yüzbaşı gücü"); rz(toplamGuc>=2000,"⚔️","Binbaşı gücü");
+  rz(hafCiro>=5000,"💰","Haftalık ciro"); rz(gerillaGanimet>=1000,"🥷","Gerilla ustası");
+  // takım lider tablosu
+  const lider=liderHesap(hareketler,kullanicilar);
+  const emirSira=lider.findIndex(x=>x.uid===emir.id);
   return {emir,kaleler,toplamGuc,komutan,sonraki,gerillaGanimet,streak,hafCiro,hafKar,gorevler,cephane,cantaTop,
+    gorevHaf,rozetler,lider,emirSira,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
     borcTop:kaleler.reduce((s,k)=>s+k.borc,0)};
 }
@@ -199,8 +230,43 @@ function Home({d,say,openKale,openSheet,stype}){
           .map((s,i)=>h("div",{key:i,className:"card",style:{padding:"14px 8px",textAlign:"center",boxShadow:"none"}},
             h("div",{style:{fontSize:17,marginBottom:4}},s[0]),
             h("div",{style:{fontSize:15,fontWeight:800,color:s[3],lineHeight:1.1}},s[1]),
-            h("div",{style:{fontSize:10.5,color:"var(--mut)",marginTop:3,fontWeight:600}},s[2]))))));
+            h("div",{style:{fontSize:10.5,color:"var(--mut)",marginTop:3,fontWeight:600}},s[2]))))),
+    // haftalık görevler
+    h("div",{style:{padding:"22px 16px 0"}},
+      h("div",{className:"lbl",style:{marginBottom:6,paddingLeft:2,color:"var(--mut2)"}},"🎯 Haftalık görevler"),
+      h("div",{className:"card",style:{padding:"6px 16px 12px"}},
+        d.gorevHaf.map((g,i)=>h(Gorev,{key:i,ad:g.ad,deg:g.deg,hedef:g.hedef,renk:g.renk,birim:g.birim})))),
+    // rozetler
+    d.rozetler.length>0&&h("div",{style:{padding:"22px 16px 0"}},
+      h("div",{className:"lbl",style:{marginBottom:10,paddingLeft:2,color:"var(--mut2)"}},"🎖️ Rozetlerin · "+d.rozetler.length),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+        d.rozetler.map((r,i)=>h("div",{key:i,className:"card",style:{padding:"9px 13px",display:"flex",alignItems:"center",gap:7,boxShadow:"none"}},
+          h("span",{style:{fontSize:18}},r.ik),
+          h("span",{style:{fontSize:12.5,fontWeight:700}},r.ad))))),
+    // mini lider tablosu
+    d.lider.length>1&&h("div",{style:{padding:"22px 16px 0"}},
+      h("div",{className:"lbl",style:{marginBottom:10,paddingLeft:2,color:"var(--mut2)"}},"🏆 Komuta sıralaması"),
+      h("div",{className:"card",style:{padding:"6px 4px",boxShadow:"none"}},
+        d.lider.slice(0,5).map((u,i)=>h(LiderSatir,{key:u.uid,u,sira:i,ben:u.uid===d.emir.id})))));
 }
+function LiderSatir({u,sira,ben}){ const madalya=["🥇","🥈","🥉"][sira]||("#"+(sira+1));
+  return h("div",{style:{display:"flex",alignItems:"center",gap:11,padding:"10px 12px",borderRadius:12,background:ben?"var(--surf2)":"transparent"}},
+    h("span",{style:{fontSize:15,fontWeight:800,width:26,textAlign:"center",color:"var(--mut)"}},madalya),
+    h("span",{style:{fontSize:20}},u.simge),
+    h("div",{style:{flex:1,minWidth:0}},
+      h("div",{style:{fontSize:14,fontWeight:ben?800:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad+(ben?" · sen":"")),
+      h("div",{style:{fontSize:11.5,color:"var(--mut)"}},u.komutan[2]+" "+u.komutan[1])),
+    h("span",{style:{fontSize:13,fontWeight:800,color:"var(--gold)",flexShrink:0}},"💪 "+u.guc.toLocaleString("tr-TR")));
+}
+
+function Gorev({ad,deg,hedef,renk,birim}){ const pct=Math.min(100,hedef?Math.round(num(deg)/hedef*100):0); const tamam=num(deg)>=hedef;
+  const gv=birim==="tl"?tl(deg):num(deg), hv=birim==="tl"?tl(hedef):hedef;
+  return h("div",{style:{padding:"9px 0"}},
+    h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,gap:8}},
+      h("span",{style:{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(tamam?"✅ ":"")+ad),
+      h("span",{style:{color:"var(--mut)",fontWeight:700,flexShrink:0}},gv+" / "+hv)),
+    h("div",{style:{height:8,borderRadius:99,background:"var(--surf2)",overflow:"hidden"}},
+      h("div",{style:{height:"100%",width:pct+"%",borderRadius:99,background:renk,transition:"width .6s cubic-bezier(.2,.7,.2,1)"}}))); }
 
 /* ————— Kale satırı (liste) ————— */
 function KaleSatir({k,onClick}){ const D=k.durum;
@@ -293,20 +359,30 @@ function HareketPanel({k,kaleHar,onClose}){
         h("span",{style:{fontSize:12.5,fontWeight:700,color:"var(--mut)",flexShrink:0}},o.v));})
     : h("div",{style:{padding:"18px 0",textAlign:"center",color:"var(--mut)"}},"Henüz hareket yok."));
 }
-// bu kaleden hakediş dökümü
+// bu kaleden hakediş dökümü — ürün / gün geçişli
 function HakedisPanel({k,kaleHar,onClose}){
-  const um={}; (kaleHar||[]).filter(x=>x.tip==="satis").forEach(x=>{const a=x.urunAd||"?";const m=(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet);
+  const [mod,setMod]=useState("urun");
+  const sat=(kaleHar||[]).filter(x=>x.tip==="satis");
+  const um={}; sat.forEach(x=>{const a=x.urunAd||"?";const m=(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet);
     (um[a]||(um[a]={adet:0,marj:0}));um[a].adet+=num(x.adet);um[a].marj+=m;});
-  const list=Object.entries(um).map(([ad,o])=>({ad,...o})).sort((a,b)=>b.marj-a.marj);
+  const urunList=Object.entries(um).map(([ad,o])=>({ad,...o})).sort((a,b)=>b.marj-a.marj);
+  const gm={}; sat.forEach(x=>{const t=new Date(x.tarih); if(isNaN(+t))return; const key=t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")+"-"+String(t.getDate()).padStart(2,"0");
+    const m=(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet); (gm[key]||(gm[key]={adet:0,marj:0,t:+t}));gm[key].adet+=num(x.adet);gm[key].marj+=m;});
+  const gunList=Object.entries(gm).map(([g,o])=>({g,...o})).sort((a,b)=>b.t-a.t);
+  const fmtGun=g=>{const[y,mo,d2]=g.split("-");return d2+"."+mo+"."+y.slice(2);};
+  const satir=(baslik,alt,deger)=>h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderTop:"1px solid var(--line)"}},
+    h("span",{style:{fontSize:14}},baslik+"  ",h("span",{style:{color:"var(--mut)",fontSize:12}},alt)),
+    h("span",{style:{fontWeight:800,color:"var(--gold)"}},tl(deger)));
   return h(Sheet,{ik:"🫰",hex:"#d97b12",baslik:k.ad+" · hakediş",alt:"pazarlamacı kazancı",onClose,cta:"Kapat",onCta:onClose},
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
       h(Stat,{ik:"✅",v:tl(k.hakedisAlinan),l:"Kazandığın (tahsil edilen)",renk:"var(--green)"}),
       h(Stat,{ik:"⏳",v:tl(k.hakedisBekleyen),l:"Bekleyen (tahsil edilince)",renk:k.hakedisBekleyen>0.5?"var(--gold)":"var(--mut)"})),
-    h("div",{className:"lbl",style:{marginBottom:8}},"Ürün bazında marj"),
-    list.length?list.map((u,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
-      h("span",{style:{fontSize:14}},u.ad+"  ",h("span",{style:{color:"var(--mut)",fontSize:12}},u.adet+" adet")),
-      h("span",{style:{fontWeight:800,color:"var(--gold)"}},tl(u.marj))))
-    : h("div",{style:{padding:"12px 0",color:"var(--mut)",fontSize:13}},"Henüz satış yok."));
+    h("div",{style:{display:"flex",gap:8,marginBottom:6}},
+      h(Chip,{on:mod==="urun",onClick:()=>setMod("urun")},"📦 Ürüne göre"),
+      h(Chip,{on:mod==="gun",onClick:()=>setMod("gun")},"📅 Güne göre")),
+    (mod==="urun"?urunList:gunList).length
+      ? (mod==="urun"?urunList.map((u,i)=>satir(u.ad,u.adet+" adet",u.marj)):gunList.map((g,i)=>satir(fmtGun(g.g),g.adet+" adet",g.marj)))
+      : h("div",{style:{padding:"12px 0",color:"var(--mut)",fontSize:13}},"Henüz satış yok."));
 }
 
 /* ————— HARİTA ————— */
