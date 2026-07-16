@@ -104,11 +104,15 @@ function raporHesap(hareketler,kod){ const [b0,ad]=donemAralik(kod);
   const satList=Object.entries(byYer).map(([yer,o])=>({yer,...o})).sort((a,b)=>b.ciro-a.ciro);
   const tahByYer={}; tah.forEach(x=>{const y=x.yer||"—";tahByYer[y]=(tahByYer[y]||0)+num(x.tutar);});
   const tahList=Object.entries(tahByYer).map(([yer,t])=>({yer,t})).sort((a,b)=>b.t-a.t);
+  // gerilla peşin paranın bölüşümü: önce üretici maliyeti, kalan marj pazarlamacının
+  let gerU=0,gerP=0; ger.forEach(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat);
+    gerU+=Math.min(th,K); gerP+=Math.max(0,th-K); });
   const T={ciro:satList.reduce((s,x)=>s+x.ciro,0),adet:satList.reduce((s,x)=>s+x.adet,0),
     uret:satList.reduce((s,x)=>s+x.uret,0),marj:satList.reduce((s,x)=>s+x.marj,0),
     tahsil:tahList.reduce((s,x)=>s+x.t,0),
-    uPay:tah.reduce((s,x)=>s+num(x.ureticiPay),0),pPay:tah.reduce((s,x)=>s+num(x.pazPay),0),
-    gerCiro:ger.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0)};
+    uPay:tah.reduce((s,x)=>s+num(x.ureticiPay),0)+gerU,
+    pPay:tah.reduce((s,x)=>s+num(x.pazPay),0)+gerP,
+    gerCiro:ger.reduce((s,x)=>s+(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),0)};
   return {ad,satList,tahList,T}; }
 
 /* ————— YAZMA katmanı — CANLI · asıl deftere yazar (ana uygulama ile aynı) ————— */
@@ -743,11 +747,15 @@ function OvSatir({x,geriAl}){ const o=ovOzet(x);
 /* ————— SEFER: dönem raporu + çanta doldurma ————— */
 function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,hak=0,ganimet=0,iade=0;
   (recs||[]).forEach(x=>{
-    if(x.tip==="satis"){ if(x.gerilla) ganimet+=num(x.adet)*num(x.satisFiyat); else {satAd+=num(x.adet);ciro+=num(x.adet)*num(x.satisFiyat);} }
+    if(x.tip==="satis"){
+      if(x.gerilla){ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat);
+        ganimet+=th; hak+=Math.max(0,th-K); }   // peşin: önce üretici maliyeti, kalan marj hakediş
+      else {satAd+=num(x.adet);ciro+=num(x.adet)*num(x.satisFiyat);} }
     else if(x.tip==="tahsilat"){ tah+=num(x.tutar); hak+=(x.pazPay!=null?num(x.pazPay):0); }
+    else if(x.tip==="tabla"){ hak+=num(x.tutar); }   // tabla ücreti de kazançtır
     else if(x.tip==="konsinye"){ konsAd+=num(x.adet); }
     else if(x.tip==="iade"){ iade+=num(x.adet); } });
-  return {satAd,ciro,tah,konsAd,hak,ganimet,iade,bos:!(satAd||tah||konsAd||ganimet||iade)}; }
+  return {satAd,ciro,tah,konsAd,hak,ganimet,iade,bos:!(satAd||tah||konsAd||ganimet||iade||hak)}; }
 function SeferRaporSheet({mod,veri,onClose,onOnay,bekle}){ const v=veri||{};
   const bitir=mod==="bitir";
   return h(Sheet,{ik:bitir?"🏭":"📡",hex:bitir?"#b45309":"#0e8fce",
