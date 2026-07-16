@@ -49,7 +49,7 @@ import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, increment
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const db=getFirestore(initializeApp(cfg));
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v33";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v34";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -674,13 +674,24 @@ function Cephane({d,say,cantaAc,openUrun}){
 /* ————— RAPOR ————— */
 function Rapor({d,say,raporVer,hareketler,ovList,geriAl}){ const ovN=(ovList||[]).length;
   const [detay,setDetay]=useState(false);
+  const [det,setDet]=useState(null);   // üst kutu ayrıntıları — klasik modal
+  const fmt2=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
+  const haf=Date.now()-7*864e5;
+  const hs=(hareketler||[]).filter(x=>x.tip==="satis"&&new Date(x.tarih).getTime()>=haf).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+  const ciroRows=hs.map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),alt:(x.yer||"—")+" · "+fmt2(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}));
+  const hakRows2=hs.map(x=>{const m2=num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat));
+    return {t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),alt:tl(num(x.adet)*num(x.satisFiyat))+" satış − "+tl(num(x.adet)*num(x.alisFiyat))+" alış · "+fmt2(x.tarih),v:"+"+tl(m2),renk:"var(--gold)"};});
+  const gerAll=(hareketler||[]).filter(x=>x.tip==="satis"&&x.gerilla).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,30);
+  const ganimetRows=gerAll.map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+(x.toptan?" 📦":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmt2(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
+  const alacakRows=d.kaleler.filter(k=>k.borc>0.5).sort((a,b)=>b.borc-a.borc).map(k=>({t:k.ad,alt:(k.bolge?("📍 "+k.bolge+" · "):"")+(k.acikKons>0?("🏬 "+k.acikKons+" ürün sahada"):"açık borç"),v:tl(k.borc),renk:"var(--red)"}));
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:14}},"📊 Rapor"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
-      h(Stat,{ik:"💰",v:tl(d.hafCiro),l:"Bu hafta ciro",renk:"var(--green)"}),
-      h(Stat,{ik:"🫰",v:tl(d.hafKar),l:"Bu hafta hakediş",renk:"var(--gold)"}),
-      h(Stat,{ik:"⚡",v:tl(d.gerillaGanimet),l:"Gerilla ganimet",renk:"var(--cyan)"}),
-      h(Stat,{ik:"🧾",v:tl(d.borcTop),l:"Toplam açık alacak",renk:d.borcTop>0.5?"var(--red)":"var(--green)"})),
+      h(Stat,{ik:"💰",v:tl(d.hafCiro),l:"Bu hafta ciro ›",renk:"var(--green)",onClick:()=>setDet({ik:"💰",hex:"#16a34a",baslik:"Bu hafta satışlar",alt:hs.length+" satış · son 7 gün",rows:ciroRows})}),
+      h(Stat,{ik:"🫰",v:tl(d.hafKar),l:"Bu hafta hakediş ›",renk:"var(--gold)",onClick:()=>setDet({ik:"🫰",hex:"#d97b12",baslik:"Bu hafta hakediş (satış − alış)",alt:"son 7 gün",rows:hakRows2})}),
+      h(Stat,{ik:"⚡",v:tl(d.gerillaGanimet),l:"Gerilla ganimet ›",renk:"var(--cyan)",onClick:()=>setDet({ik:"⚡",hex:"#0e8fce",baslik:"Gerilla satışları",alt:"son "+ganimetRows.length+" kayıt",rows:ganimetRows})}),
+      h(Stat,{ik:"🧾",v:tl(d.borcTop),l:"Toplam açık alacak ›",renk:d.borcTop>0.5?"var(--red)":"var(--green)",onClick:()=>setDet({ik:"🧾",hex:"#e0483c",baslik:"Kale kale açık alacak",alt:alacakRows.length+" kalede borç",rows:alacakRows})})),
+    det?h(DetayListSheet,{...det,onClose:()=>setDet(null)}):null,
     h("div",{className:"card",style:{padding:"16px 16px",display:"flex",alignItems:"center",gap:12,background:"linear-gradient(120deg,#f0fdf4,#fff)"}},
       h("span",{style:{fontSize:26}},"🏭"),
       h("div",null,h("div",{style:{fontSize:14.5,fontWeight:800,color:"var(--green)"}},"Üreticiye borç yok"),
@@ -757,6 +768,36 @@ function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,hak=0,ganimet=0,iad
     else if(x.tip==="konsinye"){ konsAd+=num(x.adet); }
     else if(x.tip==="iade"){ iade+=num(x.adet); } });
   return {satAd,ciro,tah,konsAd,hak,ganimet,iade,bos:!(satAd||tah||konsAd||ganimet||iade||hak)}; }
+// komuta raporunu WhatsApp metnine çevir
+function raporMetni(v,recs){ v=v||{};
+  const L=["📡 Komuta Raporu · "+new Date().toLocaleString("tr-TR",{day:"2-digit",month:"long",hour:"2-digit",minute:"2-digit"}),""];
+  L.push("💰 Kale satışı: "+(v.satAd||0)+" adet · "+tl(v.ciro));
+  L.push("🧾 Tahsil edilen: "+tl(v.tah));
+  L.push("🫰 Hakediş: "+tl(v.hak));
+  L.push("🏬 Konsinye bırakılan: "+(v.konsAd||0)+" adet");
+  if(v.ganimet>0) L.push("⚡ Gerilla (peşin): "+tl(v.ganimet));
+  if(v.iade>0) L.push("↩️ İade: "+v.iade+" adet");
+  const det=[];
+  (recs||[]).forEach(x=>{
+    if(x.tip==="satis"&&!x.gerilla) det.push("• 💰 "+num(x.adet)+"× "+(x.urunAd||"?")+" — "+tl(num(x.adet)*num(x.satisFiyat))+(x.yer?(" ("+x.yer+")"):""));
+    else if(x.tip==="satis"&&x.gerilla) det.push("• ⚡ "+num(x.adet)+"× "+(x.urunAd||"?")+" — "+tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)));
+    else if(x.tip==="tahsilat") det.push("• 🧾 "+tl(x.tutar)+" tahsilat"+(x.yer?(" ("+x.yer+")"):""));
+    else if(x.tip==="konsinye") det.push("• 🏬 "+num(x.adet)+"× "+(x.urunAd||"?")+" konsinye"+(x.yer?(" ("+x.yer+")"):""));
+    else if(x.tip==="iade") det.push("• ↩️ "+num(x.adet)+"× "+(x.urunAd||"?")+" iade");
+    else if(x.tip==="tabla") det.push("• 🧹 Tabla +"+tl(x.tutar)); });
+  if(det.length){ L.push("","— İşlemler —"); L.push(...det.slice(0,25)); if(det.length>25) L.push("… +"+(det.length-25)+" işlem daha"); }
+  L.push("","⚔️ Tikita");
+  return L.join("\n"); }
+// genel ayrıntı listesi modalı — {t, alt, v, renk} satırları
+function DetayListSheet({ik,hex,baslik,alt,rows,onClose}){
+  return h(Sheet,{ik,hex,baslik,alt:alt||((rows||[]).length+" kayıt"),onClose,cta:"Kapat",onCta:onClose},
+    (rows&&rows.length)?rows.map((r,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.t),
+        r.alt?h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.alt):null),
+      h("span",{style:{fontWeight:800,color:r.renk||"var(--txt)",flexShrink:0}},r.v)))
+    :h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Kayıt yok."));
+}
 function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}; const R=recs||[];
   const bitir=mod==="bitir";
   const [det,setDet]=useState(null);   // kutu detayı — klasik modal
@@ -1630,7 +1671,12 @@ function App(){
     }catch(e){ console.error(e); say("⚠ Rapor hazırlanamadı"); } }
   async function seferOnay(){ const sid=(seferSheet&&seferSheet.sefId)||(aktifSefer&&aktifSefer.id); if(!sid||sbekle) return; setSbekle(true);
     try{ if(seferSheet&&seferSheet.mod==="bitir"){ await save("sefer",{id:sid,durum:"kapali",bitis:new Date().toISOString()}); say("🏭 Sefer kapandı"); }
-      else { await save("sefer",{id:sid,sonRapor:new Date().toISOString()}); say("📡 Rapor verildi"); }
+      else {
+        // onayla → WhatsApp'ta rapor metni (pencereyi kayıttan ÖNCE aç ki engellenmesin)
+        const txt=raporMetni(seferSheet&&seferSheet.veri,seferSheet&&seferSheet.recs);
+        try{ window.open("https://wa.me/?text="+encodeURIComponent(txt),"_blank"); }catch(e){}
+        await save("sefer",{id:sid,sonRapor:new Date().toISOString()});
+        say("📡 Rapor verildi — WhatsApp'tan gönder"); }
       setSeferSheet(null); }catch(e){ console.error(e); say("⚠ İşlem tamamlanamadı"); } finally{ setSbekle(false); } }
   async function cantaEkle(items){ if(sbekle) return; setSbekle(true);
     try{ for(const it of items){ if(num(it.adet)>0) await cantaDelta(it.id,it.ad,+num(it.adet),-num(it.adet)); }   // atölyeden çantaya (stok düşer)
