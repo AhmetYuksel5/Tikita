@@ -49,7 +49,7 @@ import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, increment
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const db=getFirestore(initializeApp(cfg));
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v30";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v31";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -764,12 +764,14 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
   const satRows=R.filter(x=>x.tip==="satis"&&!x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}));
   const tahRows=R.filter(x=>x.tip==="tahsilat").map(x=>({t:"Tahsilat"+(num(x.pazPay)>0?(" · 🫰 "+tl(x.pazPay)+" payın"):""),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}));
   const hakRows=[
-    ...R.filter(x=>x.tip==="tahsilat"&&num(x.pazPay)>0).map(x=>({t:"Tahsilat payı",alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:"+"+tl(x.pazPay),renk:"var(--gold)"})),
-    ...R.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const m2=Math.max(0,th-num(x.adet)*num(x.alisFiyat));
-      return {t:"Gerilla marjı · "+num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"⚡ Seyyar")+" · "+fmtS(x.tarih),v:"+"+tl(m2),renk:"var(--cyan)"}; }),
+    ...R.filter(x=>x.tip==="tahsilat"&&num(x.pazPay)>0).map(x=>({t:"Tahsilat payı",
+      alt:tl(x.tutar)+" tahsilat − "+tl(num(x.tutar)-num(x.pazPay))+" üretici · "+(x.yer||"—")+" · "+fmtS(x.tarih),v:"+"+tl(x.pazPay),renk:"var(--gold)"})),
+    ...R.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat); const m2=Math.max(0,th-K);
+      return {t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad. sattın",
+        alt:tl(th)+" satış − "+tl(K)+" üretici (alış "+tl(x.alisFiyat)+") · "+fmtS(x.tarih),v:"+"+tl(m2),renk:"var(--cyan)"}; }),
     ...R.filter(x=>x.tip==="tabla").map(x=>({t:"🧹 Tabla ücreti",alt:(x.yer||"Atölye")+" · "+fmtS(x.tarih),v:"+"+tl(x.tutar),renk:"var(--violet)"}))];
   const konsRows=R.filter(x=>x.tip==="konsinye").map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:num(x.adet)+" ad.",renk:"var(--violet)"}));
-  const gerRows=R.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+(x.toptan?" · 📦 toptan":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmtS(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
+  const gerRows=R.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad."+(x.toptan?" · 📦 toptan":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmtS(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
   const iadeRows=R.filter(x=>x.tip==="iade").map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:num(x.adet)+" ad.",renk:"var(--mut)"}));
   const ac=(ik,hex,baslik,rows)=>setDet({ik,hex,baslik,rows});
   return h(React.Fragment,null,
@@ -780,7 +782,7 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
         h(Stat,{ik:"💰",v:v.satAd+" satış",l:tl(v.ciro)+" ciro ›",renk:"var(--green)",onClick:()=>ac("💰","#16a34a","Kale satışları",satRows)}),
         h(Stat,{ik:"🧾",v:tl(v.tah),l:"tahsil edilen ›",renk:"var(--gold)",onClick:()=>ac("🧾","#d97b12","Tahsilatlar",tahRows)}),
-        h(Stat,{ik:"🫰",v:tl(v.hak),l:"hakedişin ›",renk:"var(--gold)",onClick:()=>ac("🫰","#d97b12","Hakediş dökümü",hakRows)}),
+        h(Stat,{ik:"🫰",v:tl(v.hak),l:"hakedişin (satış − üretici) ›",renk:"var(--gold)",onClick:()=>ac("🫰","#d97b12","Hakediş dökümü",hakRows)}),
         h(Stat,{ik:"🏬",v:v.konsAd+" adet",l:"konsinye bırakılan ›",renk:"var(--violet)",onClick:()=>ac("🏬","#7c46e6","Bırakılan konsinyeler",konsRows)}),
         v.ganimet>0&&h(Stat,{ik:"⚡",v:tl(v.ganimet),l:"gerilla ganimet ›",renk:"var(--cyan)",onClick:()=>ac("⚡","#0e8fce","Gerilla satışları",gerRows)}),
         v.iade>0&&h(Stat,{ik:"↩️",v:v.iade+" adet",l:"iade alınan ›",renk:"var(--mut)",onClick:()=>ac("↩️","#64748b","İadeler",iadeRows)}))),
