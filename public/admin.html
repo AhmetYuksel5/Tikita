@@ -35,11 +35,13 @@
 <div id="root"></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
-const db=getFirestore(initializeApp(cfg));
+const __app=initializeApp(cfg);
+let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
+catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A2";   // komuta (admin) deneme sürümü
+const SURUM="A3";   // komuta (admin) deneme sürümü
 
 /* ————— yardımcılar — pazarlamacı sayfasıyla aynı dil ————— */
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
@@ -74,8 +76,14 @@ function planEffBas(plan,now){
   return m;
 }
 
+let VERI_HATA=false; const hataDinle=new Set();
+function hataBildir(){ if(!VERI_HATA){ VERI_HATA=true; hataDinle.forEach(f=>f()); } }
+function useVeriHata(){ const [,f]=useState(0); useEffect(()=>{ const g=()=>f(x=>x+1); hataDinle.add(g); return ()=>hataDinle.delete(g); },[]); return VERI_HATA; }
 function useColl(name){ const [rows,setRows]=useState(null);
-  useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error(name,e);setRows([]);}),[]);
+  useEffect(()=>{ const t=setTimeout(()=>setRows(r=>{ if(r===null){ hataBildir(); return []; } return r; }),9000);
+    const un=onSnapshot(collection(db,name),s=>{clearTimeout(t);setRows(s.docs.map(d=>({id:d.id,...d.data()})));},
+      e=>{console.error(name,e);clearTimeout(t);hataBildir();setRows(r=>r===null?[]:r);});
+    return ()=>{clearTimeout(t);un();}; },[]);
   return rows; }
 
 /* ————— komuta hesabı ————— */
@@ -546,6 +554,7 @@ function App(){
   useEffect(()=>{ try{ sessionStorage.setItem("tk_adm_view",view); }catch(e){} },[view]);
   const [modal,setModal]=useState(null); const [toastMsg,setToastMsg]=useState("");
   const say=m=>{ setToastMsg(m); clearTimeout(window.__t); window.__t=setTimeout(()=>setToastMsg(""),2200); };
+  const veriHata=useVeriHata();
   const yuk=[plan,makineler,urunler,hareketler,kullanicilar,musteriler].some(x=>x===null);
   const d=useMemo(()=>yuk?null:hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler),[plan,makineler,urunler,hareketler,kullanicilar,musteriler,yuk]);
   const go=v=>{ setModal(null); setView(v); window.scrollTo(0,0); };
@@ -570,7 +579,10 @@ function App(){
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
   else ekran=h(RaporA,{d,hareketler,ekip:d.ekip});
-  return h("div",null, ekran,
+  return h("div",null,
+    veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
+      "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
+    ekran,
     h(Nav,{aktif:view,go}),
     h(Toast,{msg:toastMsg}),
     modal&&modal.tip==="makine"&&h(MakineSheet,{m:modal.m,onClose:()=>setModal(null)}),

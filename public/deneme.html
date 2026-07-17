@@ -45,11 +45,13 @@
 <div id="root"></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
-const db=getFirestore(initializeApp(cfg));
+const __app=initializeApp(cfg);
+let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
+catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v34";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v35";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -176,8 +178,14 @@ function gunlukSoru(kaleler){
   return null;
 }
 
+let VERI_HATA=false; const hataDinle=new Set();
+function hataBildir(){ if(!VERI_HATA){ VERI_HATA=true; hataDinle.forEach(f=>f()); } }
+function useVeriHata(){ const [,f]=useState(0); useEffect(()=>{ const g=()=>f(x=>x+1); hataDinle.add(g); return ()=>hataDinle.delete(g); },[]); return VERI_HATA; }
 function useColl(name){ const [rows,setRows]=useState(null);
-  useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error(name,e);setRows([]);}),[]);
+  useEffect(()=>{ const t=setTimeout(()=>setRows(r=>{ if(r===null){ hataBildir(); return []; } return r; }),9000);   // sonsuz bekleme yok
+    const un=onSnapshot(collection(db,name),s=>{clearTimeout(t);setRows(s.docs.map(d=>({id:d.id,...d.data()})));},
+      e=>{console.error(name,e);clearTimeout(t);hataBildir();setRows(r=>r===null?[]:r);});
+    return ()=>{clearTimeout(t);un();}; },[]);
   return rows; }
 
 function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
@@ -1464,6 +1472,7 @@ function App(){
   const [brifAcik,setBrifAcik]=useState(false); const [bilgi,setBilgi]=useState(null);
   const openBilgi=cfg=>setBilgi(cfg);
   const say=m=>{ setToastMsg(m); clearTimeout(window.__t); window.__t=setTimeout(()=>setToastMsg(""),2200); };
+  const veriHata=useVeriHata();
   const yuk=[canliHar,musteriler,kullanicilar,urunler].some(x=>x===null);
   const hareketler=useMemo(()=>canliHar||[],[canliHar]);
   const tumMus=useMemo(()=>musteriler||[],[musteriler]);
@@ -1703,7 +1712,10 @@ function App(){
   else if(view==="cephane") ekran=h(Cephane,{d,say,cantaAc:()=>setCantaSheet(true),openUrun:u=>setUrunSec(u)});
   else ekran=h(Rapor,{d,say,raporVer,hareketler,ovList:ov,geriAl:geriAlKayit});
 
-  return h("div",null, ekran,
+  return h("div",null,
+    veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
+      "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor, yeni veriler gecikebilir. Yarın otomatik düzelir."):null,
+    ekran,
     h(Nav,{aktif:kaleGuncel?"kaleler":view,go}),
     h(Toast,{msg:toastMsg}),
     !kaleGuncel&&view!=="harita"&&h("button",{onClick:()=>{ if(confirm("Hesap değiştir / yönetici girişine geç?")) location.href="index.html?giris=1"; },
