@@ -35,13 +35,16 @@
 <div id="root"></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A4";   // komuta (admin) deneme sürümü
+const SURUM="A5";   // komuta (admin) deneme sürümü
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
+async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
 
 /* ————— yardımcılar — pazarlamacı sayfasıyla aynı dil ————— */
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
@@ -52,6 +55,7 @@ const SILAH_TIER=[[0,1],[500,2],[1000,3],[2500,5],[5000,9]];
 const katOf=(t,v)=>{let r=t[0];for(const x of t)if(v>=x[0])r=x;return r;};
 const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
 const dkYaz=dk=>{ dk=Math.max(0,Math.round(dk)); const s2=Math.floor(dk/60),m2=dk%60; return s2>0?(s2+"s "+m2+"dk"):(m2+"dk"); };
+const inp={width:"100%",padding:"13px 14px",borderRadius:13,border:"1.5px solid var(--line)",background:"var(--surf2)",fontSize:16,fontWeight:700,color:"var(--txt)",outline:"none",fontFamily:"inherit"};
 
 // planların EFEKTİF başlangıcı — eski panel ile ORTAK kural (birebir):
 // geciken başlamamış iş "şimdi"ye kayar; üzerinden başka iş başlatılmışsa (geride) sayılmaz
@@ -346,7 +350,8 @@ function Gantt({plan,makineler,ac}){
       h("button",{onClick:()=>setOfs(o=>o-1),style:{width:34,height:34,borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,fontWeight:800}},"‹"),
       h("button",{onClick:()=>setOfs(0),style:{flex:1,textAlign:"center",fontSize:14,fontWeight:800,padding:"7px 0",borderRadius:10,
         background:ofs===0?"#0e8fce14":"transparent",color:ofs===0?"var(--cyan)":"var(--txt)"}},(ofs===0?"📅 Bugün · ":"")+gunAd),
-      h("button",{onClick:()=>setOfs(o=>o+1),style:{width:34,height:34,borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,fontWeight:800}},"›")),
+      h("button",{onClick:()=>setOfs(o=>o+1),style:{width:34,height:34,borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,fontWeight:800}},"›"),
+      h("button",{onClick:()=>ac({tip:"isEkle"}),title:"İş ekle",style:{width:34,height:34,borderRadius:10,background:"var(--cyan)",color:"#fff",fontSize:18,fontWeight:800,boxShadow:"0 4px 12px rgba(14,143,206,.35)"}},"+")),
     // gövde: sol makine adları + sağ kaydırmalı zaman rayları
     h("div",{style:{display:"flex"}},
       h("div",{style:{width:86,flexShrink:0,borderRight:"1px solid var(--line)"}},
@@ -384,7 +389,7 @@ function Gantt({plan,makineler,ac}){
           h("span",{style:{width:10,height:10,borderRadius:3,background:cc,display:"inline-block"}}),ad))));
 }
 // iş detayı — klasik modal
-function IsSheet({x,onClose}){
+function IsSheet({x,onClose,onBaslat,onSil}){
   const p=x.p; const c=ganttRenk(x.durum);
   const etiket={bitti:"✅ Bitti",basiyor:"🖨️ Basıyor",sirada:"⏭ Sırada",gecikti:"⏰ Gecikti — şimdiye kaydı",geride:"⚠️ Geride kaldı (üzerinden iş başlatıldı)"}[x.durum]||x.durum;
   const rows=[
@@ -399,12 +404,75 @@ function IsSheet({x,onClose}){
     p.basladi?["🚀 Gerçek başlama",fmtS(p.gercekBaslangic||p.baslangic)]:null,
     (x.durum==="bitti")?["🧹 Tabla",p.tablaAlindi?"toplandı":"bekliyor"]:null,
   ].filter(Boolean);
-  return h(Sheet,{ik:"🧾",hex:"#0e8fce",baslik:p.ad||"İş",alt:etiket,onClose,cta:"Kapat",onCta:onClose},
+  const basla=!p.basladi;
+  return h(Sheet,{ik:"🧾",hex:"#0e8fce",baslik:p.ad||"İş",alt:etiket,onClose,
+    cta:basla?"▶️ İşi şimdi başlat":"Kapat",onCta:basla?onBaslat:onClose},
     rows.map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
       h("span",{style:{color:"var(--mut)",fontWeight:600,flexShrink:0}},r[0]),
       h("span",{style:{fontWeight:800,textAlign:"right"}},r[1]))),
-    h("div",{style:{marginTop:14,padding:"10px 12px",borderRadius:12,background:"var(--surf2)",fontSize:11.5,color:"var(--mut)"}},
-      "✏️ İş ekleme / başlatma / düzenleme şimdilik asıl panelde — burası canlı izleme."));
+    basla?h("button",{onClick:onSil,style:{width:"100%",padding:"13px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"🗑 İşi planından sil"):null);
+}
+
+// ➕ İŞ EKLE — eski panelin IsModal kayıt şemasıyla birebir uyumlu yazar
+function IsEkleSheet({makineler,urunler,plan,onKaydet,bekle}){
+  const makList=(makineler||[]).filter(mk=>(mk.ad||"").trim());
+  const [makineId,setMakineId]=useState((makList[0]&&makList[0].id)||"");
+  const urunListe=(urunler||[]).filter(u=>(u.ad||"").trim()).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const [urunId,setUrunId]=useState("");
+  const [serbest,setSerbest]=useState(false);
+  const [ad,setAd]=useState("");
+  const [parcaSec,setParcaSec]=useState([]);   // boş ya da tümü = takım
+  const [adet,setAdet]=useState(1);
+  const [sure,setSure]=useState("");
+  const [gram,setGram]=useState("");
+  const toLoc=ms=>{const d2=new Date(ms); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset()); return d2.toISOString().slice(0,16);};
+  // varsayılan başlangıç: seçili makinenin kuyruk sonu (efektif) — 5 dk'ya yuvarlanır
+  const kuyrukSonu=mid=>{ const now=Date.now(); const eff=planEffBas(plan,now); let son=now;
+    (plan||[]).forEach(p2=>{ if(p2.makineId!==mid) return; const e=eff[p2.id]; if(!e||e.geride) return;
+      const bit=e.s+num(p2.sureDk)*60000; if(bit>son) son=bit; });
+    return Math.ceil(son/300000)*300000; };
+  const [bas,setBas]=useState(()=>toLoc(kuyrukSonu((makList[0]&&makList[0].id)||"")));
+  const makSec=id=>{ setMakineId(id); setBas(toLoc(kuyrukSonu(id))); };
+  const seciliUrun=urunListe.find(u=>u.id===urunId);
+  const parcalar=(seciliUrun&&seciliUrun.parcalar)||[];
+  const parcaToggle=pt=>setParcaSec(s=>s.includes(pt)?s.filter(x=>x!==pt):[...s,pt]);
+  const isAd=serbest?ad.trim():((seciliUrun&&seciliUrun.ad)||"");
+  const gecerli=!!makineId&&!!isAd&&num(sure)>0&&num(adet)>0&&bas;
+  const onCta=()=>{ let pAdlar=[],pAd="";
+    if(!serbest&&parcalar.length){ const arr=parcaSec.filter(x=>parcalar.includes(x));
+      if(arr.length&&arr.length<parcalar.length){ pAdlar=arr; pAd=arr.length===1?arr[0]:""; } }
+    onKaydet({ makineId, ad:isAd, adet:num(adet), urunId:serbest?"":(urunId||""), parcaAd:pAd, parcaAdlar:pAdlar,
+      baslangic:new Date(bas).toISOString(), sureDk:num(sure), planSureDk:num(sure), gram:num(gram),
+      filamentId:"", ams:true, not:"", basladi:false, gercekBaslangic:null }); };
+  return h(Sheet,{ik:"➕",hex:"#0e8fce",baslik:"İş planla",alt:"Gantt'a eklenir — eski panelle ortak plan",
+    onClose:()=>onKaydet(null),cta:bekle?"⏳…":("➕ Planla · "+(bas?new Date(bas).toLocaleString("tr-TR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")),
+    disabled:!gecerli||bekle,onCta},
+    h("div",{className:"lbl",style:{marginBottom:8}},"🖨️ Makine"),
+    h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:14}},
+      makList.map(mk=>h(Chip,{key:mk.id,on:makineId===mk.id,onClick:()=>makSec(mk.id)},"🖨️ "+mk.ad))),
+    h("div",{className:"lbl",style:{marginBottom:8}},"📦 Ne basılacak?"),
+    h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:6}},
+      urunListe.slice(0,20).map(u=>h(Chip,{key:u.id,on:!serbest&&urunId===u.id,onClick:()=>{setSerbest(false);setUrunId(u.id);setParcaSec([]);}},u.ad)),
+      h(Chip,{on:serbest,onClick:()=>{setSerbest(true);setUrunId("");}},"✍️ Serbest")),
+    serbest?h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"iş adı — örn. Özel sipariş",
+      style:{...inp,fontSize:15,fontWeight:600,marginBottom:14}}):null,
+    (!serbest&&parcalar.length)?h("div",{style:{marginBottom:14}},
+      h("div",{style:{fontSize:11,color:"var(--mut)",margin:"4px 0 6px"}},"🧩 Bu tablada basılacak parçalar — hiçbiri/hepsi = takım"),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+        parcalar.map(pt=>h(Chip,{key:pt,on:parcaSec.includes(pt),onClick:()=>parcaToggle(pt)},pt)))):null,
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:10}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"⏱ Süre (dk)"),
+        h("input",{type:"number",inputMode:"numeric",value:sure,onChange:e=>setSure(e.target.value),style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"🔢 Adet"),
+        h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp}))),
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
+      [30,60,90,120,180,240].map(dk=>h(Chip,{key:dk,on:num(sure)===dk,onClick:()=>setSure(String(dk))},dkYaz(dk)))),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:10}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"⚖️ Gram (ops.)"),
+        h("input",{type:"number",inputMode:"numeric",value:gram,onChange:e=>setGram(e.target.value),style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"📅 Başlangıç"),
+        h("input",{type:"datetime-local",value:bas,onChange:e=>setBas(e.target.value),style:{...inp,padding:"12px 8px",fontSize:13}}))),
+    h("button",{onClick:()=>setBas(toLoc(kuyrukSonu(makineId))),style:{width:"100%",padding:11,borderRadius:12,background:"var(--surf2)",border:"1px dashed var(--cyan)",color:"var(--cyan)",fontSize:12.5,fontWeight:800}},"⏱ Kuyruk sonuna yerleştir"));
 }
 
 /* ————— EKRANLAR ————— */
@@ -603,6 +671,16 @@ function App(){
   const yuk=[plan,makineler,urunler,hareketler,kullanicilar,musteriler].some(x=>x===null);
   const d=useMemo(()=>yuk?null:hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler),[plan,makineler,urunler,hareketler,kullanicilar,musteriler,yuk]);
   const go=v=>{ setModal(null); setView(v); window.scrollTo(0,0); };
+  const [isBekle,setIsBekle]=useState(false);
+  async function isKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
+    try{ await save("plan",p2); setModal(null); say("➕ İş planlandı · "+p2.ad); }
+    catch(e){ console.error(e); say("⚠ Planlanamadı — tekrar dene"); } finally{ setIsBekle(false); } }
+  async function isBaslat(x){ if(!confirm("▶️ "+(x.p.ad||"iş")+" ŞİMDİ başlatılsın mı?\n"+x.mkAd)) return;
+    try{ await save("plan",{id:x.p.id,basladi:true,gercekBaslangic:new Date().toISOString()}); setModal(null); say("▶️ Başladı · "+(x.p.ad||"iş")); }
+    catch(e){ console.error(e); say("⚠ Başlatılamadı"); } }
+  async function isSil(x){ if(!confirm("🗑 "+(x.p.ad||"iş")+" plandan silinsin mi?")) return;
+    try{ await remove("plan",x.p.id); setModal(null); say("🗑 Silindi"); }
+    catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   // geri tuşu: modal → sekme → çıkış onayı
   const backRef=useRef({}); backRef.current={modal,view};
   useEffect(()=>{ history.pushState({tk:1},"");
@@ -631,7 +709,8 @@ function App(){
     h(Nav,{aktif:view,go}),
     h(Toast,{msg:toastMsg}),
     modal&&modal.tip==="makine"&&h(MakineSheet,{m:modal.m,onClose:()=>setModal(null)}),
-    modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,onClose:()=>setModal(null),onBaslat:()=>isBaslat(modal.x),onSil:()=>isSil(modal.x)}),
+    modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,bekle:isBekle,onKaydet:isKaydet}),
     modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stok"&&h(StokSheet,{u:modal.u,kullanicilar,hareketler,onClose:()=>setModal(null)}),
     modal&&modal.tip==="liste"&&h(DetayListSheet,{...modal.cfg,onClose:()=>setModal(null)}),
