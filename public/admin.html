@@ -41,7 +41,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A5";   // komuta (admin) deneme sürümü
+const SURUM="A6";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -678,9 +678,14 @@ function App(){
   async function isBaslat(x){ if(!confirm("▶️ "+(x.p.ad||"iş")+" ŞİMDİ başlatılsın mı?\n"+x.mkAd)) return;
     try{ await save("plan",{id:x.p.id,basladi:true,gercekBaslangic:new Date().toISOString()}); setModal(null); say("▶️ Başladı · "+(x.p.ad||"iş")); }
     catch(e){ console.error(e); say("⚠ Başlatılamadı"); } }
+  const [silinen,setSilinen]=useState(null); const silT=useRef(null);
   async function isSil(x){ if(!confirm("🗑 "+(x.p.ad||"iş")+" plandan silinsin mi?")) return;
-    try{ await remove("plan",x.p.id); setModal(null); say("🗑 Silindi"); }
-    catch(e){ console.error(e); say("⚠ Silinemedi"); } }
+    try{ const yedek={...x.p}; await remove("plan",x.p.id); setModal(null);
+      setSilinen({p:yedek}); clearTimeout(silT.current); silT.current=setTimeout(()=>setSilinen(null),8000);   // 8 sn geri alınabilir
+    }catch(e){ console.error(e); say("⚠ Silinemedi"); } }
+  async function silGeriAl(){ if(!silinen) return;
+    try{ await save("plan",{...silinen.p}); clearTimeout(silT.current); setSilinen(null); say("↩️ Geri alındı · "+(silinen.p.ad||"iş")); }
+    catch(e){ console.error(e); say("⚠ Geri alınamadı"); } }
   // geri tuşu: modal → sekme → çıkış onayı
   const backRef=useRef({}); backRef.current={modal,view};
   useEffect(()=>{ history.pushState({tk:1},"");
@@ -707,6 +712,11 @@ function App(){
       "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
     ekran,
     h(Nav,{aktif:view,go}),
+    silinen?h("div",{className:"fade",style:{position:"fixed",left:"50%",bottom:108,transform:"translateX(-50%)",zIndex:61,
+      background:"#1b1e25",color:"#fff",padding:"11px 14px",borderRadius:14,fontSize:13,fontWeight:600,
+      boxShadow:"0 12px 40px rgba(0,0,0,.28)",display:"flex",alignItems:"center",gap:12,maxWidth:"90%"}},
+      h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🗑 \""+(silinen.p.ad||"iş")+"\" silindi"),
+      h("button",{onClick:silGeriAl,style:{flexShrink:0,padding:"7px 12px",borderRadius:10,background:"var(--cyan)",color:"#fff",fontSize:12.5,fontWeight:800}},"↩️ Geri al")):null,
     h(Toast,{msg:toastMsg}),
     modal&&modal.tip==="makine"&&h(MakineSheet,{m:modal.m,onClose:()=>setModal(null)}),
     modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,onClose:()=>setModal(null),onBaslat:()=>isBaslat(modal.x),onSil:()=>isSil(modal.x)}),
