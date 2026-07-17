@@ -39,7 +39,7 @@ import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/fi
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const db=getFirestore(initializeApp(cfg));
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A1";   // komuta (admin) deneme sürümü
+const SURUM="A2";   // komuta (admin) deneme sürümü
 
 /* ————— yardımcılar — pazarlamacı sayfasıyla aynı dil ————— */
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
@@ -50,6 +50,29 @@ const SILAH_TIER=[[0,1],[500,2],[1000,3],[2500,5],[5000,9]];
 const katOf=(t,v)=>{let r=t[0];for(const x of t)if(v>=x[0])r=x;return r;};
 const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
 const dkYaz=dk=>{ dk=Math.max(0,Math.round(dk)); const s2=Math.floor(dk/60),m2=dk%60; return s2>0?(s2+"s "+m2+"dk"):(m2+"dk"); };
+
+// planların EFEKTİF başlangıcı — eski panel ile ORTAK kural (birebir):
+// geciken başlamamış iş "şimdi"ye kayar; üzerinden başka iş başlatılmışsa (geride) sayılmaz
+function planEffBas(plan,now){
+  const m={}, byMak={};
+  (plan||[]).forEach(p=>{ (byMak[p.makineId||"?"]=byMak[p.makineId||"?"]||[]).push(p); });
+  Object.values(byMak).forEach(arr=>{
+    arr.sort((a,b)=>new Date(a.baslangic)-new Date(b.baslangic));
+    let sonBas=-Infinity;
+    arr.forEach(p=>{ if(p.basladi){ const gs=new Date(p.gercekBaslangic||p.baslangic).getTime(); if(gs>sonBas) sonBas=gs; } });
+    let cursor=-Infinity;
+    arr.forEach(p=>{ const ps=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000;
+      const geride=!p.basladi && ps<sonBas;
+      let s;
+      if(p.basladi){ s=new Date(p.gercekBaslangic||p.baslangic).getTime(); }
+      else if(geride) s=ps;
+      else { s=Math.max(ps,cursor); if(ps<now) s=Math.max(now,cursor); }
+      if(!geride) cursor=Math.max(cursor,s+dur);
+      if(p.id) m[p.id]={s,geride};
+    });
+  });
+  return m;
+}
 
 function useColl(name){ const [rows,setRows]=useState(null);
   useEffect(()=>onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error(name,e);setRows([]);}),[]);
@@ -276,6 +299,106 @@ function StokSheet({u,kullanicilar,hareketler,onClose}){
         h("span",{style:{fontWeight:800,color:"var(--violet)",flexShrink:0}},c.adet+" ad.")))):null);
 }
 
+/* ————— GANTT — üretim takvimi (yeni konsept) ————— */
+const G_PX=46;   // saat başına piksel
+function ganttRenk(durum){
+  if(durum==="bitti")   return {bg:"#16a34a16",bd:"1px solid #16a34a55",tx:"#166534"};
+  if(durum==="basiyor") return {bg:"linear-gradient(90deg,#38bdf8,#0e8fce)",bd:"1px solid #0e8fce",tx:"#fff"};
+  if(durum==="geride")  return {bg:"#e0483c10",bd:"1.5px dashed #e0483c88",tx:"#b91c1c"};
+  if(durum==="gecikti") return {bg:"#fff7ed",bd:"1px solid #fdba74",tx:"#9a3412"};
+  return {bg:"var(--surf2)",bd:"1px solid var(--line)",tx:"var(--txt)"};
+}
+function Gantt({plan,makineler,ac}){
+  const [ofs,setOfs]=useState(0);   // 0 = bugün
+  const now=Date.now();
+  const eff=useMemo(()=>planEffBas(plan,now),[plan]);
+  const g0=(()=>{const t=new Date();t.setHours(0,0,0,0);return t.getTime()+ofs*864e5;})();
+  const g1=g0+864e5;
+  const gunAd=new Date(g0).toLocaleDateString("tr-TR",{weekday:"long",day:"numeric",month:"long"});
+  const W=24*G_PX;
+  const makList=(makineler||[]).filter(mk=>(mk.ad||"").trim());
+  const satirlar=makList.map(mk=>{
+    const jobs=(plan||[]).filter(p=>p.makineId===mk.id).map(p=>{
+      const e=eff[p.id]||{s:new Date(p.baslangic).getTime(),geride:false};
+      const es=e.s, ee=es+num(p.sureDk)*60000;
+      let durum;
+      if(e.geride) durum="geride";
+      else if(p.basladi&&ee<=now) durum="bitti";
+      else if(p.basladi) durum="basiyor";
+      else durum=(new Date(p.baslangic).getTime()<now)?"gecikti":"sirada";
+      return {p,es,ee,durum,mkAd:mk.ad||"?"};
+    }).filter(x=>x.ee>g0&&x.es<g1).sort((a,b)=>a.es-b.es);
+    return {mk,jobs};
+  });
+  const bosGun=satirlar.every(r=>!r.jobs.length);
+  const saatler=[0,4,8,12,16,20,24];
+  return h("div",{className:"card",style:{padding:"14px 0 10px",overflow:"hidden"}},
+    // gün gezgini
+    h("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"0 14px 12px"}},
+      h("button",{onClick:()=>setOfs(o=>o-1),style:{width:34,height:34,borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,fontWeight:800}},"‹"),
+      h("button",{onClick:()=>setOfs(0),style:{flex:1,textAlign:"center",fontSize:14,fontWeight:800,padding:"7px 0",borderRadius:10,
+        background:ofs===0?"#0e8fce14":"transparent",color:ofs===0?"var(--cyan)":"var(--txt)"}},(ofs===0?"📅 Bugün · ":"")+gunAd),
+      h("button",{onClick:()=>setOfs(o=>o+1),style:{width:34,height:34,borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,fontWeight:800}},"›")),
+    // gövde: sol makine adları + sağ kaydırmalı zaman rayları
+    h("div",{style:{display:"flex"}},
+      h("div",{style:{width:86,flexShrink:0,borderRight:"1px solid var(--line)"}},
+        h("div",{style:{height:24}}),
+        satirlar.map((r,i)=>h("div",{key:i,style:{height:52,display:"flex",alignItems:"center",padding:"0 8px"}},
+          h("div",{style:{fontSize:11.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🖨️ "+(r.mk.ad||"?"))))),
+      h("div",{style:{flex:1,overflowX:"auto"}},
+        h("div",{style:{width:W,position:"relative"}},
+          // saat cetveli
+          h("div",{style:{height:24,position:"relative",borderBottom:"1px solid var(--line)"}},
+            saatler.map(s2=>h("span",{key:s2,style:{position:"absolute",left:s2*G_PX+3,top:4,fontSize:9.5,fontWeight:700,color:"var(--mut2)"}},String(s2).padStart(2,"0")))),
+          // dikey saat çizgileri
+          saatler.slice(1,-1).map(s2=>h("div",{key:"g"+s2,style:{position:"absolute",top:24,bottom:0,left:s2*G_PX,width:1,background:"var(--line)",opacity:.6}})),
+          // ŞİMDİ çizgisi
+          (ofs===0&&now>g0&&now<g1)?h("div",{style:{position:"absolute",top:0,bottom:0,left:(now-g0)/3600e3*G_PX,width:2,background:"var(--red)",zIndex:5}},
+            h("span",{style:{position:"absolute",top:1,left:-4,fontSize:9,color:"var(--red)"}},"▼")):null,
+          // makine rayları
+          satirlar.map((r,i)=>h("div",{key:i,style:{height:52,position:"relative",borderBottom:i<satirlar.length-1?"1px solid var(--line)":"none"}},
+            r.jobs.map((x,j)=>{
+              const L=Math.max(0,(Math.max(x.es,g0)-g0)/3600e3*G_PX);
+              const Wd=Math.max(34,(Math.min(x.ee,g1)-Math.max(x.es,g0))/3600e3*G_PX-2);
+              const c=ganttRenk(x.durum);
+              const pct=x.durum==="basiyor"?Math.min(100,Math.round((now-x.es)/(x.ee-x.es)*100)):0;
+              return h("button",{key:j,onClick:()=>ac({tip:"is",x}),
+                style:{position:"absolute",left:L,top:8,height:36,width:Wd,borderRadius:10,background:c.bg,border:c.bd,
+                  overflow:"hidden",textAlign:"left",padding:"3px 7px",zIndex:2}},
+                x.durum==="basiyor"?h("div",{style:{position:"absolute",inset:0,width:pct+"%",background:"rgba(255,255,255,.22)"}}):null,
+                h("div",{style:{fontSize:10.5,fontWeight:800,color:c.tx,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",position:"relative"}},x.p.ad||"iş"),
+                h("div",{style:{fontSize:9,color:c.tx,opacity:.75,position:"relative"}},dkYaz(num(x.p.sureDk))+(num(x.p.adet)>1?(" · "+x.p.adet+" ad."):""))); })))))),
+    bosGun?h("div",{style:{padding:"14px 16px 4px",textAlign:"center",fontSize:12.5,color:"var(--mut)"}},"Bu günde planlı iş yok."):null,
+    // durum lejantı
+    h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",padding:"12px 14px 2px",fontSize:10.5,fontWeight:700,color:"var(--mut)"}},
+      [["#0e8fce","basıyor"],["#16a34a","bitti"],["#a9adb6","sırada"],["#fdba74","gecikti → şimdiye kayar"],["#e0483c","geride (üzerinden geçildi)"]].map(([cc,ad],i)=>
+        h("span",{key:i,style:{display:"inline-flex",alignItems:"center",gap:5}},
+          h("span",{style:{width:10,height:10,borderRadius:3,background:cc,display:"inline-block"}}),ad))));
+}
+// iş detayı — klasik modal
+function IsSheet({x,onClose}){
+  const p=x.p; const c=ganttRenk(x.durum);
+  const etiket={bitti:"✅ Bitti",basiyor:"🖨️ Basıyor",sirada:"⏭ Sırada",gecikti:"⏰ Gecikti — şimdiye kaydı",geride:"⚠️ Geride kaldı (üzerinden iş başlatıldı)"}[x.durum]||x.durum;
+  const rows=[
+    ["🖨️ Makine",x.mkAd],
+    ["📅 Planlanan",fmtS(p.baslangic)],
+    ["▶️ Efektif başlangıç",fmtS(new Date(x.es).toISOString())],
+    ["🏁 Tahmini bitiş",fmtS(new Date(x.ee).toISOString())],
+    ["⏱ Süre",dkYaz(num(p.sureDk))],
+    num(p.adet)>0?["🔢 Adet",String(p.adet)]:null,
+    num(p.gram)>0?["⚖️ Gram",p.gram+" g"]:null,
+    (p.parcaAdlar&&p.parcaAdlar.length)?["🧩 Parçalar",p.parcaAdlar.join(", ")]:null,
+    p.basladi?["🚀 Gerçek başlama",fmtS(p.gercekBaslangic||p.baslangic)]:null,
+    (x.durum==="bitti")?["🧹 Tabla",p.tablaAlindi?"toplandı":"bekliyor"]:null,
+  ].filter(Boolean);
+  return h(Sheet,{ik:"🧾",hex:"#0e8fce",baslik:p.ad||"İş",alt:etiket,onClose,cta:"Kapat",onCta:onClose},
+    rows.map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
+      h("span",{style:{color:"var(--mut)",fontWeight:600,flexShrink:0}},r[0]),
+      h("span",{style:{fontWeight:800,textAlign:"right"}},r[1]))),
+    h("div",{style:{marginTop:14,padding:"10px 12px",borderRadius:12,background:"var(--surf2)",fontSize:11.5,color:"var(--mut)"}},
+      "✏️ İş ekleme / başlatma / düzenleme şimdilik asıl panelde — burası canlı izleme."));
+}
+
 /* ————— EKRANLAR ————— */
 function Us({d,ac}){
   const P="22px 16px 0";
@@ -318,11 +441,15 @@ function Us({d,ac}){
         h(Stat,{ik:"🫰",v:tl(d.hafta.pPay),l:"hafta pazarlamacı payı",renk:"var(--gold)"}),
         h(Stat,{ik:"💰",v:tl(d.hafta.ciro+d.hafta.ger),l:"hafta toplam ciro",renk:"var(--green)"}))));
 }
-function Uretim({d,ac}){
+function Uretim({d,plan,makineler,ac}){
   const simdi=Date.now();
   const yaklasan=(d.makDurum.flatMap(m=>m.kuyruk.map(p=>({p,mk:m.mk})))).sort((a,b)=>new Date(a.p.baslangic)-new Date(b.p.baslangic)).slice(0,12);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:14}},"🖨️ Üretim"),
+    // 📅 GANTT — günlük üretim takvimi (işe dokun → detay)
+    h("div",{className:"lbl",style:{marginBottom:8}},"📅 Üretim takvimi — işe dokun"),
+    h("div",{style:{marginBottom:20}},h(Gantt,{plan,makineler,ac})),
+    h("div",{className:"lbl",style:{marginBottom:8}},"🖨️ Makineler"),
     h("div",{style:{display:"grid",gap:8,marginBottom:20}},
       d.makDurum.map((m,i)=>h(MakineKart,{key:i,m,onClick:()=>ac({tip:"makine",m})}))),
     h("div",{className:"lbl",style:{marginBottom:8}},"⏭ Sıradaki işler"),
@@ -439,7 +566,7 @@ function App(){
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Komuta merkezi hazırlanıyor…"));
   let ekran;
   if(view==="us") ekran=h(Us,{d,ac:setModal});
-  else if(view==="uretim") ekran=h(Uretim,{d,ac:setModal});
+  else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
   else ekran=h(RaporA,{d,hareketler,ekip:d.ekip});
@@ -447,6 +574,7 @@ function App(){
     h(Nav,{aktif:view,go}),
     h(Toast,{msg:toastMsg}),
     modal&&modal.tip==="makine"&&h(MakineSheet,{m:modal.m,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,onClose:()=>setModal(null)}),
     modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stok"&&h(StokSheet,{u:modal.u,kullanicilar,hareketler,onClose:()=>setModal(null)}),
     modal&&modal.tip==="liste"&&h(DetayListSheet,{...modal.cfg,onClose:()=>setModal(null)}),
