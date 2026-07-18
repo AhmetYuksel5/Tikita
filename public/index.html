@@ -4144,16 +4144,17 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
     const tahHam=hs.filter(x=>x.tip==="tahsilat"); const tah=tahHam.reduce((s,x)=>s+num(x.tutar),0);
     const avans=hs.filter(x=>x.tip==="avans").reduce((s,x)=>s+num(x.tutar),0);
     const gerSat=sat.filter(x=>x.gerilla); const gerNakit=gerSat.reduce((s,x)=>s+satPay(x).tahsil,0);
+    const gerAdet=gerSat.reduce((s,x)=>s+num(x.adet),0); const gerCiro=gerSat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
     const toplananNakit=tah+gerNakit;   // TUTARLI: fiilen toplanan nakit = kale tahsilatı + gerilla
     // ÖNCE ÜRETİCİ bölüşmesi — toplanan nakit üzerinden (ureticiBorc + marj = toplananNakit)
     const ureticiBorc=tahHam.reduce((s,t)=>s+tahUPay(t,H),0)+gerSat.reduce((s,x)=>s+satPay(x).ureticiPay,0);
     const marj=tahHam.reduce((s,t)=>s+(num(t.tutar)-tahUPay(t,H)),0)+gerSat.reduce((s,x)=>s+satPay(x).pazPay,0);
     const mek=new Set(hs.filter(x=>["satis","konsinye","tahsilat","avans","stant"].includes(x.tip)).map(x=>x.yer||"?")); mek.delete("?");
     const tablalar=hs.filter(x=>x.tip==="tabla"); const tabla=tablalar.length; const tablaKaz=tablalar.reduce((s,x)=>s+num(x.tutar),0);
-    return {u,satAdet,satTutar,konsAdet,konsTutar,tah,gerNakit,toplananNakit,avans,ureticiBorc,marj,mekan:mek.size,tabla,tablaKaz}; })
+    return {u,satAdet,satTutar,konsAdet,konsTutar,tah,gerNakit,gerAdet,gerCiro,toplananNakit,avans,ureticiBorc,marj,mekan:mek.size,tabla,tablaKaz}; })
     .sort((a,b)=>b.satTutar-a.satTutar);
-  const T={satAdet:0,satTutar:0,konsAdet:0,konsTutar:0,tah:0,gerNakit:0,toplananNakit:0,avans:0,ureticiBorc:0,marj:0,tabla:0,tablaKaz:0};
-  pazPerf.forEach(p=>{ T.satAdet+=p.satAdet;T.satTutar+=p.satTutar;T.konsAdet+=p.konsAdet;T.konsTutar+=p.konsTutar;T.tah+=p.tah;T.gerNakit+=p.gerNakit;T.toplananNakit+=p.toplananNakit;T.avans+=p.avans;T.ureticiBorc+=p.ureticiBorc;T.marj+=p.marj;T.tabla+=p.tabla;T.tablaKaz+=p.tablaKaz; });
+  const T={satAdet:0,satTutar:0,konsAdet:0,konsTutar:0,tah:0,gerNakit:0,gerAdet:0,gerCiro:0,toplananNakit:0,avans:0,ureticiBorc:0,marj:0,tabla:0,tablaKaz:0};
+  pazPerf.forEach(p=>{ T.satAdet+=p.satAdet;T.satTutar+=p.satTutar;T.konsAdet+=p.konsAdet;T.konsTutar+=p.konsTutar;T.tah+=p.tah;T.gerNakit+=p.gerNakit;T.gerAdet+=p.gerAdet;T.gerCiro+=p.gerCiro;T.toplananNakit+=p.toplananNakit;T.avans+=p.avans;T.ureticiBorc+=p.ureticiBorc;T.marj+=p.marj;T.tabla+=p.tabla;T.tablaKaz+=p.tablaKaz; });
   const aktifMekan=new Set(pHar.filter(x=>["satis","konsinye","tahsilat","stant"].includes(x.tip)).map(x=>x.yer||"?")); aktifMekan.delete("?");
   const aktifPaz=pazPerf.filter(p=>p.satAdet||p.konsAdet||p.tah||p.mekan).length;
 
@@ -4246,9 +4247,10 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
       kart("🏭 Üretici ödemesi bekleyen",tl(uBekleyenTop),uBekSeferTop+" sefer · ödendi "+tl(uOdenenTop),"#b45309"),
       kart("📦 Bu hafta planlanan üretim",buHaftaUretim+" adet","güncel plan","#c2410c")),
     h("div",{style:{...S.label,margin:"6px 2px 8px",color:"#334155"}},"🏅 Pazarlamacı performansı · "+donemAd),
-    Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"Konsinye",r:1},{t:"Tahsilat",r:1},{t:"Marj",r:1},{t:"Mekan",r:1}],
-      pazPerf.map(p=>[p.u.ad,p.satAdet+" ad",tl(p.satTutar),p.konsAdet+" ad",tl(p.toplananNakit),tl(p.marj),p.mekan+""]),
+    Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"⚡ Gerilla",r:1},{t:"Konsinye",r:1},{t:"Tahsilat",r:1},{t:"Marj",r:1},{t:"Mekan",r:1}],
+      pazPerf.map(p=>[p.u.ad,p.satAdet+" ad",tl(p.satTutar),p.gerAdet?(p.gerAdet+" ad · "+tl(p.gerCiro)):"—",p.konsAdet+" ad",tl(p.toplananNakit),tl(p.marj),p.mekan+""]),
       "Bu dönemde hareket yok."),
+    h("div",{style:{fontSize:11.5,color:"#64748b",margin:"6px 2px 0"}},"⚡ Gerilla = seyyar satışlar (Satış & Ciro'ya zaten dahildir; burada ayrıca dökülür)."),
     // —— üretici ödeme durumu (sefer onayı bazlı, tüm zaman) ——
     h("div",{style:{...S.label,margin:"16px 2px 8px",color:"#334155"}},"🏭 Üretici ödeme durumu — kapatılmış seferler"),
     Tablo([{t:"Pazarlamacı",b:1},{t:"Bekleyen",r:1},{t:"Bekleyen sefer",r:1},{t:"Ödendi",r:1},{t:"Durum",r:1}],
@@ -4257,10 +4259,10 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
       "Kapatılmış seferde üretici borcu yok."));
 
   const pazView=()=>h("div",null,
-    Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"Kons. ad",r:1},{t:"Kons. ₺",r:1},{t:"Tahsilat",r:1},{t:"Avans",r:1},{t:"Üretici borç",r:1},{t:"Marj",r:1},{t:"Mekan",r:1},{t:"Tabla (adet · ₺)",r:1}],
+    Tablo([{t:"Pazarlamacı",b:1},{t:"Satış",r:1},{t:"Ciro",r:1},{t:"⚡ Gerilla",r:1},{t:"Kons. ad",r:1},{t:"Kons. ₺",r:1},{t:"Tahsilat",r:1},{t:"Avans",r:1},{t:"Üretici borç",r:1},{t:"Marj",r:1},{t:"Mekan",r:1},{t:"Tabla (adet · ₺)",r:1}],
       pazPerf.map(p=>[
         h("button",{onClick:()=>{setSeciliPaz(p.u.id);setHTip("");setAlt("hareket");},style:{background:"none",border:"none",color:"#0369a1",fontWeight:800,cursor:"pointer",padding:0,fontSize:13,textAlign:"left"}},(p.u.simge||"👤")+" "+p.u.ad+" ›"),
-        p.satAdet+"",tl(p.satTutar),p.konsAdet+"",tl(p.konsTutar),tl(p.toplananNakit),tl(p.avans),tl(p.ureticiBorc),tl(p.marj),p.mekan+"",p.tabla+" · "+tl(p.tablaKaz)]),
+        p.satAdet+"",tl(p.satTutar),p.gerAdet?(p.gerAdet+" · "+tl(p.gerCiro)):"—",p.konsAdet+"",tl(p.konsTutar),tl(p.toplananNakit),tl(p.avans),tl(p.ureticiBorc),tl(p.marj),p.mekan+"",p.tabla+" · "+tl(p.tablaKaz)]),
       "Bu dönemde hareket yok."),
     h("div",{style:{fontSize:12,color:"#64748b",marginTop:8}},"🧹 Tabla = pazarlamacının değiştirdiği tabla sayısı ve karşılığında kazandığı ücret. 👆 İsme dokun → hareket dökümü."));
 
