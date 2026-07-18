@@ -41,7 +41,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A6";   // komuta (admin) deneme sürümü
+const SURUM="A7";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -405,12 +405,14 @@ function IsSheet({x,onClose,onBaslat,onSil}){
     (x.durum==="bitti")?["🧹 Tabla",p.tablaAlindi?"toplandı":"bekliyor"]:null,
   ].filter(Boolean);
   const basla=!p.basladi;
+  const silinebilir=basla||x.durum==="basiyor";   // bitmiş işler silinmez (üretim geçmişi/tabla bozulmasın)
   return h(Sheet,{ik:"🧾",hex:"#0e8fce",baslik:p.ad||"İş",alt:etiket,onClose,
     cta:basla?"▶️ İşi şimdi başlat":"Kapat",onCta:basla?onBaslat:onClose},
     rows.map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
       h("span",{style:{color:"var(--mut)",fontWeight:600,flexShrink:0}},r[0]),
       h("span",{style:{fontWeight:800,textAlign:"right"}},r[1]))),
-    basla?h("button",{onClick:onSil,style:{width:"100%",padding:"13px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"🗑 İşi planından sil"):null);
+    silinebilir?h("button",{onClick:onSil,style:{width:"100%",padding:"13px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},
+      basla?"🗑 İşi planından sil":"🗑 Baskıyı iptal et — plandan sil"):null);
 }
 
 // ➕ İŞ EKLE — eski panelin IsModal kayıt şemasıyla birebir uyumlu yazar
@@ -679,7 +681,11 @@ function App(){
     try{ await save("plan",{id:x.p.id,basladi:true,gercekBaslangic:new Date().toISOString()}); setModal(null); say("▶️ Başladı · "+(x.p.ad||"iş")); }
     catch(e){ console.error(e); say("⚠ Başlatılamadı"); } }
   const [silinen,setSilinen]=useState(null); const silT=useRef(null);
-  async function isSil(x){ if(!confirm("🗑 "+(x.p.ad||"iş")+" plandan silinsin mi?")) return;
+  async function isSil(x){
+    const msj=(x.p.basladi&&x.durum==="basiyor")
+      ?("⚠ \""+(x.p.ad||"iş")+"\" ŞU AN BASILIYOR.\nİptal edilip plandan silinsin mi?")
+      :("🗑 "+(x.p.ad||"iş")+" plandan silinsin mi?");
+    if(!confirm(msj)) return;
     try{ const yedek={...x.p}; await remove("plan",x.p.id); setModal(null);
       setSilinen({p:yedek}); clearTimeout(silT.current); silT.current=setTimeout(()=>setSilinen(null),8000);   // 8 sn geri alınabilir
     }catch(e){ console.error(e); say("⚠ Silinemedi"); } }
