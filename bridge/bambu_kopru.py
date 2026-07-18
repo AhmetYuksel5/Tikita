@@ -54,7 +54,11 @@ class Yazici:
         self.son_yaz = 0
         self.son_ozet = None
         self.durum = {}
-        c = mqtt.Client(protocol=mqtt.MQTTv311)
+        # paho-mqtt 1.x (örn. macOS 11 / Python 3.8) ve 2.x ile uyumlu istemci
+        try:
+            c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, protocol=mqtt.MQTTv311)
+        except AttributeError:
+            c = mqtt.Client(protocol=mqtt.MQTTv311)
         c.username_pw_set("bblp", cfg["access_code"])
         c.tls_set(cert_reqs=ssl.CERT_NONE)   # yazıcı sertifikası self-signed
         c.tls_insecure_set(True)
