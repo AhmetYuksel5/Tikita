@@ -41,7 +41,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A10";   // komuta (admin) deneme sürümü
+const SURUM="A11";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -385,8 +385,18 @@ function Gantt({plan,makineler,makDurum,ac}){
       else if(p.basladi) durum="basiyor";
       else durum=(new Date(p.baslangic).getTime()<now)?"gecikti":"sirada";
       return {p,es,ee,durum,mkAd:mk.ad||"?"};
-    }).filter(x=>x.ee>g0&&x.es<g1).sort((a,b)=>a.es-b.es);
-    return {mk,jobs,canli:canliByMak[mk.id]||null};
+    }).filter(x=>x.ee>g0&&x.es<g1);
+    const cl=canliByMak[mk.id];
+    // yazıcı CANLI basıyor ama plana bağlı 'basıyor' çubuk yoksa (Studio'dan başlatılmış vb.) → sentetik canlı çubuk
+    if(cl&&cl.durum==="basiyor"&&now>=g0&&now<g1){
+      const zatenVar=jobs.some(x=>x.durum==="basiyor"&&x.es<=now&&x.ee>=now);
+      if(!zatenVar){ const kalan=num(cl.kalanDk)*60000;
+        const gecen=(cl.pct>0&&cl.pct<100)?kalan*cl.pct/(100-cl.pct):0;
+        const es2=now-gecen, ee2=now+kalan;
+        jobs.push({p:{ad:cl.dosya||"Canlı baskı",sureDk:Math.round((gecen+kalan)/60000),adet:1},es:es2,ee:ee2,durum:"basiyor",mkAd:mk.ad||"?",_ghost:true}); }
+    }
+    jobs.sort((a,b)=>a.es-b.es);
+    return {mk,jobs,canli:cl||null};
   });
   const bosGun=satirlar.every(r=>!r.jobs.length);
   const saatler=[0,4,8,12,16,20,24];
