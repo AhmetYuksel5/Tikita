@@ -51,7 +51,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v35";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v36";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -269,7 +269,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
     .map(m=>({id:m.id,ad:m.ad,bolge:m.bolge||"",telefon:(m.telefon||"").trim(),lat:m.lat||"",lng:m.lng||"",kesif:!!m.kesif,
       gozcu:!!((m.telefon||"").trim())&&!!(m.lat&&m.lng)}))
     .sort((a,b)=>(b.gozcu-a.gozcu)||(b.kesif-a.kesif));
-  return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,streak,hafCiro,hafKar,gorevler,cephane,cantaTop,
+  return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
     gorevHaf,rozetler,lider,emirSira,toplamCiro,hakedisTop,bugunSat,bugunCiro,bugunTah,vurkac,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
     borcTop:kaleler.reduce((s,k)=>s+k.borc,0)};
@@ -284,7 +284,7 @@ function HudChip({ik,val,sub,renk,onClick}){ return h(onClick?"button":"div",{on
   h("span",{style:{fontSize:15}},ik),
   h("div",{style:{lineHeight:1.1}},h("div",{style:{fontSize:13.5,fontWeight:800,color:renk||"#fff"}},val),
     sub&&h("div",{style:{fontSize:9.5,color:"rgba(255,255,255,.65)",fontWeight:700,letterSpacing:.3}},sub))); }
-function Hud({d,onBell,openBilgi,goView}){ const {emir,komutan,sonraki,toplamGuc,kaleler,gerillaGanimet,streak,gorevler}=d;
+function Hud({d,onBell,openBilgi,goView,onSeri}){ const {emir,komutan,sonraki,toplamGuc,kaleler,gerillaGanimet,streak,gorevler}=d;
   const taban=komutan[0],tavan=sonraki?sonraki[0]:komutan[0];
   const oran=tavan>taban?Math.max(4,Math.min(100,Math.round((toplamGuc-taban)/(tavan-taban)*100))):100;
   const rutbeBilgi=()=>openBilgi&&openBilgi({ik:komutan[2],hex:"#7c2d12",baslik:komutan[1],alt:"Komuta rütben",govde:[
@@ -312,8 +312,41 @@ function Hud({d,onBell,openBilgi,goView}){ const {emir,komutan,sonraki,toplamGuc
         h("div",{style:{height:"100%",width:oran+"%",borderRadius:99,background:"linear-gradient(90deg,#ffd479,#f5a623)",boxShadow:"0 0 10px rgba(245,166,35,.55)",animation:"barfill 1s cubic-bezier(.2,.7,.2,1)"}}))),
     h("div",{style:{display:"flex",gap:9,marginTop:14}},
       h(HudChip,{ik:"🏰",val:kaleler.length,sub:"KALE",onClick:()=>goView&&goView("kaleler")}),
-      h(HudChip,{ik:"🔥",val:streak+" gün",sub:"SERİ",renk:streak>0?"#ffd479":"#fff",onClick:()=>openBilgi&&openBilgi({ik:"🔥",hex:"#b45309",baslik:streak+" günlük seri",alt:"üst üste satış yaptığın gün",govde:["Her gün en az bir satış yaparsan serin büyür.","Bir gün satış olmazsa seri sıfırlanır.","🔥 Seriyi bozma — momentum kazandırır!"]})}),
+      h(HudChip,{ik:"🔥",val:streak+" gün",sub:"SERİ",renk:streak>0?"#ffd479":"#fff",onClick:()=>onSeri&&onSeri()}),
       h(HudChip,{ik:"⚡",val:tl(gerillaGanimet),sub:"GANİMET",onClick:()=>openBilgi&&openBilgi({ik:"⚡",hex:"#0e8fce",baslik:tl(gerillaGanimet),alt:"gerilla (seyyar) ganimet",govde:["Vur-kaç / seyyar satışlardan gelen anlık nakit.","Kalıcı kale kurmaz ama hızlı ganimettir.","Cephane ekranından '⚡ Gerilla satış' ile ekleyebilirsin."]})}))); }
+
+/* ————— 🔥 SERİ TAKVİMİ — satış yapılan günler işaretli aylık görünüm ————— */
+function SeriTakvimSheet({streak,satisGun,onClose}){
+  const bugun=new Date();
+  const [ay,setAy]=useState(()=>new Date(bugun.getFullYear(),bugun.getMonth(),1));
+  const yilAy=ay.toLocaleDateString("tr-TR",{month:"long",year:"numeric"});
+  const gunSay=new Date(ay.getFullYear(),ay.getMonth()+1,0).getDate();
+  const ilkGun=(new Date(ay.getFullYear(),ay.getMonth(),1).getDay()+6)%7;   // Pazartesi=0
+  const key=d2=>d2.getFullYear()+"-"+d2.getMonth()+"-"+d2.getDate();
+  const bugunKey=key(bugun);
+  const hucre=[]; for(let i=0;i<ilkGun;i++) hucre.push(null); for(let g=1;g<=gunSay;g++) hucre.push(g);
+  const okS={width:34,height:34,borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,fontWeight:800};
+  return h(Sheet,{ik:"🔥",hex:"#b45309",baslik:streak+" günlük seri",alt:"✔ satış yaptığın günler — seriyi bozma, komutan",onClose,cta:"Kapat",onCta:onClose},
+    h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:12}},
+      h("button",{onClick:()=>setAy(a=>new Date(a.getFullYear(),a.getMonth()-1,1)),style:okS},"‹"),
+      h("div",{style:{flex:1,textAlign:"center",fontSize:15,fontWeight:800,textTransform:"capitalize"}},yilAy),
+      h("button",{onClick:()=>setAy(a=>new Date(a.getFullYear(),a.getMonth()+1,1)),style:okS},"›")),
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6,marginBottom:6}},
+      ["PZT","SAL","ÇAR","PER","CUM","CMT","PAZ"].map(g2=>h("div",{key:g2,style:{textAlign:"center",fontSize:10,fontWeight:800,color:"var(--mut2)",padding:"4px 0"}},g2))),
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}},
+      hucre.map((g,i)=>{ if(g===null) return h("div",{key:"b"+i});
+        const d2=new Date(ay.getFullYear(),ay.getMonth(),g); const k2=key(d2);
+        const sat=satisGun.has(k2); const bugunMu=k2===bugunKey; const gelecek=d2.getTime()>Date.now();
+        return h("div",{key:i,style:{aspectRatio:"1",borderRadius:12,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1,
+            background:bugunMu?(sat?"var(--green)":"#1b1e25"):(sat?"var(--surf2)":"transparent"),
+            border:(sat&&!bugunMu)?"1px solid var(--line)":"none",
+            color:bugunMu?"#fff":(gelecek?"var(--mut2)":"var(--txt)")}},
+          sat?h("span",{style:{fontSize:9,lineHeight:1,fontWeight:800,color:bugunMu?"#fff":"var(--green)"}},"✓"):h("span",{style:{height:9}}),
+          h("span",{style:{fontSize:13.5,fontWeight:(sat||bugunMu)?800:600}},g)); })),
+    h("div",{style:{display:"flex",gap:16,justifyContent:"center",marginTop:14,fontSize:11,fontWeight:700,color:"var(--mut)"}},
+      h("span",null,"✓ satış yapılan gün"),
+      h("span",{style:{color:"var(--green)"}},"■ bugün")));
+}
 
 /* ————— HOME (Üs) ————— */
 function SecBaslik({no,txt,ek}){ return h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10,paddingLeft:2}},
@@ -322,6 +355,7 @@ function SecBaslik({no,txt,ek}){ return h("div",{style:{display:"flex",alignItem
   ek&&h("span",{style:{marginLeft:"auto",fontSize:11.5,color:"var(--mut2)",fontWeight:700}},ek)); }
 function Home({d,say,openKale,openSheet,stype,openBrif,goView,openBilgi,toplanacak,tablaTopla,tablaUc}){
   const [sahada,setSahada]=useState(false);
+  const [seriAcik,setSeriAcik]=useState(false);
   const borclular=d.kaleler.filter(k=>k.borc>0.5).sort((a,b)=>b.borc-a.borc);
   const sessiz=d.kaleler.filter(k=>k.gunGecti>=14&&k.gunGecti<900).sort((a,b)=>b.gunGecti-a.gunGecti);
   const konsK=d.kaleler.filter(k=>k.acikKons>0).sort((a,b)=>b.acikKons-a.acikKons);
@@ -332,7 +366,8 @@ function Home({d,say,openKale,openSheet,stype,openBrif,goView,openBilgi,toplanac
   if(sessiz.length) fir.push({ik:"⏳",renk:"var(--cyan)",hex:"#0e8fce",bas:sessiz.length+" kale sessiz",alt:"en uzunu "+sessiz[0].gunGecti+" gündür — ilişki soğumasın",k:sessiz[0]});
   const topBorc=borclular[0];
   return h("div",null,
-    h(Hud,{d,onBell:openBrif,openBilgi,goView}),
+    h(Hud,{d,onBell:openBrif,openBilgi,goView,onSeri:()=>setSeriAcik(true)}),
+    seriAcik?h(SeriTakvimSheet,{streak:d.streak,satisGun:d.satisGun,onClose:()=>setSeriAcik(false)}):null,
     d.vurkac?h("div",{style:{margin:"12px 16px 0",padding:"10px 14px",borderRadius:13,background:"#fff7ed",border:"1px solid #fdba74",
       fontSize:12.5,fontWeight:700,color:"#9a3412"}},"⚠️ Gelirinin çoğu seyyar satıştan — kalıcı kale kurmayı düşün, komutan."):null,
     // ① BU HAFTA
