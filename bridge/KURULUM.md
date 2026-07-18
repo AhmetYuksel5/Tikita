@@ -4,6 +4,40 @@ Yazıcılardan **gerçek baskı durumunu** (%, kalan süre, dosya) çekip Tikita
 aktarır. Admin sayfasındaki makine kartları/Gantt "📡 canlı" rozetiyle gerçek
 veriyi gösterir.
 
+## ☁️ BULUT SÜRÜMÜ (Handy uzaktan çalışsın istiyorsan) — `bambu_bulut.py`
+
+Yerel sürüm (aşağıda) yazıcıyı LAN-Only/Developer moduna alır → **Handy uzaktan
+göremez**. Handy'yi uzaktan da kullanmak istiyorsan **bulut sürümünü** kullan:
+yazıcılar normal (Cloud) modda kalır, köprü de aynı Bambu bulutundan okur.
+
+1. Yazıcıları **normal (Cloud) moda geri al** (LAN Only'yi KAPAT). Handy'de
+   tekrar buluttan görünür olsunlar.
+2. Paketler (bir kez): `python3 -m pip install --user paho-mqtt requests`
+3. `bambu_bulut.py`'yi indir, üstündeki alanları doldur:
+   - `BAMBU_EMAIL` / `BAMBU_SIFRE` → Handy ile aynı hesap
+   - `PRINTERS` → her yazıcı için `makineAd` (Tikita'daki adla AYNI) + `serial`
+     (IP/erişim kodu GEREKMEZ)
+4. **İlk çalıştırma terminalde** (kod girmen istenir):
+   ```bash
+   python3 /Users/safa_bilisim/bambu_bulut.py
+   ```
+   Bambu e-postana bir **doğrulama kodu** yollar → terminale yaz, Enter.
+   Kod bir kez girilir, token `~/.tikita_bambu_token.json`'a kaydedilir; sonraki
+   açılışlarda tekrar sorulmaz (token ~3 ay geçerli, dolunca terminalde bir kez
+   yeniden kod istenir).
+5. `[X1C] baglandi (bulut)` görünce tamam — admin sayfasında 📡 belirir.
+
+> ✅ Handy uzaktan çalışır · ✅ Tikita canlı · ⚠️ Bulut yöntemi resmi değildir,
+> Bambu bir güncellemeyle değiştirebilir. Hesap bilgilerin sadece kendi
+> Mac'inde durur.
+
+Otomatik başlatma için `com.tikita.bambu.plist` içindeki dosya yolunu
+`bambu_bulut.py` yap (ama önce en az bir kez terminalde çalıştırıp kodu gir).
+
+---
+
+## 🔌 YEREL SÜRÜM (Handy uzaktan gerekmiyorsa) — `bambu_kopru.py`
+
 ## 1. Yazıcıları hazırla (her yazıcıda bir kez)
 
 1. Yazıcı ekranı → **Ayarlar → Ağ → LAN Only Mode** → aç.
