@@ -4145,16 +4145,17 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
     const avans=hs.filter(x=>x.tip==="avans").reduce((s,x)=>s+num(x.tutar),0);
     const gerSat=sat.filter(x=>x.gerilla); const gerNakit=gerSat.reduce((s,x)=>s+satPay(x).tahsil,0);
     const gerAdet=gerSat.reduce((s,x)=>s+num(x.adet),0); const gerCiro=gerSat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+    const gerUretici=gerSat.reduce((s,x)=>s+satPay(x).ureticiPay,0); const gerMarj=gerSat.reduce((s,x)=>s+satPay(x).pazPay,0);
     const toplananNakit=tah+gerNakit;   // TUTARLI: fiilen toplanan nakit = kale tahsilatı + gerilla
     // ÖNCE ÜRETİCİ bölüşmesi — toplanan nakit üzerinden (ureticiBorc + marj = toplananNakit)
     const ureticiBorc=tahHam.reduce((s,t)=>s+tahUPay(t,H),0)+gerSat.reduce((s,x)=>s+satPay(x).ureticiPay,0);
     const marj=tahHam.reduce((s,t)=>s+(num(t.tutar)-tahUPay(t,H)),0)+gerSat.reduce((s,x)=>s+satPay(x).pazPay,0);
     const mek=new Set(hs.filter(x=>["satis","konsinye","tahsilat","avans","stant"].includes(x.tip)).map(x=>x.yer||"?")); mek.delete("?");
     const tablalar=hs.filter(x=>x.tip==="tabla"); const tabla=tablalar.length; const tablaKaz=tablalar.reduce((s,x)=>s+num(x.tutar),0);
-    return {u,satAdet,satTutar,konsAdet,konsTutar,tah,gerNakit,gerAdet,gerCiro,toplananNakit,avans,ureticiBorc,marj,mekan:mek.size,tabla,tablaKaz}; })
+    return {u,satAdet,satTutar,konsAdet,konsTutar,tah,gerNakit,gerAdet,gerCiro,gerUretici,gerMarj,toplananNakit,avans,ureticiBorc,marj,mekan:mek.size,tabla,tablaKaz}; })
     .sort((a,b)=>b.satTutar-a.satTutar);
-  const T={satAdet:0,satTutar:0,konsAdet:0,konsTutar:0,tah:0,gerNakit:0,gerAdet:0,gerCiro:0,toplananNakit:0,avans:0,ureticiBorc:0,marj:0,tabla:0,tablaKaz:0};
-  pazPerf.forEach(p=>{ T.satAdet+=p.satAdet;T.satTutar+=p.satTutar;T.konsAdet+=p.konsAdet;T.konsTutar+=p.konsTutar;T.tah+=p.tah;T.gerNakit+=p.gerNakit;T.gerAdet+=p.gerAdet;T.gerCiro+=p.gerCiro;T.toplananNakit+=p.toplananNakit;T.avans+=p.avans;T.ureticiBorc+=p.ureticiBorc;T.marj+=p.marj;T.tabla+=p.tabla;T.tablaKaz+=p.tablaKaz; });
+  const T={satAdet:0,satTutar:0,konsAdet:0,konsTutar:0,tah:0,gerNakit:0,gerAdet:0,gerCiro:0,gerUretici:0,gerMarj:0,toplananNakit:0,avans:0,ureticiBorc:0,marj:0,tabla:0,tablaKaz:0};
+  pazPerf.forEach(p=>{ T.satAdet+=p.satAdet;T.satTutar+=p.satTutar;T.konsAdet+=p.konsAdet;T.konsTutar+=p.konsTutar;T.tah+=p.tah;T.gerNakit+=p.gerNakit;T.gerAdet+=p.gerAdet;T.gerCiro+=p.gerCiro;T.gerUretici+=p.gerUretici;T.gerMarj+=p.gerMarj;T.toplananNakit+=p.toplananNakit;T.avans+=p.avans;T.ureticiBorc+=p.ureticiBorc;T.marj+=p.marj;T.tabla+=p.tabla;T.tablaKaz+=p.tablaKaz; });
   const aktifMekan=new Set(pHar.filter(x=>["satis","konsinye","tahsilat","stant"].includes(x.tip)).map(x=>x.yer||"?")); aktifMekan.delete("?");
   const aktifPaz=pazPerf.filter(p=>p.satAdet||p.konsAdet||p.tah||p.mekan).length;
 
@@ -4251,6 +4252,15 @@ function PazarlamaTakip({ hareketler, musteriler, kullanicilar, urunler, seferle
       pazPerf.map(p=>[p.u.ad,p.satAdet+" ad",tl(p.satTutar),p.gerAdet?(p.gerAdet+" ad · "+tl(p.gerCiro)):"—",p.konsAdet+" ad",tl(p.toplananNakit),tl(p.marj),p.mekan+""]),
       "Bu dönemde hareket yok."),
     h("div",{style:{fontSize:11.5,color:"#64748b",margin:"6px 2px 0"}},"⚡ Gerilla = seyyar satışlar (Satış & Ciro'ya zaten dahildir; burada ayrıca dökülür)."),
+    // —— ⚡ GERİLLA satış dökümü — miktar · ciro · üretici payı · hakediş ——
+    h("div",{style:{...S.label,margin:"16px 2px 8px",color:"#334155"}},"⚡ Gerilla satış dökümü · "+donemAd),
+    Tablo([{t:"Pazarlamacı",b:1},{t:"Miktar",r:1},{t:"Ciro (toplanan)",r:1},{t:"🏭 Üreticiye kalan",r:1},{t:"🫰 Hakediş (marj)",r:1}],
+      pazPerf.filter(p=>p.gerAdet>0).map(p=>[(p.u.simge||"👤")+" "+p.u.ad, p.gerAdet+" ad", tl(p.gerCiro),
+        h("b",{style:{color:"#b45309"}},tl(p.gerUretici)), h("b",{style:{color:"#047857"}},tl(p.gerMarj))])
+        .concat( pazPerf.some(p=>p.gerAdet>0) ? [["TOPLAM", T.gerAdet+" ad", tl(T.gerCiro),
+          h("b",{style:{color:"#b45309"}},tl(T.gerUretici)), h("b",{style:{color:"#047857"}},tl(T.gerMarj))]] : [] ),
+      "Bu dönemde gerilla satış yok."),
+    h("div",{style:{fontSize:11.5,color:"#64748b",margin:"6px 2px 0"}},"Ciro = müşteriden peşin toplanan toplam. Önce üretici: para önce üretici maliyetini (alış) kapatır, kalan pazarlamacının hakedişi. (Ciro = Üreticiye kalan + Hakediş)"),
     // —— üretici ödeme durumu (sefer onayı bazlı, tüm zaman) ——
     h("div",{style:{...S.label,margin:"16px 2px 8px",color:"#334155"}},"🏭 Üretici ödeme durumu — kapatılmış seferler"),
     Tablo([{t:"Pazarlamacı",b:1},{t:"Bekleyen",r:1},{t:"Bekleyen sefer",r:1},{t:"Ödendi",r:1},{t:"Durum",r:1}],
