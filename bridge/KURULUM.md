@@ -42,35 +42,39 @@ sayfasındaki makine kartında **📡** rozeti belirir.
 
 ## 3a. Mac'te kurulum (atölye bilgisayarı Mac ise)
 
-> ✅ macOS 11 (Big Sur) dahil eski sürümlerde çalışır. İlk `python3`
-> komutunda "geliştirici araçları kurulsun mu?" penceresi çıkarsa **Kur**'a
-> bas, bitmesini bekle (Python'u o kurar). Big Sur'da pip eskiyse önce:
-> `python3 -m pip install --upgrade --user pip`
+> ✅ Script macOS 11 (Big Sur) sistem Python'u **2.7.16** ile de çalışır.
+> Aşağıdaki komutlarda `python` = sistemdeki 2.7.16. (`python3` de kuruluysa
+> onunla da çalışır; komutlarda `python` yerine `python3` yazman yeter.)
 
 Terminal'i aç (⌘+Boşluk → "Terminal"):
 
 ```bash
-# 1) Python paketleri (ilk sefer "geliştirici araçları kurulsun mu?" derse Kur'a bas)
-python3 -m pip install --user paho-mqtt requests
-# "externally-managed-environment" hatası verirse:
-#   python3 -m pip install --user --break-system-packages paho-mqtt requests
+# 1) Hangi Python?  -> "Python 2.7.16" görmelisin
+python --version
 
-# 2) Script için klasör aç ve dosyayı oraya koy (örn. indirilenlerden)
+# 2) Paketler — Python 2.7 için SÜRÜMLERİ SABİTLE (son sürümler artık py2 desteklemez)
+python -m pip install --user "paho-mqtt==1.5.1" "requests==2.27.1"
+#  "No module named pip" derse önce pip'i kur:
+#     curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py && python get-pip.py --user
+
+# 3) Script için klasör aç ve dosyayı oraya koy (örn. indirilenlerden)
 mkdir -p ~/tikita && cp ~/Downloads/bambu_kopru.py ~/tikita/
 
-# 3) PRINTERS listesini düzenle (TextEdit ile açılır)
+# 4) PRINTERS listesini düzenle (TextEdit ile açılır)
 open -e ~/tikita/bambu_kopru.py
 
-# 4) Çalıştır
-python3 ~/tikita/bambu_kopru.py
+# 5) Çalıştır
+python ~/tikita/bambu_kopru.py
 ```
 
-`[X1C] bağlandı` satırlarını görüyorsan tamam — admin sayfasında 📡 belirir.
+Açılışta `Python 2.7.16` ve ardından `[X1C] baglandi` satırlarını görüyorsan
+tamam — admin sayfasında 📡 belirir.
 
 ### Mac açılınca kendiliğinden başlasın + uyumasın
 
 `com.tikita.bambu.plist` dosyasını indir, içindeki `KULLANICI_ADIN` yazan yeri
-kendi kullanıcı adınla değiştir (Terminal'de `whoami` yazınca görürsün), sonra:
+kendi kullanıcı adınla değiştir (Terminal'de `whoami` yazınca görürsün).
+Big Sur'da sistem Python'u `/usr/bin/python`'dur — plist zaten onu kullanıyor.
 
 ```bash
 cp ~/Downloads/com.tikita.bambu.plist ~/Library/LaunchAgents/
