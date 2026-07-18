@@ -40,7 +40,44 @@ python3 bambu_kopru.py
 Ekranda `[X1C] bağlandı` ve durum satırları akmaya başlamalı. Admin
 sayfasındaki makine kartında **📡** rozeti belirir.
 
-## 3. Sürekli çalışsın (Raspberry Pi / Linux, isteğe bağlı)
+## 3a. Mac'te kurulum (atölye bilgisayarı Mac ise)
+
+Terminal'i aç (⌘+Boşluk → "Terminal"):
+
+```bash
+# 1) Python paketleri (ilk sefer "geliştirici araçları kurulsun mu?" derse Kur'a bas)
+python3 -m pip install --user paho-mqtt requests
+# "externally-managed-environment" hatası verirse:
+#   python3 -m pip install --user --break-system-packages paho-mqtt requests
+
+# 2) Script için klasör aç ve dosyayı oraya koy (örn. indirilenlerden)
+mkdir -p ~/tikita && cp ~/Downloads/bambu_kopru.py ~/tikita/
+
+# 3) PRINTERS listesini düzenle (TextEdit ile açılır)
+open -e ~/tikita/bambu_kopru.py
+
+# 4) Çalıştır
+python3 ~/tikita/bambu_kopru.py
+```
+
+`[X1C] bağlandı` satırlarını görüyorsan tamam — admin sayfasında 📡 belirir.
+
+### Mac açılınca kendiliğinden başlasın + uyumasın
+
+`com.tikita.bambu.plist` dosyasını indir, içindeki `KULLANICI_ADIN` yazan yeri
+kendi kullanıcı adınla değiştir (Terminal'de `whoami` yazınca görürsün), sonra:
+
+```bash
+cp ~/Downloads/com.tikita.bambu.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.tikita.bambu.plist
+```
+
+- `caffeinate -s` sayesinde Mac **fişe takılıyken uykuya dalmaz** (köprü kesintisiz akar).
+- Günlük: `tail -f /tmp/tikita-bambu.log`
+- Durdurmak: `launchctl unload ~/Library/LaunchAgents/com.tikita.bambu.plist`
+- Ek öneri: Sistem Ayarları → Kilit Ekranı → "Ekran kapalıyken Mac'i uyku moduna geçir: Asla" (fişteyken).
+
+## 3b. Sürekli çalışsın (Raspberry Pi / Linux, isteğe bağlı)
 
 ```bash
 sudo tee /etc/systemd/system/tikita-bambu.service > /dev/null <<'EOF'
