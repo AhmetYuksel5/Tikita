@@ -42,6 +42,11 @@ sayfasındaki makine kartında **📡** rozeti belirir.
 
 ## 3a. Mac'te kurulum (atölye bilgisayarı Mac ise)
 
+> ✅ macOS 11 (Big Sur) dahil eski sürümlerde çalışır. İlk `python3`
+> komutunda "geliştirici araçları kurulsun mu?" penceresi çıkarsa **Kur**'a
+> bas, bitmesini bekle (Python'u o kurar). Big Sur'da pip eskiyse önce:
+> `python3 -m pip install --upgrade --user pip`
+
 Terminal'i aç (⌘+Boşluk → "Terminal"):
 
 ```bash
