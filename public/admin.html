@@ -41,7 +41,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A9";   // komuta (admin) deneme sürümü
+const SURUM="A10";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -365,7 +365,8 @@ function ganttRenk(durum){
   if(durum==="gecikti") return {bg:"#fff7ed",bd:"1px solid #fdba74",tx:"#9a3412"};
   return {bg:"var(--surf2)",bd:"1px solid var(--line)",tx:"var(--txt)"};
 }
-function Gantt({plan,makineler,ac}){
+function Gantt({plan,makineler,makDurum,ac}){
+  const canliByMak={}; (makDurum||[]).forEach(m=>{ if(m.canli&&m.canli.taze) canliByMak[m.mk.id]=m.canli; });
   const [ofs,setOfs]=useState(0);   // 0 = bugün
   const now=Date.now();
   const eff=useMemo(()=>planEffBas(plan,now),[plan]);
@@ -385,7 +386,7 @@ function Gantt({plan,makineler,ac}){
       else durum=(new Date(p.baslangic).getTime()<now)?"gecikti":"sirada";
       return {p,es,ee,durum,mkAd:mk.ad||"?"};
     }).filter(x=>x.ee>g0&&x.es<g1).sort((a,b)=>a.es-b.es);
-    return {mk,jobs};
+    return {mk,jobs,canli:canliByMak[mk.id]||null};
   });
   const bosGun=satirlar.every(r=>!r.jobs.length);
   const saatler=[0,4,8,12,16,20,24];
@@ -418,14 +419,16 @@ function Gantt({plan,makineler,ac}){
             r.jobs.map((x,j)=>{
               const L=Math.max(0,(Math.max(x.es,g0)-g0)/3600e3*G_PX);
               const Wd=Math.max(34,(Math.min(x.ee,g1)-Math.max(x.es,g0))/3600e3*G_PX-2);
+              const cl=r.canli;
+              const canliBar=x.durum==="basiyor"&&cl&&cl.durum==="basiyor";   // bu makine ŞU AN gerçekten basıyor
               const c=ganttRenk(x.durum);
-              const pct=x.durum==="basiyor"?Math.min(100,Math.round((now-x.es)/(x.ee-x.es)*100)):0;
-              return h("button",{key:j,onClick:()=>ac({tip:"is",x}),
-                style:{position:"absolute",left:L,top:8,height:36,width:Wd,borderRadius:10,background:c.bg,border:c.bd,
-                  overflow:"hidden",textAlign:"left",padding:"3px 7px",zIndex:2}},
+              const pct=canliBar?cl.pct:(x.durum==="basiyor"?Math.min(100,Math.round((now-x.es)/(x.ee-x.es)*100)):0);
+              return h("button",{key:j,onClick:()=>ac({tip:"is",x:{...x,canli:cl}}),
+                style:{position:"absolute",left:L,top:8,height:36,width:Wd,borderRadius:10,background:c.bg,border:canliBar?"1.5px solid #0e8fce":c.bd,
+                  overflow:"hidden",textAlign:"left",padding:"3px 7px",zIndex:canliBar?3:2}},
                 x.durum==="basiyor"?h("div",{style:{position:"absolute",inset:0,width:pct+"%",background:"rgba(255,255,255,.22)"}}):null,
-                h("div",{style:{fontSize:10.5,fontWeight:800,color:c.tx,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",position:"relative"}},x.p.ad||"iş"),
-                h("div",{style:{fontSize:9,color:c.tx,opacity:.75,position:"relative"}},dkYaz(num(x.p.sureDk))+(num(x.p.adet)>1?(" · "+x.p.adet+" ad."):""))); })))))),
+                h("div",{style:{fontSize:10.5,fontWeight:800,color:c.tx,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",position:"relative"}},(canliBar?"📡 ":"")+(x.p.ad||"iş")),
+                h("div",{style:{fontSize:9,color:c.tx,opacity:.8,position:"relative"}},canliBar?("%"+cl.pct+" · "+dkYaz(cl.kalanDk)+" kaldı"):(dkYaz(num(x.p.sureDk))+(num(x.p.adet)>1?(" · "+x.p.adet+" ad."):"")))); })))))),
     bosGun?h("div",{style:{padding:"14px 16px 4px",textAlign:"center",fontSize:12.5,color:"var(--mut)"}},"Bu günde planlı iş yok."):null,
     // durum lejantı
     h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",padding:"12px 14px 2px",fontSize:10.5,fontWeight:700,color:"var(--mut)"}},
@@ -659,7 +662,7 @@ function Uretim({d,plan,makineler,ac}){
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:14}},"🖨️ Üretim"),
     // 📅 GANTT — günlük üretim takvimi (işe dokun → detay)
     h("div",{className:"lbl",style:{marginBottom:8}},"📅 Üretim takvimi — işe dokun"),
-    h("div",{style:{marginBottom:20}},h(Gantt,{plan,makineler,ac})),
+    h("div",{style:{marginBottom:20}},h(Gantt,{plan,makineler,makDurum:d.makDurum,ac})),
     h("div",{className:"lbl",style:{marginBottom:8}},"🖨️ Makineler"),
     h("div",{style:{display:"grid",gap:8,marginBottom:20}},
       d.makDurum.map((m,i)=>h(MakineKart,{key:i,m,onClick:()=>ac({tip:"makine",m})}))),
