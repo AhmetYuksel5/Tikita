@@ -16,7 +16,14 @@ yazıcılar normal (Cloud) modda kalır, köprü de aynı Bambu bulutundan okur.
 3. `bambu_bulut.py`'yi indir, üstündeki alanları doldur:
    - `BAMBU_EMAIL` / `BAMBU_SIFRE` → Handy ile aynı hesap
    - `PRINTERS` → her yazıcı için `makineAd` (Tikita'daki adla AYNI) + `serial`
-     (IP/erişim kodu GEREKMEZ)
+   - **`ip` + `access_code` (İSTEĞE BAĞLI ama önerilir):** eklersen admin'de
+     **SD karttaki 3mf dosyaları listeden seçilir** (elle isim yazmaya gerek
+     kalmaz). Köprü, yazıcının SD kartını atölye ağından FTPS ile okur.
+     - `ip`: yazıcı ekranı → Ayarlar → Ağ (örn. `192.168.1.50`)
+     - `access_code`: yazıcı ekranı → Ayarlar → Ağ → "Erişim Kodu" (8 hane, her
+       yazıcıya özel). Bulut modunda da geçerlidir; Handy'yi kapatmaz.
+     - Boş bırakırsan köprü yine çalışır; sadece SD listesi gelmez, dosya adını
+       admin'de elle yazarsın.
 4. **İlk çalıştırma terminalde** (kod girmen istenir):
    ```bash
    python3 /Users/safa_bilisim/bambu_bulut.py
