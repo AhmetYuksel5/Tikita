@@ -129,7 +129,7 @@ class Kopru(object):
         self.byser = {}       # serial -> {cfg, son_ozet, son_yaz, durum}
         self.ad2ser = {}
         for p in printers:
-            self.byser[p["serial"]] = {"cfg": p, "son_state": None, "son_yaz": 0, "durum": {}}
+            self.byser[p["serial"]] = {"cfg": p, "son_state": None, "son_isik": None, "son_yaz": 0, "durum": {}}
             self.ad2ser[p["makineAd"]] = p["serial"]
         cid = "tikita_" + str(int(time.time()))   # sabit/benzersiz client-id
         try:
@@ -183,12 +183,18 @@ class Kopru(object):
         for k in ("gcode_state", "mc_percent", "mc_remaining_time", "subtask_name",
                   "gcode_file", "layer_num", "total_layer_num", "nozzle_temper", "bed_temper"):
             if k in p: d[k] = p[k]
-        # KOTA DOSTU: durum DEGISINCE aninda; yoksa en fazla 5 DK'da bir (% seyrek yazilir)
-        st_state = metin(d.get("gcode_state"))
+        # kabin isigi durumu (lights_report tam mesajlarda gelir)
+        lr = p.get("lights_report")
+        if isinstance(lr, list):
+            for L in lr:
+                if isinstance(L, dict) and L.get("node") == "chamber_light":
+                    d["isik"] = 1 if L.get("mode") == "on" else 0
+        # KOTA DOSTU: durum/isik DEGISINCE aninda; yoksa en fazla 5 DK'da bir (% seyrek yazilir)
+        st_state = metin(d.get("gcode_state")); isik = d.get("isik")
         simdi = time.time()
-        onemli = (st_state != st.get("son_state"))
+        onemli = (st_state != st.get("son_state")) or (isik != st.get("son_isik"))
         if (not onemli) and (simdi - st["son_yaz"] < 300): return
-        st["son_state"], st["son_yaz"] = st_state, simdi
+        st["son_state"], st["son_isik"], st["son_yaz"] = st_state, isik, simdi
         cfg = st["cfg"]
         veri = {
             "makineAd": cfg["makineAd"], "serial": serial,
@@ -197,6 +203,7 @@ class Kopru(object):
             "dosya": metin(d.get("subtask_name") or d.get("gcode_file")),
             "katman": int(sayi(d.get("layer_num"))), "katmanTop": int(sayi(d.get("total_layer_num"))),
             "nozul": sayi(d.get("nozzle_temper")), "tabla": sayi(d.get("bed_temper")),
+            "isik": bool(d.get("isik")),
             "guncelleme": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z",
         }
         fs_yaz(serial, veri)
