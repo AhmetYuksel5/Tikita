@@ -289,7 +289,9 @@ class Kopru(object):
     def bas_yazdir(self, makineAd, dosya, klasor="", plate=1, use_ams=False):
         url = SD_KOK + (klasor or "") + dosya
         p = {"command": "project_file", "param": "Metadata/plate_{0}.gcode".format(int(plate or 1)),
-             "url": url, "subtask_name": dosya, "plate_idx": int(plate or 1) - 1,
+             "url": url, "subtask_name": dosya,
+             "project_id": "0", "profile_id": "0", "task_id": "0", "subtask_id": "0",
+             "plate_idx": int(plate or 1) - 1,
              "timelapse": False, "bed_type": "auto", "bed_leveling": True, "flow_cali": False,
              "vibration_cali": False, "layer_inspect": False, "use_ams": bool(use_ams),
              "sequence_id": str(int(time.time()))}
