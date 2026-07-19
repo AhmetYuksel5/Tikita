@@ -131,10 +131,12 @@ class Kopru(object):
         for p in printers:
             self.byser[p["serial"]] = {"cfg": p, "son_ozet": None, "son_yaz": 0, "durum": {}}
             self.ad2ser[p["makineAd"]] = p["serial"]
+        cid = "tikita_" + str(int(time.time()))   # sabit/benzersiz client-id
         try:
-            c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, protocol=mqtt.MQTTv311)
-        except AttributeError:
-            c = mqtt.Client(protocol=mqtt.MQTTv311)
+            c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=cid, protocol=mqtt.MQTTv311)
+        except (AttributeError, TypeError):
+            try: c = mqtt.Client(client_id=cid, protocol=mqtt.MQTTv311)
+            except Exception: c = mqtt.Client(protocol=mqtt.MQTTv311)
         c.username_pw_set(auth["user"], auth["token"])
         c.tls_set(cert_reqs=ssl.CERT_NONE); c.tls_insecure_set(True)
         c.on_connect = self.baglandi; c.on_message = self.mesaj; c.on_disconnect = self.koptu
@@ -142,10 +144,14 @@ class Kopru(object):
         except Exception: pass
         self.c = c
 
-    def koptu(self, c, u, rc):
-        print("baglanti koptu (rc={0}) — otomatik yeniden baglanacak".format(rc))
+    def koptu(self, c, u, a, b=None, d=None):
+        # paho 1.x: (c,u,rc) · 2.x: (c,u,flags,reason_code,properties)
+        rc = b if b is not None else a
+        code = getattr(rc, "value", rc)
+        print("baglanti koptu (sebep kodu: {0}) — otomatik yeniden baglanacak".format(code))
 
-    def baglandi(self, c, u, f, rc):
+    def baglandi(self, c, u, f, rc, properties=None):
+        rc = getattr(rc, "value", rc)
         if rc == 0:
             print("BULUTA BAGLANDI · {0} yazici dinleniyor".format(len(self.byser)))
             for s in self.byser: c.subscribe("device/{0}/report".format(s))
