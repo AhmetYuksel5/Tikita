@@ -51,7 +51,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v36";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v37";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -879,18 +879,30 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
       :h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde kayıt yok.")));
 }
 function CantaSheet({d,onClose,onConfirm,bekle}){
+  const [mod,setMod]=useState("doldur");   // doldur = atölye→çanta · bosalt = çanta→atölye (iade)
   const [lines,setLines]=useState({});
-  const secili=d.cephane.filter(u=>num(lines[u.id])>0);
+  const bosalt=mod==="bosalt";
+  const liste=bosalt?d.cephane.filter(u=>num(u.canta)>0):d.cephane;
+  const secili=liste.filter(u=>num(lines[u.id])>0);
   const toplam=secili.reduce((s,u)=>s+num(lines[u.id]),0);
-  return h(Sheet,{ik:"🎒",hex:"#d97b12",baslik:"Çantayı doldur",alt:"atölyeden sahaya ürün al",onClose,
-    cta:bekle?"⏳…":("🎒 "+toplam+" ürünü çantaya al"),disabled:!secili.length||bekle,
-    onCta:()=>onConfirm(secili.map(u=>({id:u.id,ad:u.ad,adet:num(lines[u.id])})))},
-    d.cephane.slice(0,24).map((u,i)=>h("div",{key:u.id||i,style:{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i?"1px solid var(--line)":"none"}},
+  const setLn=(u,val)=>{ if(val===""){ setLines(s=>({...s,[u.id]:""})); return; }
+    let n=num(val); if(bosalt&&n>num(u.canta)) n=num(u.canta); if(n<0) n=0;
+    setLines(s=>({...s,[u.id]:n})); };
+  const tog=m=>{ setMod(m); setLines({}); };
+  const tb=(m,ik,txt)=>h("button",{onClick:()=>tog(m),style:{flex:1,padding:"10px 8px",borderRadius:12,fontSize:13.5,fontWeight:800,
+    background:mod===m?"#1b1e25":"var(--surf2)",color:mod===m?"#fff":"var(--mut)",border:"1px solid "+(mod===m?"#1b1e25":"var(--line)")}},ik+" "+txt);
+  return h(Sheet,{ik:bosalt?"📤":"🎒",hex:"#d97b12",baslik:bosalt?"Çantayı boşalt":"Çantayı doldur",
+    alt:bosalt?"sahadan atölyeye ürün iade et":"atölyeden sahaya ürün al",onClose,
+    cta:bekle?"⏳…":(bosalt?("📤 "+toplam+" ürünü atölyeye bırak"):("🎒 "+toplam+" ürünü çantaya al")),disabled:!secili.length||bekle,
+    onCta:()=>onConfirm(secili.map(u=>({id:u.id,ad:u.ad,adet:num(lines[u.id])})),mod)},
+    h("div",{style:{display:"flex",gap:8,marginBottom:16}},tb("doldur","🎒","Doldur"),tb("bosalt","📤","Boşalt")),
+    liste.length?liste.slice(0,24).map((u,i)=>h("div",{key:u.id||i,style:{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i?"1px solid var(--line)":"none"}},
       h("div",{style:{flex:1,minWidth:0}},
         h("div",{style:{fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
-        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},"atölyede "+u.stokta+" · 🎒 "+u.canta)),
-      h("input",{type:"number",inputMode:"numeric",placeholder:"0",value:lines[u.id]||"",onChange:e=>setLines(s=>({...s,[u.id]:e.target.value})),
-        style:{...inp,width:76,textAlign:"center",padding:"10px 8px"}}))));
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},bosalt?("🎒 çantanda "+u.canta+" · atölyede "+u.stokta):("atölyede "+u.stokta+" · 🎒 "+u.canta))),
+      h("input",{type:"number",inputMode:"numeric",placeholder:"0",value:lines[u.id]===0?"":(lines[u.id]||""),onChange:e=>setLn(u,e.target.value),
+        style:{...inp,width:76,textAlign:"center",padding:"10px 8px"}})))
+      :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Çantanda boşaltacak ürün yok."));
 }
 
 /* ————— ETKİLEŞİM: alttan işlem paneli + ödül ————— */
@@ -1722,9 +1734,13 @@ function App(){
         await save("sefer",{id:sid,sonRapor:new Date().toISOString()});
         say("📡 Rapor verildi — WhatsApp'tan gönder"); }
       setSeferSheet(null); }catch(e){ console.error(e); say("⚠ İşlem tamamlanamadı"); } finally{ setSbekle(false); } }
-  async function cantaEkle(items){ if(sbekle) return; setSbekle(true);
-    try{ for(const it of items){ if(num(it.adet)>0) await cantaDelta(it.id,it.ad,+num(it.adet),-num(it.adet)); }   // atölyeden çantaya (stok düşer)
-      setCantaSheet(false); say("🎒 Çantaya eklendi — atölyeden düşüldü"); }catch(e){ console.error(e); say("⚠ Eklenemedi"); } finally{ setSbekle(false); } }
+  async function cantaEkle(items,mod){ if(sbekle) return; setSbekle(true);
+    const bosalt=mod==="bosalt";
+    try{ for(const it of items){ if(num(it.adet)>0){
+          if(bosalt) await cantaDelta(it.id,it.ad,-num(it.adet),+num(it.adet));   // çantadan atölyeye (stok artar) — iade
+          else await cantaDelta(it.id,it.ad,+num(it.adet),-num(it.adet)); } }       // atölyeden çantaya (stok düşer)
+      setCantaSheet(false); say(bosalt?"📤 Atölyeye bırakıldı — stoğa eklendi":"🎒 Çantaya eklendi — atölyeden düşüldü"); }
+    catch(e){ console.error(e); say(bosalt?"⚠ Boşaltılamadı":"⚠ Eklenemedi"); } finally{ setSbekle(false); } }
 
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--gold)",animation:"spin .8s linear infinite"}}),
