@@ -129,7 +129,7 @@ class Kopru(object):
         self.byser = {}       # serial -> {cfg, son_ozet, son_yaz, durum}
         self.ad2ser = {}
         for p in printers:
-            self.byser[p["serial"]] = {"cfg": p, "son_ozet": None, "son_yaz": 0, "durum": {}}
+            self.byser[p["serial"]] = {"cfg": p, "son_state": None, "son_yaz": 0, "durum": {}}
             self.ad2ser[p["makineAd"]] = p["serial"]
         cid = "tikita_" + str(int(time.time()))   # sabit/benzersiz client-id
         try:
@@ -183,10 +183,12 @@ class Kopru(object):
         for k in ("gcode_state", "mc_percent", "mc_remaining_time", "subtask_name",
                   "gcode_file", "layer_num", "total_layer_num", "nozzle_temper", "bed_temper"):
             if k in p: d[k] = p[k]
-        ozet = (metin(d.get("gcode_state")), int(sayi(d.get("mc_percent"))), int(sayi(d.get("mc_remaining_time"))))
+        # KOTA DOSTU yazim: durum DEGISINCE aninda; yoksa en fazla 60 sn'de bir (% degisimi seyrek yazilir)
+        st_state = metin(d.get("gcode_state"))
         simdi = time.time()
-        if ozet == st["son_ozet"] and simdi - st["son_yaz"] < 15: return
-        st["son_ozet"], st["son_yaz"] = ozet, simdi
+        onemli = (st_state != st.get("son_state"))
+        if (not onemli) and (simdi - st["son_yaz"] < 60): return
+        st["son_state"], st["son_yaz"] = st_state, simdi
         cfg = st["cfg"]
         veri = {
             "makineAd": cfg["makineAd"], "serial": serial,
@@ -269,7 +271,7 @@ def komut_dongu(kopru):
                 print("[{0}] komut islendi: {1} ({2})".format(mak, cmd, "OK" if ok else "hata"))
         except Exception as e:
             print("komut dongu: {0}".format(e))
-        time.sleep(3)
+        time.sleep(8)
 
 if __name__ == "__main__":
     print("Tikita <-> Bambu BULUT koprusu (tek baglanti) · Python " + sys.version.split()[0])
