@@ -7,7 +7,7 @@
 #  Python 2.7.16 ve Python 3 ile calisir.
 # ============================================================
 from __future__ import print_function
-import json, ssl, time, threading, sys, os, base64
+import json, ssl, time, threading, sys, os, base64, ftplib
 
 try:
     import requests
@@ -21,8 +21,10 @@ except ImportError:
 BAMBU_EMAIL = "senin@email.com"
 BAMBU_SIFRE = "sifren"
 PRINTERS = [
-    {"makineAd": "X1C", "serial": "01S00A000000000"},
-    # {"makineAd": "P1S", "serial": "01P00A000000000"},
+    # ip + access_code EKLERSEN → admin'de SD karttaki 3mf dosyalari LISTEDEN secilir
+    # (elle isim yazmak gerekmez). ip/erisim kodu yazicinin ekraninda: Ayarlar > Ag.
+    {"makineAd": "X1C", "serial": "01S00A000000000", "ip": "192.168.1.50", "access_code": "12345678"},
+    # {"makineAd": "P1S", "serial": "01P00A000000000"},   # ip/access_code yoksa sadece elle isimle baslatilir
 ]
 
 API_KEY = "AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k"
@@ -115,12 +117,60 @@ def fs_yaz(docid, data):
         if isinstance(v, bool): fields[k] = {"booleanValue": v}
         elif isinstance(v, (int, float)): fields[k] = {"doubleValue": float(v)}
         else: fields[k] = {"stringValue": metin(v)}
+    # updateMask: SADECE bu alanlari yaz → sdDosyalar gibi baska alanlar silinmez
+    params = [("key", API_KEY)] + [("updateMask.fieldPaths", k) for k in fields]
     try:
-        rr = requests.patch(FS + "/makine_durum/" + docid + "?key=" + API_KEY,
+        rr = requests.patch(FS + "/makine_durum/" + docid, params=params,
                             json={"fields": fields}, timeout=10)
         if rr.status_code >= 300: print("[firestore] {0}: HTTP {1}".format(docid, rr.status_code))
     except Exception as e:
         print("[firestore] {0}: {1}".format(docid, e))
+
+def fs_sd_yaz(serial, dosyalar):
+    """SD karttaki 3mf listesini makine_durum/<serial>.sdDosyalar (dizi) olarak yaz."""
+    body = {"fields": {
+        "sdDosyalar": {"arrayValue": {"values": [{"stringValue": metin(x)} for x in dosyalar]}},
+        "sdGuncelleme": {"stringValue": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z"}}}
+    params = [("key", API_KEY), ("updateMask.fieldPaths", "sdDosyalar"),
+              ("updateMask.fieldPaths", "sdGuncelleme")]
+    try:
+        requests.patch(FS + "/makine_durum/" + serial, params=params, json=body, timeout=10)
+    except Exception as e:
+        print("[firestore-sd] {0}: {1}".format(serial, e))
+
+# ————— SD KART OKUMA (yazicinin FTPS'i, port 990 'implicit' TLS) —————
+class _ImplicitFTPS(ftplib.FTP_TLS):
+    """Bambu yazicilari 990 portunda implicit FTPS kullanir (baglanir baglanmaz TLS)."""
+    def __init__(self, *a, **k):
+        self._sock = None
+        ftplib.FTP_TLS.__init__(self, *a, **k)
+    def _get_sock(self): return self._sock
+    def _set_sock(self, value):
+        if value is not None and not isinstance(value, ssl.SSLSocket):
+            value = self.context.wrap_socket(value, server_hostname=None)
+        self._sock = value
+    sock = property(_get_sock, _set_sock)
+
+def sd_listele(ip, code):
+    """SD kartin kokundeki .3mf dosya adlarini dondurur."""
+    try: ctx = ssl._create_unverified_context()
+    except AttributeError:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23); ctx.verify_mode = ssl.CERT_NONE
+    ftp = _ImplicitFTPS(context=ctx)
+    ftp.connect(ip, 990, timeout=8)
+    ftp.login("bblp", code)
+    ftp.prot_p()
+    try: names = ftp.nlst("/")
+    except Exception: names = ftp.nlst()
+    try: ftp.quit()
+    except Exception:
+        try: ftp.close()
+        except Exception: pass
+    out = []
+    for n in names:
+        b = n.split("/")[-1]
+        if b.lower().endswith(".3mf"): out.append(b)
+    return sorted(set(out))
 
 # ————— TEK BAGLANTILI KOPRU —————
 class Kopru(object):
@@ -179,6 +229,12 @@ class Kopru(object):
             return
         p = j.get("print")
         if not isinstance(p, dict): return
+        # yazicinin komuta verdigi CEVABI gorunur yap (sessiz basarisizligi onler)
+        rcmd = p.get("command")
+        if rcmd in ("project_file", "pause", "resume", "stop") or ("result" in p) or p.get("print_error"):
+            if ("result" in p) or ("reason" in p) or p.get("print_error"):
+                print("[{0}] YANIT {1}: result={2} reason={3} print_error={4}".format(
+                    st["cfg"]["makineAd"], rcmd, p.get("result"), p.get("reason"), p.get("print_error")))
         d = st["durum"]
         for k in ("gcode_state", "mc_percent", "mc_remaining_time", "subtask_name",
                   "gcode_file", "layer_num", "total_layer_num", "nozzle_temper", "bed_temper"):
@@ -223,8 +279,9 @@ class Kopru(object):
         url = SD_KOK + (klasor or "") + dosya
         p = {"command": "project_file", "param": "Metadata/plate_{0}.gcode".format(int(plate or 1)),
              "url": url, "subtask_name": dosya, "plate_idx": int(plate or 1) - 1,
-             "timelapse": False, "bed_leveling": True, "flow_cali": False, "vibration_cali": False,
-             "layer_inspect": False, "use_ams": bool(use_ams), "sequence_id": str(int(time.time()))}
+             "timelapse": False, "bed_type": "auto", "bed_leveling": True, "flow_cali": False,
+             "vibration_cali": False, "layer_inspect": False, "use_ams": bool(use_ams),
+             "sequence_id": str(int(time.time()))}
         if use_ams: p["ams_mapping"] = [0]
         print("[{0}] BASLAT -> {1}".format(makineAd, url))
         return self.yolla(makineAd, {"print": p})
@@ -234,6 +291,17 @@ class Kopru(object):
     def isik(self, m, ac): return self.yolla(m, {"system": {"command": "ledctrl", "led_node": "chamber_light",
         "led_mode": ("on" if ac else "off"), "led_on_time": 500, "led_off_time": 500,
         "loop_times": 0, "interval_time": 0, "sequence_id": str(int(time.time()))}})
+
+    def sd_tara(self, makineAd):
+        """Bu makinenin SD kartini oku, Firestore'a yaz. ip+access_code gerekir."""
+        s = self.ad2ser.get(makineAd)
+        if not s: return False
+        cfg = self.byser[s]["cfg"]; ip = cfg.get("ip"); code = cfg.get("access_code")
+        if not (ip and code): return False
+        files = sd_listele(ip, code)
+        fs_sd_yaz(s, files); self.byser[s]["sd_son"] = files
+        print("[{0}] SD: {1} dosya".format(makineAd, len(files)))
+        return True
 
     def calis(self):
         while True:
@@ -273,6 +341,9 @@ def komut_dongu(kopru):
                 elif cmd == "durdur":   ok = kopru.durdur(mak)
                 elif cmd == "isik_ac":  ok = kopru.isik(mak, True)
                 elif cmd == "isik_kapat": ok = kopru.isik(mak, False)
+                elif cmd == "sd_tara":
+                    try: ok = kopru.sd_tara(mak)
+                    except Exception as e: ok = False; print("[{0}] SD tara hatasi: {1}".format(mak, e))
                 try: requests.delete(FS + "/makine_komut/" + mid + "?key=" + API_KEY, timeout=12)
                 except Exception: pass
                 print("[{0}] komut islendi: {1} ({2})".format(mak, cmd, "OK" if ok else "hata"))
@@ -280,12 +351,32 @@ def komut_dongu(kopru):
             print("komut dongu: {0}".format(e))
         time.sleep(8)
 
+# ————— SD DONGU: her yazicinin SD kartini periyodik oku (ip+access_code varsa) —————
+def sd_dongu(kopru):
+    ilk = True
+    while True:
+        for s in list(kopru.byser.keys()):
+            cfg = kopru.byser[s]["cfg"]
+            if not (cfg.get("ip") and cfg.get("access_code")): continue
+            try:
+                files = sd_listele(cfg["ip"], cfg["access_code"])
+            except Exception as e:
+                if ilk: print("[{0}] SD okunamadi: {1}".format(cfg["makineAd"], e))
+                continue
+            if files != kopru.byser[s].get("sd_son"):
+                kopru.byser[s]["sd_son"] = files
+                fs_sd_yaz(s, files)
+                print("[{0}] SD: {1} dosya".format(cfg["makineAd"], len(files)))
+        ilk = False
+        time.sleep(300)   # 5 dk'da bir; degismezse yazmaz (kota dostu)
+
 if __name__ == "__main__":
     print("Tikita <-> Bambu BULUT koprusu (tek baglanti) · Python " + sys.version.split()[0])
     auth = giris()
     kopru = Kopru(auth, PRINTERS)
     kt = threading.Thread(target=komut_dongu, args=(kopru,)); kt.daemon = True; kt.start()
-    print("Komut dinleyici aktif (makine_komut).")
+    sdt = threading.Thread(target=sd_dongu, args=(kopru,)); sdt.daemon = True; sdt.start()
+    print("Komut dinleyici + SD tarayici aktif (makine_komut / SD kart).")
     while True:
         kopru.calis()          # yetki hatasinda doner
         print("Token yenileniyor…"); token_sil(); auth = giris()
