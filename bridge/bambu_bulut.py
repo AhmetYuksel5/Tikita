@@ -139,8 +139,9 @@ def fs_sd_yaz(serial, dosyalar):
         print("[firestore-sd] {0}: {1}".format(serial, e))
 
 # ————— SD KART OKUMA (yazicinin FTPS'i, port 990 'implicit' TLS) —————
-class _ImplicitFTPS(ftplib.FTP_TLS):
-    """Bambu yazicilari 990 portunda implicit FTPS kullanir (baglanir baglanmaz TLS)."""
+class _ImplicitFTPS(ftplib.FTP_TLS, object):
+    """Bambu yazicilari 990 portunda implicit FTPS kullanir (baglanir baglanmaz TLS).
+    Py2.7'de FTP_TLS old-style; 'object' ekleyince yeni-stil olur -> property calisir."""
     def __init__(self, *a, **k):
         self._sock = None
         ftplib.FTP_TLS.__init__(self, *a, **k)
@@ -155,7 +156,10 @@ def sd_listele(ip, code):
     """SD kartin kokundeki .3mf dosya adlarini dondurur."""
     try: ctx = ssl._create_unverified_context()
     except AttributeError:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23); ctx.verify_mode = ssl.CERT_NONE
+        ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+        try: ctx.check_hostname = False
+        except Exception: pass
+        ctx.verify_mode = ssl.CERT_NONE
     ftp = _ImplicitFTPS(context=ctx)
     ftp.connect(ip, 990, timeout=8)
     ftp.login("bblp", code)
