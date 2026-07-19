@@ -32,6 +32,7 @@ PRINTERS = [
 
 API_KEY = "AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k"
 PROJECT = "tikita-2026"
+SD_KOK = "file:///sdcard/"    # SD karttaki 3MF'lerin kok yolu (gerekirse "file:///sdcard/cache/" yap)
 API = "https://api.bambulab.com"
 MQTT_HOST = "us.mqtt.bambulab.com"   # global hesap. Cin hesabi ise: cn.mqtt.bambulab.com
 TOKEN_FILE = os.path.expanduser("~/.tikita_bambu_token.json")
@@ -183,6 +184,30 @@ class Yazici(object):
                 json.dumps({"pushing": {"sequence_id": "1", "command": "pushall"}, "user_id": "tikita"}))
         except Exception: pass
 
+    def yolla(self, obj):
+        try:
+            self.c.publish("device/{0}/request".format(self.cfg["serial"]), json.dumps(obj))
+            return True
+        except Exception as e:
+            print("[{0}] komut hatasi: {1}".format(self.cfg["makineAd"], e)); return False
+
+    # ——— KOMUTLAR ———
+    def bas_yazdir(self, dosya, klasor="", plate=1, use_ams=False, subtask=""):
+        url = SD_KOK + (klasor or "") + dosya
+        p = {"command": "project_file", "param": "Metadata/plate_{0}.gcode".format(int(plate or 1)),
+             "url": url, "subtask_name": subtask or dosya, "plate_idx": int(plate or 1) - 1,
+             "timelapse": False, "bed_leveling": True, "flow_cali": False, "vibration_cali": False,
+             "layer_inspect": False, "use_ams": bool(use_ams), "sequence_id": str(int(time.time()))}
+        if use_ams: p["ams_mapping"] = [0]
+        print("[{0}] BASLAT -> {1}".format(self.cfg["makineAd"], url))
+        return self.yolla({"print": p})
+    def duraklat(self): return self.yolla({"print": {"command": "pause", "sequence_id": str(int(time.time()))}})
+    def devam(self):    return self.yolla({"print": {"command": "resume", "sequence_id": str(int(time.time()))}})
+    def durdur(self):   return self.yolla({"print": {"command": "stop", "sequence_id": str(int(time.time()))}})
+    def isik(self, ac): return self.yolla({"system": {"command": "ledctrl", "led_node": "chamber_light",
+        "led_mode": ("on" if ac else "off"), "led_on_time": 500, "led_off_time": 500, "loop_times": 0,
+        "interval_time": 0, "sequence_id": str(int(time.time()))}})
+
     def mesaj(self, c, u, msg):
         try:
             pl = msg.payload.decode("utf-8") if isinstance(msg.payload, bytes) else msg.payload
@@ -212,11 +237,56 @@ class Yazici(object):
         print("[{0}] {1} %{2} kalan {3}dk {4}".format(
             self.cfg["makineAd"], veri["durum"], veri["pct"], veri["kalanDk"], veri["dosya"][:30]))
 
+# ——— KOMUT DINLEYICI: Tikita 'makine_komut' -> yaziciya ilet ———
+def komut_dongu(registry):
+    base = ("https://firestore.googleapis.com/v1/projects/{0}/databases/(default)"
+            "/documents/makine_komut").format(PROJECT)
+    def gk(f, k, d=""):
+        v = f.get(k, {})
+        for t in ("stringValue", "integerValue", "doubleValue", "booleanValue"):
+            if t in v: return v[t]
+        return d
+    while True:
+        try:
+            j = json.loads(_get(base + "?key=" + API_KEY + "&pageSize=50"))
+            for doc in j.get("documents", []):
+                f = doc.get("fields", {}); mid = doc["name"].split("/")[-1]
+                mak = metin(gk(f, "makineAd")); y = registry.get(mak)
+                if not y:  # bize ait degil
+                    continue
+                cmd = metin(gk(f, "cmd"))
+                ok = False
+                if cmd == "basla":
+                    ok = y.bas_yazdir(metin(gk(f, "dosya")), metin(gk(f, "klasor")),
+                                      int(sayi(gk(f, "plate")) or 1), bool(gk(f, "useAms")),
+                                      metin(gk(f, "dosya")))
+                elif cmd == "duraklat": ok = y.duraklat()
+                elif cmd == "devam":    ok = y.devam()
+                elif cmd == "durdur":   ok = y.durdur()
+                elif cmd == "isik_ac":  ok = y.isik(True)
+                elif cmd == "isik_kapat": ok = y.isik(False)
+                else: ok = True  # bilinmeyen -> sil gitsin
+                # komutu sil (tekrar islenmesin)
+                _delete(base + "/" + mid + "?key=" + API_KEY)
+                print("[{0}] komut islendi: {1} ({2})".format(mak, cmd, "OK" if ok else "hata"))
+        except Exception as e:
+            print("komut dongu: {0}".format(e))
+        time.sleep(3)
+
+def _get(url):
+    return requests.get(url, timeout=12).text
+def _delete(url):
+    try: requests.delete(url, timeout=12)
+    except Exception: pass
+
 if __name__ == "__main__":
     print("Tikita <-> Bambu BULUT koprusu · Python " + sys.version.split()[0])
     auth = giris()
     yazicilar = [Yazici(cfg, auth) for cfg in PRINTERS]
-    for y in yazicilar: y.basla()
+    registry = {}
+    for y in yazicilar: y.basla(); registry[y.cfg["makineAd"]] = y
+    kt = threading.Thread(target=komut_dongu, args=(registry,)); kt.daemon = True; kt.start()
+    print("Komut dinleyici aktif (makine_komut).")
     while True:
         time.sleep(30)
         # herhangi biri yetki hatasi verdiyse token yenile + yeniden basla
