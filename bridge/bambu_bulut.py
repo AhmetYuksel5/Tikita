@@ -176,6 +176,13 @@ def sd_listele(ip, code):
         if b.lower().endswith(".3mf"): out.append(b)
     return sorted(set(out))
 
+def sd_ayarli(cfg):
+    """ip + access_code gercekten girilmis mi? (bos ya da 'XX' placeholder ise SD atlanir)"""
+    ip = (cfg.get("ip") or "").strip(); code = (cfg.get("access_code") or "").strip()
+    if not ip or not code: return False
+    if "X" in ip.upper() or "X" in code.upper(): return False   # doldurulmamis placeholder
+    return True
+
 # ————— TEK BAGLANTILI KOPRU —————
 class Kopru(object):
     def __init__(self, auth, printers):
@@ -300,9 +307,9 @@ class Kopru(object):
         """Bu makinenin SD kartini oku, Firestore'a yaz. ip+access_code gerekir."""
         s = self.ad2ser.get(makineAd)
         if not s: return False
-        cfg = self.byser[s]["cfg"]; ip = cfg.get("ip"); code = cfg.get("access_code")
-        if not (ip and code): return False
-        files = sd_listele(ip, code)
+        cfg = self.byser[s]["cfg"]
+        if not sd_ayarli(cfg): return False
+        files = sd_listele(cfg["ip"], cfg["access_code"])
         fs_sd_yaz(s, files); self.byser[s]["sd_son"] = files
         print("[{0}] SD: {1} dosya".format(makineAd, len(files)))
         return True
@@ -361,7 +368,7 @@ def sd_dongu(kopru):
     while True:
         for s in list(kopru.byser.keys()):
             cfg = kopru.byser[s]["cfg"]
-            if not (cfg.get("ip") and cfg.get("access_code")): continue
+            if not sd_ayarli(cfg): continue
             try:
                 files = sd_listele(cfg["ip"], cfg["access_code"])
             except Exception as e:
