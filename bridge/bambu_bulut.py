@@ -183,11 +183,11 @@ class Kopru(object):
         for k in ("gcode_state", "mc_percent", "mc_remaining_time", "subtask_name",
                   "gcode_file", "layer_num", "total_layer_num", "nozzle_temper", "bed_temper"):
             if k in p: d[k] = p[k]
-        # KOTA DOSTU yazim: durum DEGISINCE aninda; yoksa en fazla 60 sn'de bir (% degisimi seyrek yazilir)
+        # KOTA DOSTU: durum DEGISINCE aninda; yoksa en fazla 5 DK'da bir (% seyrek yazilir)
         st_state = metin(d.get("gcode_state"))
         simdi = time.time()
         onemli = (st_state != st.get("son_state"))
-        if (not onemli) and (simdi - st["son_yaz"] < 60): return
+        if (not onemli) and (simdi - st["son_yaz"] < 300): return
         st["son_state"], st["son_yaz"] = st_state, simdi
         cfg = st["cfg"]
         veri = {
