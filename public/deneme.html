@@ -51,7 +51,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v40";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v41";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -976,11 +976,13 @@ function ActionSheet({type,k,d,onClose,onFire}){
   const [not,setNot]=useState("");
   const [smod,setSmod]=useState("hediye"); const [sfiyat,setSfiyat]=useState("");
   const [alinan,setAlinan]=useState("");   // satışta anında tahsil edilen (opsiyonel)
+  const [lines,setLines]=useState({});     // 🏬 çoklu konsinye bırak: urunId -> adet
+  const [birakMod,setBirakMod]=useState("konsinye");   // konsinye/hediye/odunc
   const [bekle,setBekle]=useState(false);
   const fire=async(mesaj,xp,ekstra)=>{ setBekle(true); const ok=await onFire({type,k,mesaj,xp,...(ekstra||{})});
     if(!(ekstra&&ekstra.kalici)) return;   // klasik akış: parent sheet'i kapattı
     setBekle(false); if(ok===false) return;
-    setAdet(1); setKfiyat(""); setKkalem({ad:"",adet:0}); };   // kalıcı: seçim sıfırlansın, başka ürün seçilebilsin
+    setAdet(1); setKfiyat(""); setKkalem({ad:"",adet:0}); setLines({}); };   // kalıcı: seçim sıfırlansın, başka ürün seçilebilsin
 
   if(type==="tahsilat"){ const borc=k?k.borc:0;
     return h(Sheet,{ik:"🧾",hex:"#d97b12",baslik:"Tahsilat · "+(k?k.ad:""),alt:"Bu kalenin borcu "+tl(borc),
@@ -1018,22 +1020,35 @@ function ActionSheet({type,k,d,onClose,onFire}){
   }
   if(type==="konsinye"){
     const modlar=[["birak","🏬 Bırak"],["satis","💰 Satış"],["iade","↩️ İade"]];
+    const durumlar=[["konsinye","🏬 Konsinye"],["hediye","🎁 Hediye"],["odunc","🤝 Ödünç"]];
+    const secili=d.cephane.filter(u=>num(lines[u.id])>0);
+    const topAdet=secili.reduce((s,u)=>s+num(lines[u.id]),0);
+    const topDeger=secili.reduce((s,u)=>s+num(lines[u.id])*num(u.fiyat),0);
     const kToplam=adet*num(kfiyat);
-    const cta=kmod==="birak"?"🏬 Konsinye bırak":kmod==="satis"?("💰 "+(num(kfiyat)>0?tl(kToplam)+" ":"")+"konsinye satışı"):"↩️ Konsinye iade";
-    const gecerli=kmod==="birak"?(!!urun.ad&&adet>0):(!!kkalem.ad&&adet>0&&(kmod!=="satis"||num(kfiyat)>0));
-    const onOk=()=>{ if(kmod==="birak") fire(adet+" × "+urun.ad+" konsinye bırakıldı · "+(k?k.ad:""),XP.konsinye,{kmod:"birak",urun,adet,kalici:true});
+    const birakCta=(birakMod==="hediye"?"🎁 ":birakMod==="odunc"?"🤝 ":"🏬 ")+topAdet+" adet "+(birakMod==="hediye"?"hediye et":birakMod==="odunc"?"ödünç ver":"konsinye bırak");
+    const cta=kmod==="birak"?birakCta:kmod==="satis"?("💰 "+(num(kfiyat)>0?tl(kToplam)+" ":"")+"konsinye satışı"):"↩️ Konsinye iade";
+    const gecerli=kmod==="birak"?(secili.length>0):(!!kkalem.ad&&adet>0&&(kmod!=="satis"||num(kfiyat)>0));
+    const onOk=()=>{ if(kmod==="birak") fire(topAdet+" adet "+(birakMod==="hediye"?"hediye edildi":birakMod==="odunc"?"ödünç verildi":"konsinye bırakıldı")+" · "+(k?k.ad:""),XP.konsinye,{kmod:"birak",items:secili.map(u=>({urun:u,adet:num(lines[u.id])})),mod:birakMod,kalici:true});
       else fire(adet+" konsinye "+(kmod==="satis"?("satıldı ("+tl(kToplam)+")"):"iade edildi")+" · "+(k?k.ad:""),XP.konsinye,{kmod,kkalem,adet,fiyat:num(kfiyat),kalici:true}); };
     const kalemSec=c=>{ setKkalem(c); setAdet(c.adet);
       setKfiyat(String(num((d.cephane.find(u2=>u2.ad===c.ad)||{}).fiyat)||"")); };
     return h(Sheet,{ik:"🏬",hex:"#7c46e6",baslik:"Konsinye · "+(k?k.ad:""),alt:(k?k.acikKons:0)+" adet açık konsinye",
       onClose,cta:bekle?"⏳ İşleniyor…":cta,disabled:!gecerli||bekle,onCta:onOk},
-      h("div",{style:{display:"flex",gap:8,marginBottom:16}},
+      h("div",{style:{display:"flex",gap:8,marginBottom:14}},
         modlar.map(([m,lbl])=>h(Chip,{key:m,on:kmod===m,onClick:()=>setKmod(m)},lbl))),
       kmod==="birak"
-        ? h("div",{style:{marginBottom:14}},
-            h("div",{className:"lbl",style:{marginBottom:8}},"Ürün (çantandan bırak)"),
-            h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
-              d.cephane.slice(0,10).map((u,i)=>h(Chip,{key:i,on:urun.ad===u.ad,onClick:()=>setUrun(u)},(u.canta>0?"🎒 ":"")+u.ad))))
+        ? h(React.Fragment,null,
+            h("div",{className:"lbl",style:{marginBottom:8}},"Nasıl bırakılıyor?"),
+            h("div",{style:{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}},
+              durumlar.map(([m,lbl])=>h(Chip,{key:m,on:birakMod===m,onClick:()=>setBirakMod(m)},lbl))),
+            h("div",{className:"lbl",style:{marginBottom:8}},"Ürünler — bırakılacak adedi gir (çoklu)"),
+            h("div",{style:{display:"grid",gap:8}},
+              d.cephane.slice(0,20).map((u,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 11px",borderRadius:12,background:num(lines[u.id])>0?"#7c46e60d":"var(--surf2)",border:"1px solid "+(num(lines[u.id])>0?"#7c46e644":"var(--line)")}},
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(u.canta>0?"🎒 ":"")+u.ad),
+                  h("div",{style:{fontSize:11,color:"var(--mut)"}},"çantanda "+u.canta+" · "+(birakMod==="hediye"?"🎁 hediye":birakMod==="odunc"?("🤝 ödünç · "+tl(u.fiyat)+"/ad"):(tl(u.fiyat)+"/ad")))),
+                h("input",{type:"number",inputMode:"numeric",placeholder:"0",value:lines[u.id]||"",onChange:e=>setLines(s=>({...s,[u.id]:e.target.value})),style:{...inp,width:74,textAlign:"center",padding:"10px 8px",fontSize:15}})))),
+            secili.length?h("div",{style:{textAlign:"center",marginTop:12,fontSize:13.5,fontWeight:700,color:"var(--violet)"}},topAdet+" adet"+(birakMod!=="hediye"?(" · toplam "+tl(topDeger)):" · hediye")):null)
         : (konsList.length>0
             ? h("div",{style:{marginBottom:14}},
                 h("div",{className:"lbl",style:{marginBottom:8}},kmod==="satis"?"Ürün (buradan satılan)":"Ürün (geri alınan)"),
@@ -1046,9 +1061,11 @@ function ActionSheet({type,k,d,onClose,onFire}){
               h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp})),
             h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Gerçek birim ₺"),
               h("input",{type:"number",inputMode:"numeric",value:kfiyat,onChange:e=>setKfiyat(e.target.value),placeholder:"kaça sattın?",style:inp})))
-        : h("div",null,
+        : kmod==="iade"
+        ? h("div",null,
             h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
-            h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp})));
+            h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp}))
+        : null);
   }
   if(type==="stant"){
     return h(Sheet,{ik:"🎪",hex:"#9333ea",baslik:"Stant · "+(k?k.ad:""),alt:"tabla/stant bırak — hediye ya da parayla",
@@ -1664,10 +1681,12 @@ function App(){
         }
       }
     } else if(p.type==="konsinye"){
-      if(p.kmod==="birak"){ const u=p.urun||{};
-        await save("pazarlama_hareket",{...kul,tip:"konsinye",urunId:u.id||"",urunAd:u.ad||"?",adet:num(p.adet),kalan:num(p.adet),
-          alisFiyat:num(u.pazFiyat),satisFiyat:num(u.fiyat),...yerB,...gecEk,tarih:now});
-        if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-num(p.adet));
+      if(p.kmod==="birak"){ const items=p.items||[{urun:p.urun||{},adet:p.adet}]; const kmod2=p.mod||"konsinye";
+        for(const it of items){ const u=it.urun||{}; const ad=num(it.adet); if(ad<=0) continue;
+          await save("pazarlama_hareket",{...kul,tip:"konsinye",urunId:u.id||"",urunAd:u.ad||"?",adet:ad,
+            kalan:kmod2==="hediye"?0:ad,   // hediye: açık konsinye sayılmaz (geri beklenmez)
+            konsMod:kmod2,alisFiyat:num(u.pazFiyat),satisFiyat:num(u.fiyat),...yerB,...gecEk,tarih:now});
+          if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-ad); }
       } else {
         const ad=(p.kkalem&&p.kkalem.ad)||"?";
         const recs=hareketler.filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&kkOf(x)===key&&(x.urunAd||"?")===ad).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
