@@ -51,7 +51,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v39";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v40";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -977,7 +977,10 @@ function ActionSheet({type,k,d,onClose,onFire}){
   const [smod,setSmod]=useState("hediye"); const [sfiyat,setSfiyat]=useState("");
   const [alinan,setAlinan]=useState("");   // satışta anında tahsil edilen (opsiyonel)
   const [bekle,setBekle]=useState(false);
-  const fire=(mesaj,xp,ekstra)=>{ setBekle(true); onFire({type,k,mesaj,xp,...(ekstra||{})}); };
+  const fire=async(mesaj,xp,ekstra)=>{ setBekle(true); const ok=await onFire({type,k,mesaj,xp,...(ekstra||{})});
+    if(!(ekstra&&ekstra.kalici)) return;   // klasik akış: parent sheet'i kapattı
+    setBekle(false); if(ok===false) return;
+    setAdet(1); setKfiyat(""); setKkalem({ad:"",adet:0}); };   // kalıcı: seçim sıfırlansın, başka ürün seçilebilsin
 
   if(type==="tahsilat"){ const borc=k?k.borc:0;
     return h(Sheet,{ik:"🧾",hex:"#d97b12",baslik:"Tahsilat · "+(k?k.ad:""),alt:"Bu kalenin borcu "+tl(borc),
@@ -1018,8 +1021,8 @@ function ActionSheet({type,k,d,onClose,onFire}){
     const kToplam=adet*num(kfiyat);
     const cta=kmod==="birak"?"🏬 Konsinye bırak":kmod==="satis"?("💰 "+(num(kfiyat)>0?tl(kToplam)+" ":"")+"konsinye satışı"):"↩️ Konsinye iade";
     const gecerli=kmod==="birak"?(!!urun.ad&&adet>0):(!!kkalem.ad&&adet>0&&(kmod!=="satis"||num(kfiyat)>0));
-    const onOk=()=>{ if(kmod==="birak") fire(adet+" × "+urun.ad+" konsinye bırakıldı · "+(k?k.ad:""),XP.konsinye,{kmod:"birak",urun,adet});
-      else fire(adet+" konsinye "+(kmod==="satis"?("satıldı ("+tl(kToplam)+")"):"iade edildi")+" · "+(k?k.ad:""),XP.konsinye,{kmod,kkalem,adet,fiyat:num(kfiyat)}); };
+    const onOk=()=>{ if(kmod==="birak") fire(adet+" × "+urun.ad+" konsinye bırakıldı · "+(k?k.ad:""),XP.konsinye,{kmod:"birak",urun,adet,kalici:true});
+      else fire(adet+" konsinye "+(kmod==="satis"?("satıldı ("+tl(kToplam)+")"):"iade edildi")+" · "+(k?k.ad:""),XP.konsinye,{kmod,kkalem,adet,fiyat:num(kfiyat),kalici:true}); };
     const kalemSec=c=>{ setKkalem(c); setAdet(c.adet);
       setKfiyat(String(num((d.cephane.find(u2=>u2.ad===c.ad)||{}).fiyat)||"")); };
     return h(Sheet,{ik:"🏬",hex:"#7c46e6",baslik:"Konsinye · "+(k?k.ad:""),alt:(k?k.acikKons:0)+" adet açık konsinye",
@@ -1684,9 +1687,10 @@ function App(){
     }
     return {};
   }
-  const fire=async(p)=>{ try{ const r=await performWrite(p); if(r&&r.iptal){ setSheet(null); say("⚠ "+r.iptal); return; } }
-    catch(e){ console.error(e); setSheet(null); say("⚠ Kaydedilemedi — tekrar dene"); return; }
-    setSheet(null); setReward({mesaj:p.mesaj,xp:p.xp}); };
+  const fire=async(p)=>{ try{ const r=await performWrite(p); if(r&&r.iptal){ if(!p.kalici) setSheet(null); say("⚠ "+r.iptal); return false; } }
+    catch(e){ console.error(e); if(!p.kalici) setSheet(null); say("⚠ Kaydedilemedi — tekrar dene"); return false; }
+    if(p.kalici){ say("✓ "+(p.mesaj||"işlendi")); } else { setSheet(null); setReward({mesaj:p.mesaj,xp:p.xp}); }
+    return true; };
   // (toplu silme kaldırıldı — canlı defterde tekil geri alma kullanılır)
   const geriAlKayit=async(x)=>{ const o=ovOzet(x); if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
     try{
@@ -1822,7 +1826,7 @@ function App(){
       ? h(GecmisSheet,{k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})
       : sheet.type==="talep"
       ? h(TalepSheet,{talepler:emirTalep,onGonder:talepGonder,onCevapla:talepCevapla,onKonum:talepKonum,onClose:()=>setSheet(null)})
-      : h(ActionSheet,{type:sheet.type,k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})),
+      : h(ActionSheet,{type:sheet.type,k:(sheet.k&&sheet.k.key?(d.kaleler.find(x=>x.key===sheet.k.key)||sheet.k):sheet.k),d,onClose:()=>setSheet(null),onFire:fire})),
     (!kaleGuncel&&view==="us")?h("button",{onClick:()=>setSheet({type:"talep"}),
       style:{position:"fixed",right:16,bottom:"calc(env(safe-area-inset-bottom,0px) + 150px)",zIndex:36,width:54,height:54,borderRadius:"50%",background:"linear-gradient(135deg,#1e3a5f,#0e8fce)",color:"#fff",fontSize:24,boxShadow:"0 8px 22px rgba(14,143,206,.42)",display:"flex",alignItems:"center",justifyContent:"center"}},"💬",
       talepYeniCevap>0?h("span",{style:{position:"absolute",top:-2,right:-2,minWidth:20,height:20,borderRadius:99,background:"#e0483c",color:"#fff",fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 5px",border:"2px solid var(--bg)"}},talepYeniCevap):null):null,
