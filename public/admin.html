@@ -41,7 +41,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A15";   // komuta (admin) deneme sürümü
+const SURUM="A16";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -268,9 +268,7 @@ function MakineKart({m,onClick}){
     (m.durum==="basiyor"||(m.canli&&m.canli.taze&&m.canli.durum==="basiyor"))?h("div",{style:{height:7,borderRadius:99,background:"var(--surf2)",overflow:"hidden",marginTop:10}},
       h("div",{style:{height:"100%",width:((m.canli&&m.canli.taze&&m.canli.durum==="basiyor")?m.canli.pct:m.pct)+"%",borderRadius:99,background:"linear-gradient(90deg,#38bdf8,#0e8fce)",animation:"barfill 1s cubic-bezier(.2,.7,.2,1)"}})):null);
 }
-function MakineSheet({m,onClose,onKomut,onTablaBasla,onSdBaslat,onSdTara,siradaki}){
-  const [dosya,setDosya]=useState(siradaki?((siradaki.ad||"iş")+" "+num(siradaki.adet)+".3mf"):"");
-  const btn=(ik,txt,renk,fn)=>h("button",{onClick:fn,style:{flex:1,padding:"12px 6px",borderRadius:13,background:renk+"14",border:"1px solid "+renk+"44",fontSize:12.5,fontWeight:800,color:renk,display:"flex",flexDirection:"column",alignItems:"center",gap:3}},h("span",{style:{fontSize:18}},ik),txt);
+function MakineSheet({m,onClose,onKaydet}){
   const satir=(p,i,etiket)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
     h("div",{style:{flex:1,minWidth:0}},
       h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(p.ad||"iş")+((p.parcaAdlar&&p.parcaAdlar.length)?(" · "+p.parcaAdlar.join(", ")):"")),
@@ -290,37 +288,55 @@ function MakineSheet({m,onClose,onKomut,onTablaBasla,onSdBaslat,onSdTara,siradak
         cl.durum==="durakladi"?"⏸ Duraklatıldı":cl.durum==="hata"?"⚠ Hata":"Boşta"),
       cl.dosya?h("div",{style:{fontSize:12,color:"var(--mut)",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"📄 "+cl.dosya+(cl.katmanTop?(" · katman "+cl.katman+"/"+cl.katmanTop):"")):null,
       h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:3}},"🌡 nozül "+Math.round(cl.nozul||0)+"° · tabla "+Math.round(cl.tabla||0)+"°")):null,
-    // 🎮 CANLI KONTROL — köprü bağlıysa
-    cl?h("div",{style:{marginBottom:14}},
-      // baskı bitti → tabla topla & sıradakini başlat (asıl akış)
-      (cl.durum==="bitti"||m.durum==="tabla")?h("button",{onClick:onTablaBasla,style:{width:"100%",padding:14,borderRadius:14,marginBottom:9,background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:14.5,fontWeight:800,boxShadow:"0 8px 20px rgba(217,123,18,.28)"}},
-        siradaki?("🧹 Tabla topla → ▶️ başlat: "+((siradaki.ad||"iş")+" "+num(siradaki.adet))):"🧹 Tabla toplandı olarak işaretle"):null,
-      h("div",{style:{display:"flex",gap:8}},
-        cl.durum==="basiyor"?btn("⏸","Duraklat","#b45309",()=>onKomut("duraklat")):null,
-        cl.durum==="durakladi"?btn("▶️","Devam","#16a34a",()=>onKomut("devam")):null,
-        (cl.durum==="basiyor"||cl.durum==="durakladi")?btn("⏹","İptal","#e0483c",()=>{ if(confirm("⏹ Baskı İPTAL edilsin mi? Geri alınamaz.")) onKomut("durdur"); }):null,
-        (cl.isik?btn("🌑","Işığı kapat","#334155",()=>onKomut("isik_kapat")):btn("💡","Işığı aç","#f59e0b",()=>onKomut("isik_ac"))))):null,
-    siradaki?h("div",{style:{fontSize:12,color:"var(--mut)",margin:"0 0 12px 2px"}},"⏭ Sıradaki: "+(siradaki.ad||"iş")+" "+num(siradaki.adet)+" · SD dosyası: "+((siradaki.ad||"iş")+" "+num(siradaki.adet)+".3mf")):null,
-    // 🧪 SD dosya başlat — tabla boşken. Köprü SD'yi okuduysa LİSTEDEN seç, yoksa elle yaz.
-    cl?h("div",{className:"card",style:{padding:"12px 14px",marginBottom:14,boxShadow:"none",background:"var(--surf2)"}},
-      h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}},
-        h("div",{style:{fontSize:11,fontWeight:800,color:"var(--mut)"}},"🧪 SD DOSYA BAŞLAT (tabla boşken)"),
-        onSdTara?h("button",{onClick:onSdTara,style:{fontSize:11,fontWeight:800,color:"var(--cyan)",background:"none",border:"none",padding:2}},"🔄 SD'yi tara"):null),
-      (cl.sdDosyalar&&cl.sdDosyalar.length)?
-        h("div",{style:{display:"flex",flexDirection:"column",gap:7,maxHeight:250,overflowY:"auto"}},
-          cl.sdDosyalar.map((f,i)=>h("button",{key:i,
-            onClick:()=>{ if(confirm("⚠️ "+m.mk.ad+" tablası BOŞ mu?\n▶️ Başlatılacak: "+f)) onSdBaslat(f); },
-            style:{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"11px 12px",borderRadius:11,background:"#fff",border:"1.5px solid var(--line)",fontSize:13.5,fontWeight:700,textAlign:"left"}},
-            h("span",{style:{fontSize:16}},"📄"),
-            h("span",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},f.replace(/\.3mf$/i,"")),
-            h("span",{style:{fontSize:12,fontWeight:800,color:"var(--cyan)",flexShrink:0}},"▶️ başlat"))))
-        :h("div",null,
-          h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:8,lineHeight:1.5}},"Köprüde bu makinenin IP + erişim kodu tanımlı değilse liste gelmez. Dosyayı elle yaz:"),
-          h("input",{value:dosya,onChange:e=>setDosya(e.target.value),placeholder:"SD'deki 3mf adı — örn. AHTAPOT1.3mf",
-            style:{width:"100%",padding:"11px 12px",borderRadius:11,border:"1.5px solid var(--line)",background:"#fff",fontSize:14,fontWeight:600,marginBottom:9,fontFamily:"inherit"}}),
-          h("button",{onClick:()=>{ if(!dosya.trim()) return; if(confirm("⚠️ "+m.mk.ad+" tablası BOŞ mu?\n▶️ Başlatılacak: "+dosya)) onSdBaslat(dosya.trim()); },
-            style:{width:"100%",padding:12,borderRadius:12,background:"var(--cyan)",color:"#fff",fontSize:14,fontWeight:800}},"▶️ Bu dosyayı başlat"))):null,
+    // 📋 Bu baskıyı işlere kaydet — canlı baskıyı tek dokunuşla plana yaz (adet/başlama/bitiş/gram otomatik)
+    (cl&&cl.durum==="basiyor")?h("button",{onClick:onKaydet,style:{width:"100%",padding:15,borderRadius:14,marginBottom:14,
+      background:"linear-gradient(90deg,#38bdf8,#0e8fce)",color:"#fff",fontSize:15,fontWeight:800,boxShadow:"0 8px 20px rgba(14,143,206,.3)"}},
+      "📋 Bu baskıyı işlere kaydet"):
+    (cl&&cl.durum==="bitti")?h("div",{style:{padding:"11px 14px",marginBottom:14,borderRadius:12,background:"var(--surf2)",fontSize:12.5,color:"var(--mut)",textAlign:"center",lineHeight:1.5}},"Baskı bitmiş — kaydetmek için baskı SÜRERKEN açman gerekir."):null,
     gecmis.length?gecmis:h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Bu makinede iş yok."));
+}
+
+/* ————— BASKIYI KAYDET — canlı baskıdan otomatik doldur (adet/başlama/bitiş/gram) ————— */
+function BaskiKaydetSheet({m,urunler,onKaydet,bekle}){
+  const cl=m.canli||{};
+  const now=Date.now();
+  const pct=Math.max(0,Math.min(100,num(cl.pct))); const kalanDk=Math.max(0,num(cl.kalanDk));
+  const total=(pct>0&&pct<100)?Math.round(kalanDk*100/(100-pct)):kalanDk;   // canlı yüzdeden toplam süre tahmini
+  const elapsed=Math.max(0,total-kalanDk);
+  const basMs0=now-elapsed*60000, bitMs0=now+kalanDk*60000;
+  const raw=(cl.dosya||"").replace(/\.gcode\.3mf$/i,"").replace(/\.3mf$/i,"").trim();
+  const mm=raw.match(/^(.*?)[\s_\-]*([0-9]+)\s*$/);   // "ürün sayı" → ad + adet
+  const ad0=(mm?mm[1]:raw).trim(), adet0=mm?num(mm[2]):1;
+  const urun0=(urunler||[]).find(u=>(u.ad||"").toLowerCase()===ad0.toLowerCase());
+  const gram0=(urun0&&num(urun0.gram)>0)?String(num(urun0.gram)*(adet0||1)):"";
+  const toLoc=ms=>{const d2=new Date(ms-new Date().getTimezoneOffset()*60000);return d2.toISOString().slice(0,16);};
+  const [ad,setAd]=useState(ad0||"Baskı");
+  const [adet,setAdet]=useState(String(adet0||1));
+  const [bas,setBas]=useState(toLoc(basMs0));
+  const [bit,setBit]=useState(toLoc(bitMs0));
+  const [gram,setGram]=useState(gram0);
+  const urun=(urunler||[]).find(u=>(u.ad||"").toLowerCase()===ad.trim().toLowerCase());
+  const kaydet=()=>{ const bMs=new Date(bas).getTime(), eMs=new Date(bit).getTime();
+    const sureDk=Math.max(1,Math.round((eMs-bMs)/60000));
+    onKaydet({makineId:m.mk.id, ad:ad.trim()||"Baskı", adet:num(adet)||1, urunId:urun?urun.id:"",
+      baslangic:new Date(bMs).toISOString(), sureDk, planSureDk:sureDk, gram:num(gram),
+      basladi:true, gercekBaslangic:new Date(bMs).toISOString()}); };
+  return h(Sheet,{ik:"📋",hex:"#0e8fce",baslik:"Baskıyı kaydet",alt:(m.mk.ad||"Makine")+" · canlıdan otomatik dolduruldu",
+    onClose:()=>onKaydet(null),cta:bekle?"⏳…":"📋 İşlere kaydet",disabled:bekle,onCta:kaydet},
+    cl.dosya?h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"📄 "+cl.dosya+" · %"+pct):null,
+    h("div",{className:"lbl",style:{marginBottom:8}},"Ürün"),
+    h("input",{value:ad,onChange:e=>setAd(e.target.value),style:{...inp,marginBottom:4}}),
+    h("div",{style:{fontSize:11,fontWeight:700,marginBottom:14,color:urun?"var(--green)":"var(--mut)"}},urun?("✓ ürünle eşleşti: "+urun.ad):"serbest kayıt (ürünle eşleşmedi)"),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
+        h("input",{type:"number",inputMode:"numeric",value:adet,onChange:e=>setAdet(e.target.value),style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"⚖️ Gram (toplam)"),
+        h("input",{type:"number",inputMode:"numeric",value:gram,onChange:e=>setGram(e.target.value),placeholder:"—",style:inp}))),
+    h("div",{className:"lbl",style:{marginBottom:8}},"🚀 Başladı"),
+    h("input",{type:"datetime-local",value:bas,onChange:e=>setBas(e.target.value),style:{...inp,marginBottom:14}}),
+    h("div",{className:"lbl",style:{marginBottom:8}},"🏁 Bitecek"),
+    h("input",{type:"datetime-local",value:bit,onChange:e=>setBit(e.target.value),style:{...inp,marginBottom:6}}),
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",lineHeight:1.5}},"Başlama, canlı yüzdeye göre tahmini; bitiş, kalan süreden. Gerekirse düzelt."));
 }
 
 /* ————— EKİP ————— */
@@ -578,13 +594,14 @@ function UrunDuzenSheet({u,onKaydet,bekle}){
   const [satis,setSatis]=useState(duzen?String(u.fiyat||""):"");
   const [alis,setAlis]=useState(duzen?String(u.alis||""):"");
   const [stokta,setStokta]=useState(duzen?String(u.stokta||0):"0");
+  const [gram,setGram]=useState(duzen?(u.gram?String(u.gram):""):"");
   const [parcalar,setParcalar]=useState(duzen?((u.parcalar||[]).slice()):[]);
   const [pYeni,setPYeni]=useState("");
   const pEkle=()=>{ const t=pYeni.trim(); if(t&&!parcalar.includes(t)) setParcalar(x=>[...x,t]); setPYeni(""); };
   return h(Sheet,{ik:duzen?"✏️":"➕",hex:"#d97b12",baslik:duzen?("Düzenle · "+(u.ad||"")):"Yeni ürün",
     alt:"eski panelle ortak ürün kartı",onClose:()=>onKaydet(null),
     cta:bekle?"⏳…":(duzen?"💾 Kaydet":"➕ Ürünü ekle"),disabled:!ad.trim()||bekle,
-    onCta:()=>onKaydet({id:duzen?u.id:null,ad:ad.trim(),satisFiyat:num(satis),pazFiyat:num(alis),stokta:num(stokta),parcalar,_eskiStok:duzen?num(u.stokta):0})},
+    onCta:()=>onKaydet({id:duzen?u.id:null,ad:ad.trim(),satisFiyat:num(satis),pazFiyat:num(alis),stokta:num(stokta),gram:num(gram),parcalar,_eskiStok:duzen?num(u.stokta):0})},
     h("div",{className:"lbl",style:{marginBottom:8}},"Ürün adı *"),
     h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Ahtapot",style:{...inp,marginBottom:14}}),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
@@ -594,6 +611,8 @@ function UrunDuzenSheet({u,onKaydet,bekle}){
         h("input",{type:"number",inputMode:"numeric",value:alis,onChange:e=>setAlis(e.target.value),style:inp}))),
     h("div",{className:"lbl",style:{marginBottom:8}},"📦 Atölye stoğu — elle düzeltme loglanır"),
     h("input",{type:"number",inputMode:"numeric",value:stokta,onChange:e=>setStokta(e.target.value),style:{...inp,marginBottom:14}}),
+    h("div",{className:"lbl",style:{marginBottom:8}},"⚖️ Parça başı gram (baskı kaydında adet×gram otomatik dolar)"),
+    h("input",{type:"number",inputMode:"numeric",value:gram,onChange:e=>setGram(e.target.value),placeholder:"örn. 45",style:{...inp,marginBottom:14}}),
     h("div",{className:"lbl",style:{marginBottom:8}},"🧩 Parçalar (takım ürünlerde)"),
     parcalar.length?h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}},
       parcalar.map(pt=>h("button",{key:pt,onClick:()=>setParcalar(x=>x.filter(y=>y!==pt)),
@@ -868,8 +887,11 @@ function App(){
       }
       setModal(null); say((eski?"💾 Kaydedildi":"➕ İş planlandı")+" · "+kayit.ad); }
     catch(e){ console.error(e); say("⚠ Planlanamadı — tekrar dene"); } finally{ setIsBekle(false); } }
+  async function baskiKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
+    try{ await save("plan",p2); setModal(null); say("📋 Baskı kaydedildi · "+(p2.ad||"iş")+" ×"+num(p2.adet)); }
+    catch(e){ console.error(e); say("⚠ Kaydedilemedi — tekrar dene"); } finally{ setIsBekle(false); } }
   async function urunKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
-    try{ const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,parcalar:p2.parcalar});
+    try{ const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar});
       const delta=p2.stokta-(p2._eskiStok||0);
       if(delta) await stokLogla({id,ad:p2.ad},delta,"elle");   // elle düzeltme logu — eski panel uyumu
       setModal(null); say((p2.id?"💾 Güncellendi":"➕ Ürün eklendi")+" · "+p2.ad); }
@@ -927,9 +949,8 @@ function App(){
       h("button",{onClick:silGeriAl,style:{flexShrink:0,padding:"7px 12px",borderRadius:10,background:"var(--cyan)",color:"#fff",fontSize:12.5,fontWeight:800}},"↩️ Geri al")):null,
     h(Toast,{msg:toastMsg}),
     modal&&modal.tip==="makine"&&h(MakineSheet,{m:modal.m,onClose:()=>setModal(null),
-      onKomut:(cmd)=>makKomut(modal.m.mk,cmd),onTablaBasla:()=>tablaVeBasla(modal.m),siradaki:siradakiIs(modal.m.mk),
-      onSdBaslat:(dosya)=>{ save("makine_komut",{makineAd:modal.m.mk.ad,cmd:"basla",dosya,plate:1,useAms:false,tarih:new Date().toISOString()}).then(()=>say("▶️ Başlat yollandı: "+dosya)).catch(()=>say("⚠ Yollanamadı")); },
-      onSdTara:()=>{ save("makine_komut",{makineAd:modal.m.mk.ad,cmd:"sd_tara",tarih:new Date().toISOString()}).then(()=>say("🔄 SD taranıyor…")).catch(()=>say("⚠ Yollanamadı")); }}),
+      onKaydet:()=>setModal({tip:"baskiKaydet",m:modal.m})}),
+    modal&&modal.tip==="baskiKaydet"&&h(BaskiKaydetSheet,{m:modal.m,urunler,bekle:isBekle,onKaydet:baskiKaydet}),
     modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,onClose:()=>setModal(null),onBaslat:()=>isBaslat(modal.x),onSil:()=>isSil(modal.x),
       onDuzen:()=>setModal({tip:"isEkle",kayit:modal.x.p})}),
     modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,bekle:isBekle,onKaydet:isKaydet,kayit:modal.kayit||null}),
