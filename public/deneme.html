@@ -51,7 +51,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v38";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v39";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -911,23 +911,38 @@ const inp={width:"100%",padding:"13px 14px",borderRadius:13,border:"1px solid va
 function Chip({on,onClick,children}){ return h("button",{onClick,style:{flexShrink:0,padding:"9px 13px",borderRadius:11,fontSize:13,fontWeight:800,
   background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},children); }
 
-// 💬 KOMUTA HATTI — pazarlamacıdan komutaya talep + gelen cevaplar
-function TalepSheet({talepler,onGonder,onClose}){
+// 💬 KOMUTA HATTI — pazarlamacı ↔ komuta (talep gönder · gelen mesajları yanıtla · konum paylaş)
+function TalepSheet({talepler,onGonder,onCevapla,onKonum,onClose}){
   const [mesaj,setMesaj]=useState(""); const [tip,setTip]=useState("");
+  const [yanit,setYanit]=useState({});   // talepId -> cevap metni
+  const [kbekle,setKbekle]=useState(false);
   const tipler=[["📦 Stok/ürün","stok"],["⚡ Acil","acil"],["💬 Genel","genel"]];
-  const gecmis=(talepler||[]).slice(0,10);
-  return h(Sheet,{ik:"💬",hex:"#0e8fce",baslik:"Komuta hattı",alt:"komutaya/üretime ilet — cevabı burada görürsün",onClose,
+  const gecmis=(talepler||[]).slice(0,12);
+  const konumPaylas=t=>{ if(kbekle) return; if(!navigator.geolocation) return alert("Cihaz konum desteklemiyor."); setKbekle(true);
+    navigator.geolocation.getCurrentPosition(pos=>{ setKbekle(false); onKonum(t,pos.coords.latitude,pos.coords.longitude); },
+      err=>{ setKbekle(false); alert("Konum alınamadı: "+(err.message||"izin verilmedi")); },{enableHighAccuracy:true,timeout:12000}); };
+  return h(Sheet,{ik:"💬",hex:"#0e8fce",baslik:"Komuta hattı",alt:"komutaya ilet · gelen mesajları yanıtla",onClose,
     cta:"📨 Gönder",disabled:!mesaj.trim(),onCta:()=>onGonder({mesaj:mesaj.trim(),tip})},
     h("div",{style:{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}},tipler.map(([lbl,k])=>h(Chip,{on:tip===k,onClick:()=>setTip(tip===k?"":k)},lbl))),
     h("textarea",{value:mesaj,onChange:e=>setMesaj(e.target.value),rows:3,placeholder:"örn. 50 ahtapot lazım · X kalede sıkıntı var · şu ürün bitmek üzere",
-      style:{...inp,minHeight:90,resize:"vertical",fontSize:15,fontWeight:600}}),
+      style:{...inp,minHeight:88,resize:"vertical",fontSize:15,fontWeight:600,marginBottom:10}}),
+    h("button",{onClick:()=>konumPaylas(null),disabled:kbekle,style:{width:"100%",padding:12,borderRadius:12,fontSize:13.5,fontWeight:800,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--cyan)"}},kbekle?"⏳ Konum alınıyor…":"📍 Anlık konumumu komutaya paylaş"),
     gecmis.length?h("div",{style:{marginTop:18}},
-      h("div",{className:"lbl",style:{marginBottom:8}},"📨 Önceki taleplerin"),
-      gecmis.map((t,i)=>h("div",{key:i,style:{padding:"11px 13px",borderRadius:13,background:"var(--surf2)",marginBottom:9}},
-        h("div",{style:{fontSize:13.5,fontWeight:700}},(t.tip?("["+t.tip+"] "):"")+t.mesaj),
+      h("div",{className:"lbl",style:{marginBottom:8}},"📨 Yazışmalar"),
+      gecmis.map((t,i)=>{ const komutadan=t.kaynak==="komuta";
+        return h("div",{key:i,style:{padding:"11px 13px",borderRadius:13,background:komutadan?"#eef6ff":"var(--surf2)",border:komutadan?"1px solid #cfe6fb":"none",marginBottom:9}},
+        h("div",{style:{fontSize:13.5,fontWeight:700,color:komutadan?"#0b5f92":"var(--txt)"}},(komutadan?"👑 Komuta: ":(t.tip?("["+t.tip+"] "):""))+t.mesaj),
         h("div",{style:{fontSize:10.5,color:"var(--mut2)",marginTop:3}},once(new Date(t.tarih).getTime())+" · "+(t.durum==="kapandi"?"✅ kapandı":"⏳ bekliyor")),
-        t.cevap?h("div",{style:{marginTop:7,padding:"9px 11px",borderRadius:10,background:"#eef6ff",border:"1px solid #cfe6fb",fontSize:13.5,fontWeight:600,color:"#0b5f92"}},"👑 Komuta: "+t.cevap):null))):
-      h("div",{style:{marginTop:16,fontSize:12,color:"var(--mut2)",textAlign:"center"}},"Henüz talep göndermedin."));
+        // komuta konum istediyse paylaş butonu
+        (komutadan&&t.konumIste&&!(t.lat&&t.lng))?h("button",{onClick:()=>konumPaylas(t),disabled:kbekle,style:{marginTop:8,width:"100%",padding:10,borderRadius:10,background:"var(--cyan)",color:"#fff",fontSize:13,fontWeight:800}},kbekle?"⏳ Konum alınıyor…":"📍 Anlık konumumu paylaş"):null,
+        (t.lat&&t.lng)?h("div",{style:{marginTop:7,fontSize:12,color:"var(--green)",fontWeight:700}},"📍 Konum paylaşıldı ✓"):null,
+        // komutadan gelen mesaja yazılı yanıt
+        (komutadan&&!t.cevap&&t.durum!=="kapandi")?h("div",{style:{marginTop:8,display:"flex",gap:6}},
+          h("input",{value:yanit[t.id]||"",onChange:e=>setYanit(s=>({...s,[t.id]:e.target.value})),placeholder:"yanıt yaz…",style:{...inp,flex:1,fontSize:14,padding:"10px 12px"}}),
+          h("button",{onClick:()=>{ const v=(yanit[t.id]||"").trim(); if(v) onCevapla(t,v); },style:{flexShrink:0,padding:"0 14px",borderRadius:12,background:"var(--cyan)",color:"#fff",fontWeight:800,fontSize:13}},"→")):null,
+        // yanıt/cevap (her iki yön)
+        t.cevap?h("div",{style:{marginTop:7,padding:"9px 11px",borderRadius:10,background:komutadan?"var(--surf2)":"#eef6ff",border:"1px solid var(--line)",fontSize:13.5,fontWeight:600,color:komutadan?"var(--txt)":"#0b5f92"}},(komutadan?"↩️ sen: ":"👑 Komuta: ")+t.cevap):null); })):
+      h("div",{style:{marginTop:16,fontSize:12,color:"var(--mut2)",textAlign:"center"}},"Henüz yazışma yok."));
 }
 
 // işlem tipi → XP (his için; veriye yazmıyor)
@@ -1549,7 +1564,12 @@ function App(){
   // 💬 komuta hattı — Emir'in talepleri + cevaplar
   const emirTalep=useMemo(()=>(talepler||[]).filter(t=>(t.kullaniciId||"")===emirId).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),[talepler,emirId]);
   const talepYeniCevap=emirTalep.filter(t=>t.cevap&&t.durum==="kapandi").length;
-  async function talepGonder(p){ try{ await save("talep",{kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir",simge:(d&&d.emir&&d.emir.simge)||"🎖️",mesaj:p.mesaj,tip:p.tip||"",durum:"acik",tarih:new Date().toISOString()}); setSheet(null); say("📨 Komutaya iletildi"); }catch(e){ console.error(e); say("⚠ İletilemedi"); } }
+  async function talepGonder(p){ try{ await save("talep",{kaynak:"pazarlamaci",kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir",simge:(d&&d.emir&&d.emir.simge)||"🎖️",mesaj:p.mesaj,tip:p.tip||"",durum:"acik",tarih:new Date().toISOString()}); setSheet(null); say("📨 Komutaya iletildi"); }catch(e){ console.error(e); say("⚠ İletilemedi"); } }
+  async function talepCevapla(t,cevap){ try{ await save("talep",{id:t.id,cevap,durum:"kapandi",cevapTarih:new Date().toISOString()}); say("↩️ Yanıt gönderildi"); }catch(e){ console.error(e); say("⚠ Gönderilemedi"); } }
+  async function talepKonum(t,lat,lng){ try{
+      if(t&&t.id) await save("talep",{id:t.id,lat:String(lat),lng:String(lng),cevap:t.cevap||"📍 konum paylaşıldı",durum:"kapandi",cevapTarih:new Date().toISOString()});
+      else await save("talep",{kaynak:"pazarlamaci",kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir",simge:(d&&d.emir&&d.emir.simge)||"🎖️",mesaj:"📍 Anlık konumumu paylaştım",lat:String(lat),lng:String(lng),durum:"acik",tarih:new Date().toISOString()});
+      say("📍 Konum komutaya iletildi"); }catch(e){ console.error(e); say("⚠ İletilemedi"); } }
   // Emir'in kendi hareketleri + hızlı geri alma listesi (son 48 saat)
   const emirHar=useMemo(()=>hareketler.filter(x=>(x.kullaniciId||"")===emirId),[hareketler,emirId]);
   const ov=useMemo(()=>emirHar.filter(x=>new Date(x.tarih).getTime()>=Date.now()-48*3600e3)
@@ -1801,7 +1821,7 @@ function App(){
       : sheet.type==="gecmis"
       ? h(GecmisSheet,{k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})
       : sheet.type==="talep"
-      ? h(TalepSheet,{talepler:emirTalep,onGonder:talepGonder,onClose:()=>setSheet(null)})
+      ? h(TalepSheet,{talepler:emirTalep,onGonder:talepGonder,onCevapla:talepCevapla,onKonum:talepKonum,onClose:()=>setSheet(null)})
       : h(ActionSheet,{type:sheet.type,k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})),
     (!kaleGuncel&&view==="us")?h("button",{onClick:()=>setSheet({type:"talep"}),
       style:{position:"fixed",right:16,bottom:"calc(env(safe-area-inset-bottom,0px) + 150px)",zIndex:36,width:54,height:54,borderRadius:"50%",background:"linear-gradient(135deg,#1e3a5f,#0e8fce)",color:"#fff",fontSize:24,boxShadow:"0 8px 22px rgba(14,143,206,.42)",display:"flex",alignItems:"center",justifyContent:"center"}},"💬",
