@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A21";   // komuta (admin) deneme sürümü
+const SURUM="A22";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1132,9 +1132,9 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const donemler=[["bugun","Bugün"],["hafta","Bu hafta"],["ay","Bu ay"],["30","30 gün"]];
   const b0=(()=>{const g=new Date();g.setHours(0,0,0,0);
     if(kod==="bugun") return g.getTime();
-    if(kod==="hafta"){const d2=new Date(g);d2.setDate(d2.getDate()-((d2.getDay()+6)%7));return d2.getTime();}
-    if(kod==="ay") return new Date(g.getFullYear(),g.getMonth(),1).getTime();
-    return Date.now()-30*864e5;})();
+    if(kod==="hafta") return g.getTime()-6*864e5;   // son 7 gün (bugün dahil) — gerçek admin ile aynı
+    if(kod==="ay") return new Date(g.getFullYear(),g.getMonth(),1).getTime();   // takvim ayı
+    return g.getTime()-29*864e5;})();   // son 30 gün
   const R=(hareketler||[]).filter(x=>new Date(x.tarih).getTime()>=b0);
   let ciro=0,adet=0; R.forEach(x=>{ if(x.tip==="satis"&&!x.gerilla){ciro+=num(x.adet)*num(x.satisFiyat);adet+=num(x.adet);} });
   // pazarlamacı performansı (dönem) — önce üretici modeli
@@ -1156,6 +1156,8 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     let sat=0,kons=0,sonT=0; mh.forEach(x=>{ const t=new Date(x.tarih).getTime()||0; if(t>sonT)sonT=t; if(x.tip==="satis"&&!x.gerilla) sat+=num(x.adet)*num(x.satisFiyat); if(x.tip==="konsinye"&&num(x.kalan)>0) kons+=num(x.kalan); });
     return {m,sat,kons,sonT}; }).sort((a,b)=>b.sat-a.sat);
   const alacakList=(ekip||[]).filter(e=>e.alacak>0.5).sort((a,b)=>b.alacak-a.alacak);
+  const mekanTop=new Set(R.filter(x=>(x.yer||"").trim()&&["satis","konsinye","tahsilat"].includes(x.tip)).map(x=>(x.yer||"").toLocaleLowerCase("tr"))).size;
+  const konsTopAd=konsList.reduce((s,k)=>s+k.adet,0), konsTopTut=konsList.reduce((s,k)=>s+k.tutar,0), alacakTop=alacakList.reduce((s,e)=>s+e.alacak,0);
   const Tbl=(head,rows)=>h("div",{style:{overflowX:"auto",marginBottom:16}},
     h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:head.length*66}},
       h("thead",null,h("tr",null,head.map((hh,i)=>h("th",{key:i,style:{textAlign:i?"right":"left",padding:"7px 8px",color:"var(--mut)",fontWeight:800,whiteSpace:"nowrap",borderBottom:"1.5px solid var(--line)",position:i?"static":"sticky",left:0,background:"var(--bg)"}},hh)))),
@@ -1180,7 +1182,12 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         h(Stat,{ik:"🧾",v:tl(T.tah),l:"tahsil edilen",renk:"var(--gold)"}),
         h(Stat,{ik:"🫰",v:tl(T.hakedis),l:"toplam hakediş",renk:"var(--gold)"}),
         h(Stat,{ik:"🏭",v:tl(T.uBorc),l:"üreticiye kalan",renk:"var(--txt)"}),
-        h(Stat,{ik:"🧹",v:tl(T.tablaKaz),l:T.tabla+" tabla değişimi",renk:"var(--violet)"})),
+        h(Stat,{ik:"🧹",v:tl(T.tablaKaz),l:T.tabla+" tabla değişimi",renk:"var(--violet)"}),
+        h(Stat,{ik:"🏬",v:konsTopAd+" ad",l:"açık konsinye ("+tl(konsTopTut)+") ›",renk:"var(--violet)",onClick:()=>setAlt("kons")}),
+        h(Stat,{ik:"💰",v:tl(alacakTop),l:"net açık alacak ›",renk:alacakTop>0.5?"var(--red)":"var(--green)",onClick:()=>setAlt("alacak")}),
+        h(Stat,{ik:"🎖️",v:perf.length+" / "+(ekip||[]).length,l:"aktif pazarlamacı",renk:"var(--txt)"}),
+        h(Stat,{ik:"📍",v:String(mekanTop),l:"uğranılan mekan",renk:"var(--cyan)"}),
+        h(Stat,{ik:"📦",v:d.planAdet+" ad",l:"bu hafta planlanan üretim",renk:"var(--gold)"})),
       h("div",{className:"lbl",style:{marginBottom:8}},"🏅 Pazarlamacı performansı"),
       perf.length?Tbl(["Pazarlamacı","Satış","Ciro","⚡Ger.","Kons.","Tahsilat","Hakediş","Mekan"],
         perf.map(p=>[(p.u.simge||"")+" "+p.u.ad,p.satA+" ad",tl(p.satT),p.gerA+"·"+tl(p.gerC),p.konsA+" ad",tl(p.nakit),tl(p.hakedis),String(p.mekan)])):h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",fontSize:12.5}},"Bu dönemde hareket yok."),
