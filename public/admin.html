@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A23";   // komuta (admin) deneme sürümü
+const SURUM="A24";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -801,7 +801,7 @@ function KullaniciSheet({u,onKaydet,bekle}){
 }
 
 /* ————— EKRANLAR ————— */
-function Us({d,ac,hareketler,go,talepler,onTalep}){
+function Us({d,ac,hareketler,go,talepler,onTalep,onMesaj}){
   const P="20px 16px 0";
   const har=hareketler||[];
   const et={satis:"💰",tahsilat:"🧾",konsinye:"🏬",iade:"↩️",stant:"🎪",diplomasi:"🤝"};
@@ -820,13 +820,15 @@ function Us({d,ac,hareketler,go,talepler,onTalep}){
         acikTalep.slice(0,8).map((t,i)=>h("button",{key:i,onClick:()=>onTalep(t),className:"card",style:{display:"flex",gap:10,padding:"12px 14px",textAlign:"left",width:"100%",boxShadow:"none",border:"1px solid #fdba74",background:"#fffbf5"}},
           h("span",{style:{fontSize:20,flexShrink:0}},t.simge||"💬"),
           h("div",{style:{flex:1,minWidth:0}},
-            h("div",{style:{fontSize:13.5,fontWeight:800}},(t.kullaniciAd||"?")+(t.tip?(" · "+t.tip):"")),
+            h("div",{style:{fontSize:13.5,fontWeight:800}},(t.kaynak==="komuta"?"📤 ":"📥 ")+(t.kullaniciAd||"?")+(t.tip?(" · "+t.tip):"")),
             h("div",{style:{fontSize:12.5,color:"var(--txt)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},t.mesaj),
-            h("div",{style:{fontSize:10.5,color:"var(--mut)",marginTop:2}},once(new Date(t.tarih).getTime())+(t.cevap?" · ✅ cevaplandı":""))),
-          h("span",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",flexShrink:0,alignSelf:"center"}},t.cevap?"›":"Cevapla ›"))))):null,
+            h("div",{style:{fontSize:10.5,color:"var(--mut)",marginTop:2}},once(new Date(t.tarih).getTime())+(t.cevap?" · ✅ yanıtlandı":(t.lat?" · 📍 konum geldi":"")))),
+          h("span",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",flexShrink:0,alignSelf:"center"}},t.kaynak==="komuta"?"gör ›":(t.cevap?"›":"Cevapla ›")))))):null,
     // 📡 SAHADA — pazarlamacılar, en son ne yaptı / nerede
     h("div",{style:{padding:P}},
-      h(SecBaslik,{no:"1",txt:"📡 SAHADA · PAZARLAMACILAR",ek:d.ekip.length+" kişi"}),
+      h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,paddingLeft:2}},
+        h(SecBaslik,{no:"1",txt:"📡 SAHADA · PAZARLAMACILAR",ek:d.ekip.length+" kişi"}),
+        onMesaj?h("button",{onClick:onMesaj,style:{flexShrink:0,padding:"7px 12px",borderRadius:11,background:"var(--cyan)",color:"#fff",fontSize:12,fontWeight:800,marginLeft:8}},"✉️ Mesaj"):null),
       h("div",{style:{display:"grid",gap:8}},
         d.ekip.length?d.ekip.map((e,i)=>{ const s2=sonHar[e.u.id];
           return h("button",{key:i,onClick:()=>ac({tip:"ekip",e}),className:"card",style:{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",textAlign:"left",width:"100%",boxShadow:"none"}},
@@ -857,16 +859,34 @@ function Us({d,ac,hareketler,go,talepler,onTalep}){
           h("span",{style:{color:"var(--mut2)"}},"›")):null)):null,
     h("div",{style:{height:24}}));
 }
-// 💬 TALEP CEVAP — pazarlamacının talebine komutadan cevap
+// 💬 TALEP CEVAP — gelen talebe cevap · veya gönderilen mesajın yanıtını gör
 function TalepCevapSheet({talep,onKaydet,bekle}){
+  const komutadan=talep.kaynak==="komuta";
   const [cevap,setCevap]=useState(talep.cevap||"");
   const kapali=talep.durum==="kapandi";
-  return h(Sheet,{ik:talep.simge||"💬",hex:"#d97b12",baslik:"Talep · "+(talep.kullaniciAd||""),alt:once(new Date(talep.tarih).getTime())+(talep.tip?(" · "+talep.tip):""),onClose:()=>onKaydet(null),
-    cta:bekle?"⏳…":"📩 Cevabı gönder & kapat",disabled:bekle,onCta:()=>onKaydet({...talep,cevap:cevap.trim(),durum:"kapandi"})},
-    h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",marginBottom:14,fontSize:14.5,fontWeight:600,lineHeight:1.5}},talep.mesaj),
-    h("div",{className:"lbl",style:{marginBottom:8}},"Cevabın (pazarlamacı görecek)"),
-    h("textarea",{value:cevap,onChange:e=>setCevap(e.target.value),rows:3,placeholder:"örn. 50 ahtapot yarın çantana hazır olacak",style:{...inp,minHeight:82,resize:"vertical",fontSize:15,fontWeight:600}}),
-    h("button",{onClick:()=>onKaydet({...talep,durum:kapali?"acik":"kapandi",cevap:cevap.trim()}),style:{width:"100%",padding:11,borderRadius:12,marginTop:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},kapali?"↩️ Tekrar aç":"Cevapsız kapat"));
+  return h(Sheet,{ik:komutadan?"✉️":(talep.simge||"💬"),hex:"#d97b12",baslik:(komutadan?"Mesaj · ":"Talep · ")+(talep.kullaniciAd||""),alt:once(new Date(talep.tarih).getTime())+(talep.tip?(" · "+talep.tip):""),onClose:()=>onKaydet(null),
+    cta:bekle?"⏳…":(komutadan?"✔ Kapat":"📩 Cevabı gönder & kapat"),disabled:bekle,onCta:()=>onKaydet({...talep,cevap:komutadan?(talep.cevap||""):cevap.trim(),durum:"kapandi"})},
+    h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",marginBottom:12,fontSize:14.5,fontWeight:600,lineHeight:1.5}},(komutadan?"📤 sen: ":"📥 ")+talep.mesaj),
+    (talep.lat&&talep.lng)?h("a",{href:"https://www.google.com/maps?q="+talep.lat+","+talep.lng,target:"_blank",style:{display:"block",padding:"12px 14px",borderRadius:12,background:"#0e8fce14",border:"1px solid #0e8fce44",fontSize:14,fontWeight:800,color:"var(--cyan)",textAlign:"center",marginBottom:12}},"🗺️ Paylaşılan konumu haritada aç"):null,
+    komutadan?h(React.Fragment,null,
+      talep.konumIste?h("div",{style:{fontSize:11.5,fontWeight:700,color:"var(--cyan)",marginBottom:8}},"📍 Anlık konum istendi"):null,
+      talep.cevap?h("div",{style:{padding:"11px 13px",borderRadius:12,background:"#eef6ff",border:"1px solid #cfe6fb",fontSize:14,fontWeight:600,color:"#0b5f92"}},"↩️ "+(talep.kullaniciAd||"Pazarlamacı")+": "+talep.cevap):((talep.lat&&talep.lng)?null:h("div",{style:{fontSize:12.5,color:"var(--mut)",textAlign:"center",padding:"6px 0"}},"Henüz yanıtlamadı.")))
+    :h(React.Fragment,null,
+      h("div",{className:"lbl",style:{marginBottom:8}},"Cevabın (pazarlamacı görecek)"),
+      h("textarea",{value:cevap,onChange:e=>setCevap(e.target.value),rows:3,placeholder:"örn. 50 ahtapot yarın çantana hazır olacak",style:{...inp,minHeight:82,resize:"vertical",fontSize:15,fontWeight:600}}),
+      h("button",{onClick:()=>onKaydet({...talep,durum:kapali?"acik":"kapandi",cevap:cevap.trim()}),style:{width:"100%",padding:11,borderRadius:12,marginTop:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},kapali?"↩️ Tekrar aç":"Cevapsız kapat")));
+}
+// ✉️ KOMUTA → PAZARLAMACI mesaj yaz
+function KomutaMesajSheet({ekip,onKaydet,bekle}){
+  const [kime,setKime]=useState((ekip&&ekip[0]&&ekip[0].u.id)||"");
+  const [mesaj,setMesaj]=useState("");
+  const [konum,setKonum]=useState(false);
+  return h(Sheet,{ik:"✉️",hex:"#0e8fce",baslik:"Pazarlamacıya mesaj",alt:"komutadan bildir — pazarlamacı görüp yanıtlar",onClose:()=>onKaydet(null),
+    cta:bekle?"⏳…":"📨 Gönder",disabled:(!mesaj.trim()&&!konum)||!kime||bekle,onCta:()=>onKaydet({kullaniciId:kime,mesaj:mesaj.trim()||(konum?"📍 Anlık konumunu paylaşır mısın?":""),konumIste:konum})},
+    h("div",{className:"lbl",style:{marginBottom:8}},"Kime"),
+    h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:14}},(ekip||[]).map(e=>h(Chip,{key:e.u.id,on:kime===e.u.id,onClick:()=>setKime(e.u.id)},(e.u.simge||"")+" "+e.u.ad))),
+    h("textarea",{value:mesaj,onChange:e=>setMesaj(e.target.value),rows:3,placeholder:"örn. Yarın sabah stant için Kadıköy'e geç · Şu kaleye mutlaka uğra",style:{...inp,minHeight:88,resize:"vertical",fontSize:15,fontWeight:600,marginBottom:10}}),
+    h("button",{onClick:()=>setKonum(v=>!v),style:{width:"100%",padding:12,borderRadius:12,fontSize:13.5,fontWeight:800,background:konum?"#0e8fce":"var(--surf2)",color:konum?"#fff":"var(--cyan)",border:"1px solid "+(konum?"#0e8fce":"var(--line)")}},(konum?"✅ ":"📍 ")+"Anlık konum iste"));
 }
 function Uretim({d,plan,makineler,ac,onTabla}){
   const simdi=Date.now();
@@ -1341,6 +1361,10 @@ function App(){
   async function talepCevap(t){ if(t===null){ setModal(null); return; } if(!t||!t.id) return; if(isBekle) return; setIsBekle(true);
     try{ await save("talep",{id:t.id,cevap:t.cevap||"",durum:t.durum||"kapandi",cevapTarih:new Date().toISOString()}); setModal(null); say(t.durum==="kapandi"?"📩 Talep cevaplandı":"↩️ Talep tekrar açıldı"); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  async function talepYaz(p){ if(p===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
+    const kad=(kullanicilar||[]).find(u=>u.id===p.kullaniciId);
+    try{ await save("talep",{kaynak:"komuta",kullaniciId:p.kullaniciId,kullaniciAd:kad?kad.ad:"",simge:kad?(kad.simge||"👑"):"👑",mesaj:p.mesaj,konumIste:!!p.konumIste,durum:"acik",tarih:new Date().toISOString()}); setModal(null); say("📨 Mesaj gönderildi"); }
+    catch(e){ console.error(e); say("⚠ Gönderilemedi"); } finally{ setIsBekle(false); } }
   async function stokAksiyon(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     const {u,tip}=p2; const n=Math.max(1,Math.round(num(p2.adet)));
     try{ if(tip==="uret"){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)+n}); await stokLogla(u,+n,"uretim"); }
@@ -1382,7 +1406,7 @@ function App(){
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Komuta merkezi hazırlanıyor…"));
   let ekran;
-  if(view==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t})});
+  if(view==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"})});
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
@@ -1410,6 +1434,7 @@ function App(){
     modal&&modal.tip==="filamentDuzen"&&h(FilamentDuzenSheet,{fl:modal.fl,bekle:isBekle,onKaydet:filamentKaydet,onSil:filamentSil}),
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
     modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap}),
+    modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
     modal&&modal.tip==="urunDuzen"&&h(UrunDuzenSheet,{u:modal.u,bekle:isBekle,onKaydet:urunKaydet}),
     modal&&modal.tip==="kullanici"&&h(KullaniciSheet,{u:modal.u,bekle:isBekle,onKaydet:kullaniciKaydet}),
     modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:modal.e.u})}),
