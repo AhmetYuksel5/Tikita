@@ -51,7 +51,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v41";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v42";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -200,7 +200,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
     if(!k.ad&&x.yer)k.ad=x.yer; if(!k.bolge&&x.bolge)k.bolge=x.bolge; });
   const acikK={},borcK={},sonK={},ovTah={},ovCoz={},ovCozList={},marjK={},tahByK={};
   (hareketler||[]).forEach(x=>{ if(x.gerilla) return; const k=kk(x); const t=new Date(x.tarih).getTime()||0;
-    if(["satis","konsinye","iade","tahsilat","stant","diplomasi"].includes(x.tip)) sonK[k]=Math.max(sonK[k]||0,t);
+    if(["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi"].includes(x.tip)) sonK[k]=Math.max(sonK[k]||0,t);
     // deneme (overlay) yazımları: gerçek kayda dokunmadan borç/konsinyeyi düzelt
     if(x._ov){ if(x.tip==="tahsilat") ovTah[k]=(ovTah[k]||0)+num(x.tutar);
       if((x.tip==="satis"&&x.kaynak==="konsinye")||x.tip==="iade"){ const ad=x.urunAd||"?";
@@ -779,6 +779,7 @@ function Nav({aktif,go}){ const items=[["us","⛺","Üs"],["kaleler","🏰","Kal
 function ovOzet(x){
   if(x.tip==="tahsilat") return {ik:"🧾",t:"Tahsilat",v:tl(x.tutar)};
   if(x.tip==="konsinye") return {ik:"🏬",t:"Konsinye bırakıldı",v:num(x.adet)+" × "+(x.urunAd||"?")};
+  if(x.tip==="hediye") return {ik:"🎁",t:"Hediye edildi",v:num(x.adet)+" × "+(x.urunAd||"?")};
   if(x.tip==="iade") return {ik:"↩️",t:"İade",v:num(x.adet)+" × "+(x.urunAd||"?")};
   if(x.tip==="satis"&&x.kaynak==="konsinye") return {ik:"🏬",t:"Konsinye satış",v:num(x.adet)+" × "+(x.urunAd||"?")};
   if(x.tip==="satis"&&x.gerilla) return {ik:"⚡",t:"Gerilla satış",v:num(x.adet)+" × "+(x.urunAd||"?")};
@@ -1020,15 +1021,15 @@ function ActionSheet({type,k,d,onClose,onFire}){
   }
   if(type==="konsinye"){
     const modlar=[["birak","🏬 Bırak"],["satis","💰 Satış"],["iade","↩️ İade"]];
-    const durumlar=[["konsinye","🏬 Konsinye"],["hediye","🎁 Hediye"],["odunc","🤝 Ödünç"]];
+    const durumlar=[["konsinye","🏬 Konsinye"],["hediye","🎁 Hediye"]];
     const secili=d.cephane.filter(u=>num(lines[u.id])>0);
     const topAdet=secili.reduce((s,u)=>s+num(lines[u.id]),0);
     const topDeger=secili.reduce((s,u)=>s+num(lines[u.id])*num(u.fiyat),0);
     const kToplam=adet*num(kfiyat);
-    const birakCta=(birakMod==="hediye"?"🎁 ":birakMod==="odunc"?"🤝 ":"🏬 ")+topAdet+" adet "+(birakMod==="hediye"?"hediye et":birakMod==="odunc"?"ödünç ver":"konsinye bırak");
+    const birakCta=(birakMod==="hediye"?"🎁 ":"🏬 ")+topAdet+" adet "+(birakMod==="hediye"?"hediye et":"konsinye bırak");
     const cta=kmod==="birak"?birakCta:kmod==="satis"?("💰 "+(num(kfiyat)>0?tl(kToplam)+" ":"")+"konsinye satışı"):"↩️ Konsinye iade";
     const gecerli=kmod==="birak"?(secili.length>0):(!!kkalem.ad&&adet>0&&(kmod!=="satis"||num(kfiyat)>0));
-    const onOk=()=>{ if(kmod==="birak") fire(topAdet+" adet "+(birakMod==="hediye"?"hediye edildi":birakMod==="odunc"?"ödünç verildi":"konsinye bırakıldı")+" · "+(k?k.ad:""),XP.konsinye,{kmod:"birak",items:secili.map(u=>({urun:u,adet:num(lines[u.id])})),mod:birakMod,kalici:true});
+    const onOk=()=>{ if(kmod==="birak") fire(topAdet+" adet "+(birakMod==="hediye"?"hediye edildi":"konsinye bırakıldı")+" · "+(k?k.ad:""),XP.konsinye,{kmod:"birak",items:secili.map(u=>({urun:u,adet:num(lines[u.id])})),mod:birakMod,kalici:true});
       else fire(adet+" konsinye "+(kmod==="satis"?("satıldı ("+tl(kToplam)+")"):"iade edildi")+" · "+(k?k.ad:""),XP.konsinye,{kmod,kkalem,adet,fiyat:num(kfiyat),kalici:true}); };
     const kalemSec=c=>{ setKkalem(c); setAdet(c.adet);
       setKfiyat(String(num((d.cephane.find(u2=>u2.ad===c.ad)||{}).fiyat)||"")); };
@@ -1046,7 +1047,7 @@ function ActionSheet({type,k,d,onClose,onFire}){
               d.cephane.slice(0,20).map((u,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 11px",borderRadius:12,background:num(lines[u.id])>0?"#7c46e60d":"var(--surf2)",border:"1px solid "+(num(lines[u.id])>0?"#7c46e644":"var(--line)")}},
                 h("div",{style:{flex:1,minWidth:0}},
                   h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(u.canta>0?"🎒 ":"")+u.ad),
-                  h("div",{style:{fontSize:11,color:"var(--mut)"}},"çantanda "+u.canta+" · "+(birakMod==="hediye"?"🎁 hediye":birakMod==="odunc"?("🤝 ödünç · "+tl(u.fiyat)+"/ad"):(tl(u.fiyat)+"/ad")))),
+                  h("div",{style:{fontSize:11,color:"var(--mut)"}},"çantanda "+u.canta+" · "+(birakMod==="hediye"?"🎁 hediye":(tl(u.fiyat)+"/ad")))),
                 h("input",{type:"number",inputMode:"numeric",placeholder:"0",value:lines[u.id]||"",onChange:e=>setLines(s=>({...s,[u.id]:e.target.value})),style:{...inp,width:74,textAlign:"center",padding:"10px 8px",fontSize:15}})))),
             secili.length?h("div",{style:{textAlign:"center",marginTop:12,fontSize:13.5,fontWeight:700,color:"var(--violet)"}},topAdet+" adet"+(birakMod!=="hediye"?(" · toplam "+tl(topDeger)):" · hediye")):null)
         : (konsList.length>0
@@ -1683,10 +1684,16 @@ function App(){
     } else if(p.type==="konsinye"){
       if(p.kmod==="birak"){ const items=p.items||[{urun:p.urun||{},adet:p.adet}]; const kmod2=p.mod||"konsinye";
         for(const it of items){ const u=it.urun||{}; const ad=num(it.adet); if(ad<=0) continue;
-          await save("pazarlama_hareket",{...kul,tip:"konsinye",urunId:u.id||"",urunAd:u.ad||"?",adet:ad,
-            kalan:kmod2==="hediye"?0:ad,   // hediye: açık konsinye sayılmaz (geri beklenmez)
-            konsMod:kmod2,alisFiyat:num(u.pazFiyat),satisFiyat:num(u.fiyat),...yerB,...gecEk,tarih:now});
-          if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-ad); }
+          if(kmod2==="hediye"){
+            // 🎁 HEDİYE: ayrı tip + üründe hediye sayacı (stok takibi) — çantadan düşer, geri beklenmez
+            await save("pazarlama_hareket",{...kul,tip:"hediye",urunId:u.id||"",urunAd:u.ad||"?",adet:ad,
+              alisFiyat:num(u.pazFiyat),satisFiyat:num(u.fiyat),...yerB,...gecEk,tarih:now});
+            if(u.id&&!p.gecTarih){ await cantaDelta(u.id,u.ad,-ad); await save("stok_urun",{id:u.id,hediye:increment(ad)}); }
+          } else {
+            await save("pazarlama_hareket",{...kul,tip:"konsinye",urunId:u.id||"",urunAd:u.ad||"?",adet:ad,kalan:ad,
+              konsMod:"konsinye",alisFiyat:num(u.pazFiyat),satisFiyat:num(u.fiyat),...yerB,...gecEk,tarih:now});
+            if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-ad);
+          } }
       } else {
         const ad=(p.kkalem&&p.kkalem.ad)||"?";
         const recs=hareketler.filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&kkOf(x)===key&&(x.urunAd||"?")===ad).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
@@ -1817,7 +1824,7 @@ function App(){
   // güncel kale nesnesini tazele (canlı veri değişince)
   const kaleGuncel=kale?(d.kaleler.find(x=>x.key===kale.key)||kale):null;
   const kaleOv=kaleGuncel?ov.filter(x=>kkOf(x)===kaleGuncel.key).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
-  const kaleHar=kaleGuncel?hareketler.filter(x=>kkOf(x)===kaleGuncel.key&&["satis","konsinye","iade","tahsilat","stant","diplomasi"].includes(x.tip)).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
+  const kaleHar=kaleGuncel?hareketler.filter(x=>kkOf(x)===kaleGuncel.key&&["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi"].includes(x.tip)).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
   let ekran;
   if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar,
     openDuzen:k=>setYeniKale({kayit:{id:k.musteriId,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}})});
