@@ -51,7 +51,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v42";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v43";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -913,7 +913,18 @@ function Chip({on,onClick,children}){ return h("button",{onClick,style:{flexShri
   background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},children); }
 
 // 💬 KOMUTA HATTI — pazarlamacı ↔ komuta (talep gönder · gelen mesajları yanıtla · konum paylaş)
-function TalepSheet({talepler,onGonder,onCevapla,onKonum,onClose}){
+// sağa kaydır → 🗑 Sil çıkar
+function SwipeSil({onSil,children}){
+  const [dx,setDx]=useState(0); const [drag,setDrag]=useState(false); const st=useRef(0); const sw=useRef(false);
+  const TS=e=>{ st.current=e.touches[0].clientX-dx; setDrag(true); };
+  const TM=e=>{ let d=e.touches[0].clientX-st.current; setDx(Math.max(0,Math.min(88,d))); };
+  const TE=()=>{ setDrag(false); if(Math.abs(dx)>8) sw.current=true; setDx(dx>44?80:0); };
+  return h("div",{style:{position:"relative",overflow:"hidden",borderRadius:13}},
+    h("button",{onClick:()=>{ sw.current=false; setDx(0); onSil(); },style:{position:"absolute",left:0,top:0,bottom:0,width:80,background:"#e0483c",color:"#fff",fontSize:13.5,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}},"🗑 Sil"),
+    h("div",{onTouchStart:TS,onTouchMove:TM,onTouchEnd:TE,onClickCapture:e=>{ if(sw.current){ e.preventDefault(); e.stopPropagation(); sw.current=false; } },
+      style:{position:"relative",transform:"translateX("+dx+"px)",transition:drag?"none":"transform .22s"}},children));
+}
+function TalepSheet({talepler,onGonder,onCevapla,onKonum,onSil,onClose}){
   const [mesaj,setMesaj]=useState(""); const [tip,setTip]=useState("");
   const [yanit,setYanit]=useState({});   // talepId -> cevap metni
   const [kbekle,setKbekle]=useState(false);
@@ -931,7 +942,8 @@ function TalepSheet({talepler,onGonder,onCevapla,onKonum,onClose}){
     gecmis.length?h("div",{style:{marginTop:18}},
       h("div",{className:"lbl",style:{marginBottom:8}},"📨 Yazışmalar"),
       gecmis.map((t,i)=>{ const komutadan=t.kaynak==="komuta";
-        return h("div",{key:i,style:{padding:"11px 13px",borderRadius:13,background:komutadan?"#eef6ff":"var(--surf2)",border:komutadan?"1px solid #cfe6fb":"none",marginBottom:9}},
+        return h("div",{key:i,style:{marginBottom:9}}, h(SwipeSil,{onSil:()=>onSil(t)},
+        h("div",{style:{padding:"11px 13px",borderRadius:13,background:komutadan?"#eef6ff":"var(--surf2)",border:komutadan?"1px solid #cfe6fb":"none"}},
         h("div",{style:{fontSize:13.5,fontWeight:700,color:komutadan?"#0b5f92":"var(--txt)"}},(komutadan?"👑 Komuta: ":(t.tip?("["+t.tip+"] "):""))+t.mesaj),
         h("div",{style:{fontSize:10.5,color:"var(--mut2)",marginTop:3}},once(new Date(t.tarih).getTime())+" · "+(t.durum==="kapandi"?"✅ kapandı":"⏳ bekliyor")),
         // komuta konum istediyse paylaş butonu
@@ -942,7 +954,7 @@ function TalepSheet({talepler,onGonder,onCevapla,onKonum,onClose}){
           h("input",{value:yanit[t.id]||"",onChange:e=>setYanit(s=>({...s,[t.id]:e.target.value})),placeholder:"yanıt yaz…",style:{...inp,flex:1,fontSize:14,padding:"10px 12px"}}),
           h("button",{onClick:()=>{ const v=(yanit[t.id]||"").trim(); if(v) onCevapla(t,v); },style:{flexShrink:0,padding:"0 14px",borderRadius:12,background:"var(--cyan)",color:"#fff",fontWeight:800,fontSize:13}},"→")):null,
         // yanıt/cevap (her iki yön)
-        t.cevap?h("div",{style:{marginTop:7,padding:"9px 11px",borderRadius:10,background:komutadan?"var(--surf2)":"#eef6ff",border:"1px solid var(--line)",fontSize:13.5,fontWeight:600,color:komutadan?"var(--txt)":"#0b5f92"}},(komutadan?"↩️ sen: ":"👑 Komuta: ")+t.cevap):null); })):
+        t.cevap?h("div",{style:{marginTop:7,padding:"9px 11px",borderRadius:10,background:komutadan?"var(--surf2)":"#eef6ff",border:"1px solid var(--line)",fontSize:13.5,fontWeight:600,color:komutadan?"var(--txt)":"#0b5f92"}},(komutadan?"↩️ sen: ":"👑 Komuta: ")+t.cevap):null))); })):
       h("div",{style:{marginTop:16,fontSize:12,color:"var(--mut2)",textAlign:"center"}},"Henüz yazışma yok."));
 }
 
@@ -1587,6 +1599,7 @@ function App(){
   const talepYeniCevap=emirTalep.filter(t=>t.cevap&&t.durum==="kapandi").length;
   async function talepGonder(p){ try{ await save("talep",{kaynak:"pazarlamaci",kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir",simge:(d&&d.emir&&d.emir.simge)||"🎖️",mesaj:p.mesaj,tip:p.tip||"",durum:"acik",tarih:new Date().toISOString()}); setSheet(null); say("📨 Komutaya iletildi"); }catch(e){ console.error(e); say("⚠ İletilemedi"); } }
   async function talepCevapla(t,cevap){ try{ await save("talep",{id:t.id,cevap,durum:"kapandi",cevapTarih:new Date().toISOString()}); say("↩️ Yanıt gönderildi"); }catch(e){ console.error(e); say("⚠ Gönderilemedi"); } }
+  async function talepSil(t){ if(!t||!t.id) return; if(!confirm("🗑 Bu mesaj silinsin mi?")) return; try{ await remove("talep",t.id); say("🗑 Mesaj silindi"); }catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   async function talepKonum(t,lat,lng){ try{
       if(t&&t.id) await save("talep",{id:t.id,lat:String(lat),lng:String(lng),cevap:t.cevap||"📍 konum paylaşıldı",durum:"kapandi",cevapTarih:new Date().toISOString()});
       else await save("talep",{kaynak:"pazarlamaci",kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir",simge:(d&&d.emir&&d.emir.simge)||"🎖️",mesaj:"📍 Anlık konumumu paylaştım",lat:String(lat),lng:String(lng),durum:"acik",tarih:new Date().toISOString()});
@@ -1851,7 +1864,7 @@ function App(){
       : sheet.type==="gecmis"
       ? h(GecmisSheet,{k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})
       : sheet.type==="talep"
-      ? h(TalepSheet,{talepler:emirTalep,onGonder:talepGonder,onCevapla:talepCevapla,onKonum:talepKonum,onClose:()=>setSheet(null)})
+      ? h(TalepSheet,{talepler:emirTalep,onGonder:talepGonder,onCevapla:talepCevapla,onKonum:talepKonum,onSil:talepSil,onClose:()=>setSheet(null)})
       : h(ActionSheet,{type:sheet.type,k:(sheet.k&&sheet.k.key?(d.kaleler.find(x=>x.key===sheet.k.key)||sheet.k):sheet.k),d,onClose:()=>setSheet(null),onFire:fire})),
     (!kaleGuncel&&view==="us")?h("button",{onClick:()=>setSheet({type:"talep"}),
       style:{position:"fixed",right:16,bottom:"calc(env(safe-area-inset-bottom,0px) + 150px)",zIndex:36,width:54,height:54,borderRadius:"50%",background:"linear-gradient(135deg,#1e3a5f,#0e8fce)",color:"#fff",fontSize:24,boxShadow:"0 8px 22px rgba(14,143,206,.42)",display:"flex",alignItems:"center",justifyContent:"center"}},"💬",
