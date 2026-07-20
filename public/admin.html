@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A24";   // komuta (admin) deneme sürümü
+const SURUM="A25";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -256,7 +256,7 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,canliR
     const canta=Object.values(u.pazStokK||{}).reduce((s,v)=>s+num(v),0);
     const mo=malMap[u.id]; const maliyet=num(u.maliyet)>0?num(u.maliyet):(mo&&mo.a?mo.t/mo.a:0);
     return {id:u.id,ad:u.ad,stokta:num(u.stokta),canta,sahada:num(sahadaU[u.id])+num(sahadaU["a:"+u.ad]),fiyat:num(u.satisFiyat),alis:num(u.pazFiyat),
-      maliyet,maliyetElle:num(u.maliyet)>0,basimda:num(basMap[u.id]),satildi:num(u.satildi),konsStok:num(u.konsinye),gram:num(u.gram),parcalar:u.parcalar||[],pazStokK:u.pazStokK||{},raw:u};
+      maliyet,maliyetElle:num(u.maliyet)>0,basimda:num(basMap[u.id]),satildi:num(u.satildi),hediye:num(u.hediye),konsStok:num(u.konsinye),gram:num(u.gram),parcalar:u.parcalar||[],pazStokK:u.pazStokK||{},raw:u};
   }).sort((a,b)=>(b.canta+b.sahada)-(a.canta+a.sahada));
   const dusuk=stok.filter(u=>u.stokta<=3).sort((a,b)=>a.stokta-b.stokta);
   const stokDeger=stok.reduce((s,u)=>s+u.stokta*u.fiyat,0);
@@ -472,9 +472,9 @@ function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onAksiyon,onGecmis
   const konsK={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye"&&num(x.kalan)>0&&(x.urunId===u.id||(x.urunAd||"")===u.ad)){ const y=x.yer||"?"; konsK[y]=(konsK[y]||0)+num(x.kalan); } });
   const sahada=Object.entries(konsK).map(([ad,adet])=>({ad,adet})).sort((a,b)=>b.adet-a.adet);
   const aksBtn=c=>({flex:1,padding:"11px 4px",borderRadius:12,background:c+"14",border:"1px solid "+c+"44",fontSize:12.5,fontWeight:800,color:c});
-  const asama=[["🖨️",num(u.basimda),"basımda","var(--cyan)"],["🏭",num(u.stokta),"stokta","var(--txt)"],["🎒",num(u.canta),"çantada","var(--gold)"],["🏬",num(u.sahada),"konsinye","var(--violet)"],["✅",num(u.satildi),"satıldı","var(--green)"]];
+  const asama=[["🖨️",num(u.basimda),"basımda","var(--cyan)"],["🏭",num(u.stokta),"stokta","var(--txt)"],["🎒",num(u.canta),"çantada","var(--gold)"],["🏬",num(u.sahada),"konsinye","var(--violet)"],["✅",num(u.satildi),"satıldı","var(--green)"],["🎁",num(u.hediye),"hediye","#db2777"]];
   return h(Sheet,{ik:"📦",hex:"#d97b12",baslik:u.ad,alt:"🏭 "+u.stokta+" atölye · 🎒 "+u.canta+" çantalarda · 🏬 "+u.sahada+" sahada",onClose,cta:"Kapat",onCta:onClose},
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginBottom:12}},
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:5,marginBottom:12}},
       asama.map((s2,i)=>h("div",{key:i,style:{textAlign:"center",padding:"8px 2px",borderRadius:10,background:"var(--surf2)"}},
         h("div",{style:{fontSize:15}},s2[0]),h("div",{style:{fontSize:15,fontWeight:800,color:s2[3]}},s2[1]),h("div",{style:{fontSize:9,color:"var(--mut)"}},s2[2])))),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}},
@@ -804,7 +804,7 @@ function KullaniciSheet({u,onKaydet,bekle}){
 function Us({d,ac,hareketler,go,talepler,onTalep,onMesaj}){
   const P="20px 16px 0";
   const har=hareketler||[];
-  const et={satis:"💰",tahsilat:"🧾",konsinye:"🏬",iade:"↩️",stant:"🎪",diplomasi:"🤝"};
+  const et={satis:"💰",tahsilat:"🧾",konsinye:"🏬",hediye:"🎁",iade:"↩️",stant:"🎪",diplomasi:"🤝"};
   // her pazarlamacının SON hareketi (nerede/ne yaptı)
   const sonHar={}; har.forEach(x=>{ const id=x.kullaniciId; if(!id||!["satis","tahsilat","konsinye","iade","stant","diplomasi"].includes(x.tip)) return;
     const t=new Date(x.tarih).getTime()||0; if(!sonHar[id]||t>sonHar[id].t) sonHar[id]={t,x}; });
@@ -1007,7 +1007,8 @@ function Stok({d,ac}){
           h("span",null,"🏭 "+u.stokta),
           u.canta>0?h("span",{style:{color:"var(--gold)"}},"🎒 "+u.canta):null,
           u.sahada>0?h("span",{style:{color:"var(--violet)"}},"🏬 "+u.sahada):null,
-          u.satildi>0?h("span",{style:{color:"var(--green)"}},"✅ "+u.satildi):null),
+          u.satildi>0?h("span",{style:{color:"var(--green)"}},"✅ "+u.satildi):null,
+          u.hediye>0?h("span",{style:{color:"#db2777"}},"🎁 "+u.hediye):null),
         h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:6}},
           h("span",{style:{color:"var(--green)",fontWeight:700}},tl(u.fiyat)),
           u.maliyet>0?h("span",{style:{color:"var(--mut2)"}}," · mal "+tl(u.maliyet)):null)))));
@@ -1186,7 +1187,7 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
       h("tbody",null,rows.map((r,i)=>h("tr",{key:i},r.map((c,j)=>h("td",{key:j,style:{textAlign:j?"right":"left",padding:"8px",whiteSpace:"nowrap",borderBottom:"1px solid var(--line)",fontWeight:j?700:800,position:j?"static":"sticky",left:0,background:"var(--bg)"}},c)))))));
   const donemBar=h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:12}},donemler.map(([k2,lbl])=>h(Chip,{key:k2,on:kod===k2,onClick:()=>setKod(k2)},lbl)));
   const altlar=[["ozet","📊 Özet"],["paz","👥 Pazarlamacı"],["kons","🏬 Konsinye"],["alacak","💰 Alacak"],["mus","🗺️ Müşteri"],["hedef","🎯 Hedef"],["hareket","📜 Hareket"]];
-  const et={satis:"💰 satış",konsinye:"🏬 konsinye",tahsilat:"🧾 tahsilat",iade:"↩️ iade",stant:"🎪 stant",tabla:"🧹 tabla",avans:"💵 avans",diplomasi:"🤝 ziyaret",al:"📥 alım"};
+  const et={satis:"💰 satış",konsinye:"🏬 konsinye",hediye:"🎁 hediye",tahsilat:"🧾 tahsilat",iade:"↩️ iade",stant:"🎪 stant",tabla:"🧹 tabla",avans:"💵 avans",diplomasi:"🤝 ziyaret",al:"📥 alım"};
   const paylas=()=>{ const t="📊 Tikita Komuta — "+new Date().toLocaleDateString("tr-TR")+"\n"
     +"Dönem: "+(donemler.find(x=>x[0]===kod)||["",""])[1]+"\n"
     +"💰 Kale ciro: "+tl(ciro)+" ("+adet+" ad.) · ⚡ gerilla: "+tl(T.gerC)+"\n"
