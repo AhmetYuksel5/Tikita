@@ -6,6 +6,8 @@
 <title>Tikita · Komuta (DENEME)</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
   :root{
@@ -41,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A20";   // komuta (admin) deneme sürümü
+const SURUM="A21";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -78,6 +80,72 @@ const katOf=(t,v)=>{let r=t[0];for(const x of t)if(v>=x[0])r=x;return r;};
 const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
 const dkYaz=dk=>{ dk=Math.max(0,Math.round(dk)); const s2=Math.floor(dk/60),m2=dk%60; return s2>0?(s2+"s "+m2+"dk"):(m2+"dk"); };
 const inp={width:"100%",padding:"13px 14px",borderRadius:13,border:"1.5px solid var(--line)",background:"var(--surf2)",fontSize:16,fontWeight:700,color:"var(--txt)",outline:"none",fontFamily:"inherit"};
+
+/* ————— KEŞİF / HARİTA yardımcıları (index.html ile birebir) ————— */
+const KESIF_KAT=[
+  {k:"market",    ad:"Market/Bakkal",  ik:"🛒", q:'["shop"~"^(convenience|supermarket|grocery|general)$"]', gt:["supermarket","convenience_store","grocery_store"]},
+  {k:"tekel",     ad:"Tekel",          ik:"🍾", q:'["shop"~"^(alcohol|beverages)$"]', gt:["liquor_store"]},
+  {k:"kafe",      ad:"Kafe",           ik:"☕", q:'["amenity"="cafe"]', gt:["cafe","coffee_shop"]},
+  {k:"kirtasiye", ad:"Kırtasiye",      ik:"✏️", q:'["shop"="stationery"]', gt:["book_store"]},
+  {k:"hediyelik", ad:"Oyuncak/Hediye", ik:"🧸", q:'["shop"~"^(toys|gift)$"]', gt:["gift_shop","toy_store"]},
+];
+const kesifKatFromGTypes=types=>{ const ts=new Set(types||[]); const c=KESIF_KAT.find(x=>(x.gt||[]).some(g=>ts.has(g))); return c?c.k:"diger"; };
+const ZINCIR_RE=/(^|[^a-zçğıöşü])(bim|migros|a\s?-?101|şok|sok\s?market|carrefour(sa)?|file\b|macro\s?center|metro\s?(market|gross)|tespo|hakmar|onur\s?market|happy\s?center|ekomini|beğendik|kipa|tansaş|real\b|seç\s?market|dia\b|snowy|mopaş|pehlivanoğlu|çağrı\s?market|birmar|marketpaşa|ekomax|hopi)([^a-zçğıöşü]|$)/i;
+const KURUMSAL_RE=/(genel\s?(merkez|müdürlük)|dağıtım|lojistik|depo(su)?|a\.?ş\.?\s*$|san\.?\s?ve\s?tic|holding|plaza|toptan)/i;
+function zincirMi(ad){ const t=(ad||"").trim(); if(!t) return true;
+  const n=t.toLocaleLowerCase("tr").replace(/[̇̈]/g,"").replace(/ı/g,"i");
+  return ZINCIR_RE.test(n) || KURUMSAL_RE.test(n); }
+async function kesifGoogle(merkezler, katlar, metre, key){
+  const includedTypes=Array.from(new Set(katlar.flatMap(c=>c.gt||[])));
+  const gor=new Set(), out=[];
+  for(const m of merkezler){
+    const body={ includedTypes, maxResultCount:20, rankPreference:"DISTANCE",
+      locationRestriction:{ circle:{ center:{latitude:+m.lat,longitude:+m.lng}, radius:Math.min(50000,metre) } } };
+    const r=await fetch("https://places.googleapis.com/v1/places:searchNearby",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,
+        "X-Goog-FieldMask":"places.id,places.displayName,places.location,places.types,places.rating,places.userRatingCount,places.nationalPhoneNumber"},
+      body:JSON.stringify(body)});
+    if(!r.ok){ let e=""; try{ e=(await r.json()).error.message; }catch(x){} throw new Error("Google "+r.status+(e?(" — "+e):"")); }
+    const j=await r.json();
+    (j.places||[]).forEach(p=>{ const ad=p.displayName&&p.displayName.text; if(!ad||!p.location) return;
+      if(gor.has(p.id)) return; gor.add(p.id);
+      const tel=(p.nationalPhoneNumber||"").replace(/[^0-9+]/g,"").replace(/^\+?90/,"0");
+      out.push({ad, lat:p.location.latitude, lng:p.location.longitude, kat:kesifKatFromGTypes(p.types),
+        tel, puanG:(p.rating!=null?p.rating:null), yorum:(p.userRatingCount!=null?num(p.userRatingCount):0)}); });
+  }
+  return out;
+}
+const kesifKatBul=t=>{ const s=t.shop||"", a=t.amenity||"";
+  if(/^(convenience|supermarket|grocery|general)$/.test(s)) return "market";
+  if(/^(alcohol|beverages)$/.test(s)) return "tekel";
+  if(a==="cafe") return "kafe";
+  if(s==="stationery") return "kirtasiye";
+  if(/^(toys|gift)$/.test(s)) return "hediyelik";
+  return "diger"; };
+async function kesifOverpass(merkezler, katlar, metre){
+  const govde=katlar.map(c=>merkezler.map(m=>"nwr"+c.q+"(around:"+metre+","+(+m.lat)+","+(+m.lng)+");").join("")).join("");
+  const q="[out:json][timeout:25];("+govde+");out center 300;";
+  const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});
+  if(!r.ok) throw new Error("Overpass "+r.status);
+  const j=await r.json(); const gor=new Set(), out=[];
+  const telNorm=t=>{ let s=(t||"").replace(/[^0-9+]/g,""); if(!s) return ""; s=s.replace(/^\+?90/,"0"); if(s[0]!=="0"&&s.length===10) s="0"+s; return s; };
+  (j.elements||[]).forEach(el=>{ const t=el.tags||{}; const ad=t.name; if(!ad) return;
+    const la=el.lat!=null?el.lat:(el.center&&el.center.lat), lo=el.lon!=null?el.lon:(el.center&&el.center.lon);
+    if(la==null||lo==null) return;
+    const key=el.type+"/"+el.id; if(gor.has(key)) return; gor.add(key);
+    const tel=telNorm(t.phone||t["contact:phone"]||t["contact:mobile"]||t.mobile||"");
+    out.push({ad, lat:la, lng:lo, kat:kesifKatBul(t), tel}); });
+  return out;
+}
+function haversineKm(aLat,aLng,bLat,bLng){ const R=6371, dLa=(bLat-aLat)*Math.PI/180, dLo=(bLng-aLng)*Math.PI/180,
+  la1=aLat*Math.PI/180, la2=bLat*Math.PI/180;
+  const s=Math.sin(dLa/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(s))); }
+function pointInPoly(pt,poly){ const x=pt[1],y=pt[0]; let ic=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][1], yi=poly[i][0], xj=poly[j][1], yj=poly[j][0];
+    if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) ic=!ic; }
+  return ic; }
 
 // planların EFEKTİF başlangıcı — eski panel ile ORTAK kural (birebir):
 // geciken başlamamış iş "şimdi"ye kayar; üzerinden başka iş başlatılmışsa (geride) sayılmaz
@@ -959,7 +1027,104 @@ function AyarSheet({ayar,onKaydet,bekle}){
     h("div",{className:"lbl",style:{marginBottom:8,color:"var(--mut2)"}},"🗺️ GOOGLE PLACES API KEY"),
     alan("API anahtarı (kale/müşteri konumu için)",gkey,setGkey,true));
 }
-function RaporA({d,hareketler,ekip,musteriler}){
+/* ————— HEDEF/GÖREV HARİTASI — poligon çiz → tara → rota/görev ata ————— */
+function HedefHarita({kullanicilar,gkey,onKaydet}){
+  const ref=useRef(null), mapRef=useRef(null), cizLg=useRef(null), sonucLg=useRef(null);
+  const [kose,setKose]=useState([]);
+  const [sonuc,setSonuc]=useState([]);
+  const [secili,setSecili]=useState({});
+  const [kat,setKat]=useState(KESIF_KAT.map(c=>c.k));
+  const [yuk,setYuk]=useState(false);
+  const [ad,setAd]=useState(""); const [kime,setKime]=useState("");
+  useEffect(()=>{ if(!window.L||!ref.current||mapRef.current) return; const L=window.L;
+    const map=L.map(ref.current,{scrollWheelZoom:true,attributionControl:false}).setView([41.02,29.03],12);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
+    cizLg.current=L.layerGroup().addTo(map); sonucLg.current=L.layerGroup().addTo(map);
+    map.on("click",e=>setKose(k=>[...k,[+e.latlng.lat.toFixed(6),+e.latlng.lng.toFixed(6)]]));
+    mapRef.current=map; setTimeout(()=>{ try{map.invalidateSize();}catch(x){} },200);
+  },[]);
+  useEffect(()=>{ const L=window.L, lg=cizLg.current; if(!L||!lg) return; lg.clearLayers();
+    kose.forEach(p=>L.circleMarker(p,{radius:5,color:"#b45309",fillColor:"#b45309",fillOpacity:1,weight:2}).addTo(lg));
+    if(kose.length>=3) L.polygon(kose,{color:"#b45309",weight:2,fillColor:"#f59e0b",fillOpacity:0.14}).addTo(lg);
+    else if(kose.length===2) L.polyline(kose,{color:"#b45309",weight:2,dashArray:"5,5"}).addTo(lg);
+  },[kose]);
+  useEffect(()=>{ const L=window.L, lg=sonucLg.current; if(!L||!lg) return; lg.clearLayers();
+    sonuc.forEach(r=>{ const on=!!secili[r.ad];
+      const mk=L.circleMarker([+r.lat,+r.lng],{radius:on?8:6,color:on?"#16a34a":"#0369a1",fillColor:on?"#16a34a":"#fff",fillOpacity:on?1:.95,weight:2}).addTo(lg);
+      mk.bindTooltip("<b>"+r.ad+"</b>"+(r.puanG!=null?(" · ⭐"+r.puanG):""),{direction:"top"});
+      mk.on("click",()=>setSecili(s=>({...s,[r.ad]:!s[r.ad]}))); });
+  },[sonuc,secili]);
+  const merkez=()=>{ if(!kose.length) return null; return {lat:kose.reduce((s,p)=>s+p[0],0)/kose.length, lng:kose.reduce((s,p)=>s+p[1],0)/kose.length}; };
+  const yaricapKm=()=>{ const m=merkez(); if(!m) return 1; let mx=0; kose.forEach(p=>{ const d=haversineKm(m.lat,m.lng,p[0],p[1]); if(d>mx)mx=d; }); return Math.max(0.5,mx+0.2); };
+  function gridMerkezler(){
+    const lats=kose.map(p=>p[0]), lngs=kose.map(p=>p[1]);
+    const laMin=Math.min.apply(null,lats), laMax=Math.max.apply(null,lats), loMin=Math.min.apply(null,lngs), loMax=Math.max.apply(null,lngs);
+    const enKm=haversineKm(laMin,loMin,laMax,loMin), boyKm=haversineKm(laMin,loMin,laMin,loMax);
+    const ny=Math.max(1,Math.min(6,Math.ceil(enKm/0.8))), nx=Math.max(1,Math.min(6,Math.ceil(boyKm/0.8)));
+    const mrk=[];
+    for(let i=0;i<ny;i++) for(let j=0;j<nx;j++) mrk.push({lat:laMin+(laMax-laMin)*(i+0.5)/ny, lng:loMin+(loMax-loMin)*(j+0.5)/nx});
+    const cellKm=Math.max(0.5, haversineKm(laMin,loMin, laMin+(laMax-laMin)/ny, loMin+(loMax-loMin)/nx)/2 + 0.35);
+    return {mrk, cellKm};
+  }
+  async function tara(){ if(kose.length<3) return alert("Önce haritaya en az 3 nokta koyarak bir alan çiz.");
+    const katlar=KESIF_KAT.filter(c=>kat.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
+    const {mrk,cellKm}=gridMerkezler(); const mtr=Math.round(cellKm*1000); setYuk(true);
+    try{ let all=[];
+      if(gkey){ try{ const g=await kesifGoogle(mrk,katlar,mtr,gkey); if(g) all=all.concat(g); }catch(e){} }
+      try{ const o=await kesifOverpass(mrk,katlar,mtr); if(o) all=all.concat(o); }catch(e){}
+      const tut=[];
+      all.forEach(r=>{ if(r.lat==null||r.lng==null||!(r.ad||"").trim()) return;
+        if(zincirMi(r.ad)) return;
+        if(!pointInPoly([+r.lat,+r.lng],kose)) return;
+        const a2=(r.ad||"").toLocaleLowerCase("tr").trim();
+        const dup=tut.some(g=> ((g.ad||"").toLocaleLowerCase("tr").trim()===a2) || haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04);
+        if(dup){ if(r.puanG!=null){ const ex=tut.find(g=>haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04); if(ex&&ex.puanG==null){ ex.puanG=r.puanG; if(r.tel)ex.tel=ex.tel||r.tel; } } return; }
+        tut.push(r); });
+      tut.sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+      setSonuc(tut); if(!tut.length) alert("Bu alanda mekan bulunamadı — alanı büyüt ya da kategori ekle.");
+    }catch(e){ alert("Tarama yapılamadı: "+(e.message||e)); }
+    setYuk(false);
+  }
+  const secList=()=>sonuc.filter(r=>secili[r.ad]);
+  function rotaSirala(list){ if(list.length<2) return list.slice(); const kalan=list.slice(); const m=merkez(); let cur={lat:m.lat,lng:m.lng}; const out=[];
+    while(kalan.length){ let bi=0,bd=Infinity; kalan.forEach((p,i)=>{ const d=haversineKm(cur.lat,cur.lng,+p.lat,+p.lng); if(d<bd){bd=d;bi=i;} }); const n=kalan.splice(bi,1)[0]; out.push(n); cur={lat:+n.lat,lng:+n.lng}; } return out; }
+  function rotaAc(){ const list=rotaSirala(secList()).slice(0,10); if(!list.length) return alert("Rota için mekan seç."); const hd=list[list.length-1]; const ara=list.slice(0,-1).map(p=>p.lat+","+p.lng).join("|");
+    window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+hd.lat+","+hd.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank"); }
+  async function gorevVer(){ const list=rotaSirala(secList()); if(!list.length) return alert("Görev için en az bir mekan seç."); if(!ad.trim()) return alert("Görev adı gir.");
+    const m=merkez();
+    await onKaydet({ ad:ad.trim(), poly:kose.map(p=>({lat:p[0],lng:p[1]})), lat:String(m.lat), lng:String(m.lng), r:yaricapKm(),
+      duraklar:list.map(r=>({ad:r.ad,lat:String(r.lat),lng:String(r.lng),tel:r.tel||"",puanG:r.puanG!=null?r.puanG:null,kat:r.kat||""})), kullaniciId:kime });
+    setKose([]); setSonuc([]); setSecili({}); setAd(""); }
+  const secSay=secList().length;
+  const katBtn=c=>{ const on=kat.includes(c.k); return h("button",{key:c.k,onClick:()=>setKat(s=>on?s.filter(x=>x!==c.k):[...s,c.k]),
+    style:{padding:"7px 11px",borderRadius:10,fontSize:12,fontWeight:700,background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},c.ik+" "+c.ad); };
+  return h("div",null,
+    h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},KESIF_KAT.map(katBtn)),
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:6}},"🖊️ Haritaya dokunarak alan köşelerini işaretle (en az 3). Sonra '🔍 Alanı tara'."),
+    h("div",{ref,style:{height:380,borderRadius:14,overflow:"hidden",border:"1px solid var(--line)",marginBottom:8}}),
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}},
+      h("button",{onClick:()=>{setKose([]);setSonuc([]);setSecili({});},style:{padding:"11px 14px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"🗑 Temizle ("+kose.length+")"),
+      h("button",{disabled:yuk,onClick:tara,style:{flex:1,minWidth:140,padding:"11px 14px",borderRadius:12,background:yuk?"var(--line)":"var(--cyan)",color:yuk?"var(--mut2)":"#fff",fontSize:13.5,fontWeight:800}},yuk?"⏳ Taranıyor…":"🔍 Alanı tara")),
+    !gkey?h("div",{style:{fontSize:11,color:"var(--mut2)",marginBottom:8}},"ℹ️ Google anahtarı yok — sadece OpenStreetMap taranır (Ayarlar'dan ekleyebilirsin)."):null,
+    sonuc.length>0?h(React.Fragment,null,
+      h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:6}},
+        h("div",{className:"lbl"},"📍 "+sonuc.length+" mekan · "+secSay+" seçili"),
+        secSay>0?h("button",{onClick:rotaAc,style:{fontSize:12,fontWeight:800,color:"var(--cyan)"}},"🗺️ Rota önizle"):null),
+      h("div",{style:{display:"grid",gap:6,maxHeight:240,overflowY:"auto",marginBottom:12}},
+        sonuc.map((r,i)=>{ const on=!!secili[r.ad]; const c=KESIF_KAT.find(x=>x.k===r.kat);
+          return h("button",{key:i,onClick:()=>setSecili(s=>({...s,[r.ad]:!s[r.ad]})),style:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",border:"1px solid "+(on?"#16a34a":"var(--line)"),background:on?"#f0fdf4":"var(--surf)",borderRadius:10,textAlign:"left"}},
+            h("span",{style:{fontSize:15,flexShrink:0}},on?"✅":(c?c.ik:"📍")),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.ad),
+              h("div",{style:{fontSize:10.5,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(r.puanG!=null?("⭐"+num(r.puanG).toFixed(1)+" · "):"")+(r.tel?("☎ "+r.tel):(c?c.ad:""))))); })),
+      h("div",{style:{padding:"12px 14px",borderRadius:14,background:"#fffbf5",border:"1px solid #fed7aa"}},
+        h("div",{className:"lbl",style:{marginBottom:8,color:"#9a3412"}},"📋 Görev olarak ver — "+secSay+" durak"),
+        h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"Görev adı (örn. Beylerbeyi turu)",style:{...inp,marginBottom:8}}),
+        h("select",{value:kime,onChange:e=>setKime(e.target.value),style:{...inp,marginBottom:8}},
+          h("option",{value:""},"👥 Tüm ekip"),(kullanicilar||[]).filter(u=>u.rol!=="admin"&&(u.ad||"").trim()).map(u=>h("option",{key:u.id,value:u.id},u.ad))),
+        h("button",{onClick:gorevVer,style:{width:"100%",padding:13,borderRadius:13,background:"#b45309",color:"#fff",fontSize:14,fontWeight:800}},"📋 Görevi ver ("+secSay+" durak)"))):null);
+}
+function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil}){
   const [alt,setAlt]=useState("ozet");   // ozet/paz/kons/alacak/mus/hareket
   const [kod,setKod]=useState("hafta");
   const [hkisi,setHkisi]=useState("");
@@ -996,7 +1161,7 @@ function RaporA({d,hareketler,ekip,musteriler}){
       h("thead",null,h("tr",null,head.map((hh,i)=>h("th",{key:i,style:{textAlign:i?"right":"left",padding:"7px 8px",color:"var(--mut)",fontWeight:800,whiteSpace:"nowrap",borderBottom:"1.5px solid var(--line)",position:i?"static":"sticky",left:0,background:"var(--bg)"}},hh)))),
       h("tbody",null,rows.map((r,i)=>h("tr",{key:i},r.map((c,j)=>h("td",{key:j,style:{textAlign:j?"right":"left",padding:"8px",whiteSpace:"nowrap",borderBottom:"1px solid var(--line)",fontWeight:j?700:800,position:j?"static":"sticky",left:0,background:"var(--bg)"}},c)))))));
   const donemBar=h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:12}},donemler.map(([k2,lbl])=>h(Chip,{key:k2,on:kod===k2,onClick:()=>setKod(k2)},lbl)));
-  const altlar=[["ozet","📊 Özet"],["paz","👥 Pazarlamacı"],["kons","🏬 Konsinye"],["alacak","💰 Alacak"],["mus","🗺️ Müşteri"],["hareket","📜 Hareket"]];
+  const altlar=[["ozet","📊 Özet"],["paz","👥 Pazarlamacı"],["kons","🏬 Konsinye"],["alacak","💰 Alacak"],["mus","🗺️ Müşteri"],["hedef","🎯 Hedef"],["hareket","📜 Hareket"]];
   const et={satis:"💰 satış",konsinye:"🏬 konsinye",tahsilat:"🧾 tahsilat",iade:"↩️ iade",stant:"🎪 stant",tabla:"🧹 tabla",avans:"💵 avans",diplomasi:"🤝 ziyaret",al:"📥 alım"};
   const paylas=()=>{ const t="📊 Tikita Komuta — "+new Date().toLocaleDateString("tr-TR")+"\n"
     +"Dönem: "+(donemler.find(x=>x[0]===kod)||["",""])[1]+"\n"
@@ -1049,6 +1214,20 @@ function RaporA({d,hareketler,ekip,musteriler}){
             h("div",{style:{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(et[x.tip]||x.tip)+(x.urunAd?(" · "+(num(x.adet)||"")+"× "+x.urunAd):"")),
             h("div",{style:{fontSize:11,color:"var(--mut)"}},(x.kullaniciAd||"?")+" · "+(x.yer||"—")+" · "+fmtS(x.tarih))),
           h("span",{style:{fontSize:12.5,fontWeight:800,flexShrink:0}},x.tip==="tahsilat"?tl(x.tutar):x.tip==="satis"?tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)):(num(x.adet)+" ad"))))):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Kayıt yok."); })()):null,
+    alt==="hedef"?h(React.Fragment,null,
+      h("div",{className:"lbl",style:{marginBottom:8}},"🎯 Alan tara → görev ata"),
+      h(HedefHarita,{kullanicilar,gkey,onKaydet:onGorevKaydet}),
+      (()=>{ const gv=(hedefler||[]).filter(x=>(x.duraklar&&x.duraklar.length)).sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
+        const kad={}; (kullanicilar||[]).forEach(u=>kad[u.id]=u.ad);
+        return gv.length?h("div",{style:{marginTop:16}},
+          h("div",{className:"lbl",style:{marginBottom:8}},"📋 Atanmış görevler · "+gv.length),
+          h("div",{style:{display:"grid",gap:8}},gv.map((g,i)=>h("div",{key:i,className:"card",style:{display:"flex",alignItems:"center",gap:10,padding:"11px 13px",boxShadow:"none"}},
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.ad||"görev"),
+              h("div",{style:{fontSize:11,color:"var(--mut)"}},((g.duraklar||[]).length)+" durak · "+(g.kullaniciId?(kad[g.kullaniciId]||"?"):"tüm ekip"))),
+            h("button",{onClick:()=>{ const list=(g.duraklar||[]); if(!list.length) return; const hd=list[list.length-1]; const ara=list.slice(0,-1).map(p=>p.lat+","+p.lng).join("|"); window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+hd.lat+","+hd.lng+(ara?("&waypoints="+encodeURIComponent(ara)):""),"_blank"); },style:{fontSize:12,fontWeight:800,color:"var(--cyan)",flexShrink:0}},"🗺️ rota"),
+            h("button",{onClick:()=>onGorevSil(g),style:{fontSize:15,color:"var(--red)",flexShrink:0}},"🗑")))))
+        :null; })()):null,
     det?h(DetayListSheet,{...det,onClose:()=>setDet(null)}):null);
 }
 
@@ -1069,9 +1248,11 @@ function App(){
   const makCanli=useColl("makine_durum");   // 📡 Bambu köprüsü (varsa)
   const filamentler=useColl("filament");
   const stokHareket=useColl("stok_hareket");
+  const hedefler=useColl("hedef");
   const ayarlar=useColl("ayar");
   const ayar=(ayarlar||[]).find(x=>x.id==="genel")||{};
   const tablaUc=ayar.tablaUcret!=null?num(ayar.tablaUcret):5;
+  const gkey=(ayar.googleKey||"").trim();
   const emirId="mr14ih8vc39wug";
   // Tikita → yazıcı komutu (köprü 'makine_komut'u dinler, iletir, siler)
   async function makKomut(mk,cmd,extra){ try{ await save("makine_komut",{makineAd:mk.ad,cmd,tarih:new Date().toISOString(),...(extra||{})});
@@ -1142,6 +1323,11 @@ function App(){
   async function ayarKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ await save("ayar",{id:"genel",...p2}); setModal(null); say("💾 Ayarlar kaydedildi"); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  async function gorevKaydet(g){ try{ await save("hedef",{tip:"gorev",ad:g.ad,poly:g.poly,lat:g.lat,lng:g.lng,r:g.r,duraklar:g.duraklar,
+      kullaniciId:g.kullaniciId||"",kullaniciAd:(kullanicilar||[]).find(u=>u.id===g.kullaniciId)?((kullanicilar||[]).find(u=>u.id===g.kullaniciId).ad):"",tarih:new Date().toISOString()});
+      say("🎯 Görev atandı · "+(g.ad||"")); }catch(e){ console.error(e); say("⚠ Görev atanamadı"); } }
+  async function gorevSil(g){ if(!g||!g.id) return; if(!confirm("🗑 \""+(g.ad||"görev")+"\" görevi silinsin mi?")) return;
+    try{ await remove("hedef",g.id); say("🗑 Görev silindi"); }catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   async function stokAksiyon(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     const {u,tip}=p2; const n=Math.max(1,Math.round(num(p2.adet)));
     try{ if(tip==="uret"){ await save("stok_urun",{id:u.id,stokta:num(u.stokta)+n}); await stokLogla(u,+n,"uretim"); }
@@ -1187,7 +1373,7 @@ function App(){
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
-  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler});
+  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil});
   return h("div",null,
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
