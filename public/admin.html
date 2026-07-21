@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A31";   // komuta (admin) deneme sürümü
+const SURUM="A32";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1246,6 +1246,16 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const birakDon=R.filter(x=>x.tip==="konsinye"&&!x.gerilla);
   const birakDonAd=birakDon.reduce((s,x)=>s+num(x.adet),0), birakDonTut=birakDon.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
   const satDon=R.filter(x=>x.tip==="satis"&&x.kaynak==="konsinye");
+  // ürün bazında kazanç — üretici payı (alış) vs pazarlamacı payı (marj), seçili dönem (kale + gerilla)
+  const urunKar={};
+  R.forEach(x=>{ if(x.tip!=="satis") return; const u=x.urunAd||"?"; const K=num(x.adet)*num(x.alisFiyat);
+    const o=urunKar[u]||(urunKar[u]={u,adet:0,uret:0,marj:0});
+    o.adet+=num(x.adet);
+    if(x.gerilla){ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); o.uret+=Math.min(th,K); o.marj+=Math.max(0,th-K); }
+    else { o.uret+=K; o.marj+=num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)); } });
+  const urunKarList=Object.values(urunKar);
+  const enUret=urunKarList.slice().sort((a,b)=>b.uret-a.uret)[0]||null;
+  const enPaz=urunKarList.slice().sort((a,b)=>b.marj-a.marj)[0]||null;
   const musList=(musteriler||[]).filter(m=>!m.arsiv&&(m.ad||"").trim()).map(m=>{ const mh=(hareketler||[]).filter(x=>x.musteriId===m.id);
     let sat=0,kons=0,sonT=0; mh.forEach(x=>{ const t=new Date(x.tarih).getTime()||0; if(t>sonT)sonT=t; if(x.tip==="satis"&&!x.gerilla) sat+=num(x.adet)*num(x.satisFiyat); if(x.tip==="konsinye"&&num(x.kalan)>0) kons+=num(x.kalan); });
     return {m,sat,kons,sonT}; }).sort((a,b)=>b.sat-a.sat);
@@ -1270,6 +1280,8 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     mekan:()=>{ const m={}; R.filter(x=>(x.yer||"").trim()&&["satis","konsinye","tahsilat"].includes(x.tip)).forEach(x=>{ const y=x.yer; const o=m[y]||(m[y]={yer:y,n:0,son:0}); o.n++; const t=new Date(x.tarih).getTime()||0; if(t>o.son)o.son=t; }); return {ik:"📍",hex:"#0e8fce",baslik:"Uğranılan mekanlar",rows:Object.values(m).sort((a,b)=>b.son-a.son).map(o=>({t:o.yer,alt:o.n+" işlem",v:fmtS(new Date(o.son).toISOString()),renk:"var(--cyan)"}))}; },
     ciro:()=>({ik:"💰",hex:"#16a34a",baslik:"Kale satışları",rows:srt(R.filter(x=>x.tip==="satis"&&!x.gerilla)).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--green)"))}),
     gerilla:()=>({ik:"⚡",hex:"#0e8fce",baslik:"Gerilla satışları",rows:srt(R.filter(x=>x.tip==="satis"&&x.gerilla)).map(x=>harRow(x,tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),"var(--cyan)"))}),
+    uretUrun:()=>({ik:"🏭",hex:"#334155",baslik:"Üreticiye en çok kazandıran ürünler",rows:urunKarList.slice().sort((a,b)=>b.uret-a.uret).map(o=>({t:o.u,alt:o.adet+" ad · pazarlamacıya "+tl(o.marj),v:tl(o.uret),renk:"var(--txt)"}))}),
+    pazUrun:()=>({ik:"🫰",hex:"#d97b12",baslik:"Pazarlamacıya en çok kazandıran ürünler",rows:urunKarList.slice().sort((a,b)=>b.marj-a.marj).map(o=>({t:o.u,alt:o.adet+" ad · üreticiye "+tl(o.uret),v:tl(o.marj),renk:"var(--gold)"}))}),
   };
   const Tbl=(head,rows)=>h("div",{style:{overflowX:"auto",marginBottom:16}},
     h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:head.length*66}},
@@ -1313,6 +1325,10 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         h("div",{className:"lbl",style:{marginBottom:8}},"⚡ Gerilla satış dökümü — önce üretici"),
         Tbl(["Pazarlamacı","Adet","Ciro","🏭 Üretici","🫰 Hakediş"],
           perf.filter(p=>p.gerA>0).map(p=>[(p.u.simge||"")+" "+p.u.ad,String(p.gerA),tl(p.gerC),tl(p.gerU),tl(p.gerM)]).concat([["TOPLAM",String(T.gerA),tl(T.gerC),tl(T.gerU),tl(T.gerM)]]))):null,
+      h("div",{className:"lbl",style:{margin:"4px 0 8px"}},"🏆 En çok kazandıran ürünler · "+((donemler.find(x=>x[0]===kod)||["",""])[1])),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
+        h(Stat,{ik:"🏭",v:enUret?enUret.u:"—",l:enUret?("üreticiye "+tl(enUret.uret)+" ›"):"veri yok",renk:"var(--txt)",onClick:enUret?()=>setDet(detB.uretUrun()):null}),
+        h(Stat,{ik:"🫰",v:enPaz?enPaz.u:"—",l:enPaz?("pazarlamacıya "+tl(enPaz.marj)+" ›"):"veri yok",renk:"var(--gold)",onClick:enPaz?()=>setDet(detB.pazUrun()):null})),
       h("button",{onClick:paylas,style:{width:"100%",padding:14,borderRadius:16,background:"#16a34a",fontSize:14.5,fontWeight:800,color:"#fff",boxShadow:"0 8px 20px rgba(22,163,74,.25)"}},"📲 WhatsApp'tan paylaş")):null,
     alt==="paz"?(perf.length?Tbl(["Pazarlamacı","Satış","Ciro","⚡Ger.","Kons.ad","Kons.₺","Tahsilat","Üretici","Hakediş","Tabla","Mekan"],
       perf.map(p=>[(p.u.simge||"")+" "+p.u.ad,String(p.satA),tl(p.satT),p.gerA+"·"+tl(p.gerC),String(p.konsA),tl(p.konsT),tl(p.nakit),tl(p.uBorc),tl(p.hakedis),p.tabla+"·"+tl(p.tablaKaz),String(p.mekan)])):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde hareket yok.")):null,
