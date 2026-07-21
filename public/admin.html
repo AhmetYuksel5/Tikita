@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A39";   // komuta (admin) deneme sürümü
+const SURUM="A40";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -255,10 +255,6 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,canliR
     }
     return {mk,son,kuyruk,durum,pct,kalanDk};
   });
-  // 📡 köprüden gelen GERÇEK yazıcı durumu (bridge/bambu_kopru.py) — ada göre eşleşir
-  { const canliMap={}; (canliRows||[]).forEach(r=>{ const taze=(now-new Date(r.guncelleme).getTime())<90000;
-      canliMap[adN(r.makineAd)]={...r,taze}; });
-    makDurum.forEach(m=>{ m.canli=canliMap[adN(m.mk.ad)]||null; }); }
   const aktifBaski=makDurum.filter(m=>m.durum==="basiyor").length;
   const tablaBek=makDurum.filter(m=>m.durum==="tabla").length;
   // — ekip (pazarlamacılar) —
@@ -1130,10 +1126,9 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const yuzde=t=>kapasiteMs?(Math.round(t/kapasiteMs*1000)/10):0;
   const haftaKaydir=yon=>setBas(b=>b+yon*gunSayisi*24*3600*1000);
   const buHafta=()=>{ const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-((t.getDay()-6+7)%7)); setBas(t.getTime()); };
-  const canliByMak={}; (d.makDurum||[]).forEach(m=>{ if(m.canli&&m.canli.taze) canliByMak[m.mk.id]=m.canli; });
   const acJob=(x,mk)=>{ const p=x.p; const basladi=!!p.basladi; let durum;
     if(basladi) durum=x.e<=now?"bitti":"basiyor"; else if(x.s>now) durum="sirada"; else if(x.e>now) durum="gecikti"; else durum="geride";
-    ac({tip:"is",x:{p,es:x.s,ee:x.e,durum,mkAd:mk.ad||"?",canli:canliByMak[mk.id]}}); };
+    ac({tip:"is",x:{p,es:x.s,ee:x.e,durum,mkAd:mk.ad||"?"}}); };
   const Lej=(renk,ad)=>h("div",{style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#fff"}},h("span",{style:{width:12,height:12,borderRadius:4,background:renk,display:"inline-block"}}),ad);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:8,marginBottom:10,padding:"0 4px"}},
@@ -1228,10 +1223,6 @@ function Uretim({d,plan,makineler,ac,onTabla}){
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center"}},h("div",{style:{fontSize:11,color:GC.mut,fontWeight:700}},"BOŞTA"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamBosGelecek/60000)),h("div",{style:{fontWeight:800,color:GC.kirmiziB}},"%"+yuzde(toplamBosGelecek))),
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center",borderColor:GC.kirmiziB}},h("div",{style:{fontSize:11,color:GC.kirmiziB,fontWeight:700}},"⚠ KAYIP"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamKayip/60000)),h("div",{style:{fontWeight:800,color:GC.kirmiziB}},"%"+yuzde(toplamKayip))),
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center",borderColor:"#c2410c"}},h("div",{style:{fontSize:11,color:"#c2410c",fontWeight:700}},"⏱ GECİKME"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamGecikme/60000)),h("div",{style:{fontWeight:800,color:"#c2410c"}},toplamGecikmeSayi+" baskı"))))),
-    d.makDurum.length?h(React.Fragment,null,
-      h("div",{className:"lbl",style:{margin:"4px 4px 8px"}},"🖨️ Makineler (canlı · Bambu köprüsü)"),
-      h("div",{style:{display:"grid",gap:8}},
-        d.makDurum.map((m,i)=>h(MakineKart,{key:i,m,onClick:()=>ac({tip:"makine",m})})))):null,
     h("div",{style:{textAlign:"right",fontSize:11,color:"var(--mut2)",margin:"12px 4px 0"}},"Güncelleme: "+fmtS(now)));
 }
 // ⚙️ MAKİNE YÖNETİMİ — makine ekle/düzenle/sil
@@ -1687,7 +1678,6 @@ function Nav({aktif,go}){ const items=[["us","🏭","Komuta"],["uretim","🖨️
 function App(){
   const plan=useColl("plan"), makineler=useColl("makineler"), urunler=useColl("stok_urun"),
         hareketler=useColl("pazarlama_hareket"), kullanicilar=useColl("kullanici"), musteriler=useColl("musteri");
-  const makCanli=useColl("makine_durum");   // 📡 Bambu köprüsü (varsa)
   const filamentler=useColl("filament");
   const stokHareket=useColl("stok_hareket");
   const hedefler=useColl("hedef");
@@ -1722,7 +1712,7 @@ function App(){
   const say=m=>{ setToastMsg(m); clearTimeout(window.__t); window.__t=setTimeout(()=>setToastMsg(""),2200); };
   const veriHata=useVeriHata();
   const yuk=[plan,makineler,urunler,hareketler,kullanicilar,musteriler].some(x=>x===null);
-  const d=useMemo(()=>yuk?null:hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,makCanli,filamentler),[plan,makineler,urunler,hareketler,kullanicilar,musteriler,makCanli,filamentler,yuk]);
+  const d=useMemo(()=>yuk?null:hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,null,filamentler),[plan,makineler,urunler,hareketler,kullanicilar,musteriler,filamentler,yuk]);
   const go=v=>{ setModal(null); setHedefOdak(null); setView(v); window.scrollTo(0,0); };
   const [isBekle,setIsBekle]=useState(false);
   async function isKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
