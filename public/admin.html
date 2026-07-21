@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A27";   // komuta (admin) deneme sürümü
+const SURUM="A28";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -815,11 +815,17 @@ function SwipeSil({onSil,children}){
 function Us({d,ac,hareketler,go,talepler,onTalep,onMesaj,onTalepSil}){
   const P="20px 16px 0";
   const har=hareketler||[];
+  const [acikP,setAcikP]=useState(null);   // sahada — hangi pazarlamacının adımları açık
   const et={satis:"💰",tahsilat:"🧾",konsinye:"🏬",hediye:"🎁",iade:"↩️",stant:"🎪",diplomasi:"🤝"};
-  // her pazarlamacının SON hareketi (nerede/ne yaptı)
-  const sonHar={}; har.forEach(x=>{ const id=x.kullaniciId; if(!id||!["satis","tahsilat","konsinye","iade","stant","diplomasi"].includes(x.tip)) return;
-    const t=new Date(x.tarih).getTime()||0; if(!sonHar[id]||t>sonHar[id].t) sonHar[id]={t,x}; });
-  const harMetni=x=>x.tip==="satis"?((num(x.adet)||"")+"× "+(x.urunAd||"satış")+(x.gerilla?" ⚡":"")):x.tip==="tahsilat"?("tahsilat "+tl(x.tutar)):x.tip==="konsinye"?((num(x.adet)||"")+"× "+(x.urunAd||"?")+" konsinye"):x.tip;
+  const izle=["satis","tahsilat","konsinye","iade","stant","diplomasi","hediye"];
+  // her pazarlamacının SON hareketi (nerede/ne yaptı) + son adımları
+  const sonHar={}, harByK={};
+  har.forEach(x=>{ const id=x.kullaniciId; if(!id||!izle.includes(x.tip)) return;
+    const t=new Date(x.tarih).getTime()||0; if(!sonHar[id]||t>sonHar[id].t) sonHar[id]={t,x};
+    (harByK[id]||(harByK[id]=[])).push(x); });
+  Object.values(harByK).forEach(a=>a.sort((p,q)=>new Date(q.tarih)-new Date(p.tarih)));
+  const harMetni=x=>x.tip==="satis"?((num(x.adet)||"")+"× "+(x.urunAd||"satış")+(x.gerilla?" ⚡":"")):x.tip==="tahsilat"?("tahsilat "+tl(x.tutar)):x.tip==="konsinye"?((num(x.adet)||"")+"× "+(x.urunAd||"?")+" konsinye"):x.tip==="iade"?((num(x.adet)||"")+"× "+(x.urunAd||"?")+" iade"):x.tip==="hediye"?((num(x.adet)||"")+"× "+(x.urunAd||"?")+" hediye"):x.tip==="stant"?"stant bırakıldı":x.tip==="diplomasi"?"ziyaret":x.tip;
+  const harTutar=x=>x.tip==="tahsilat"?tl(x.tutar):x.tip==="satis"?tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)):(num(x.adet)?(num(x.adet)+" ad"):"");
   const acikTalep=(talepler||[]).filter(t=>t.durum!=="kapandi").sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
   const enSonUretim=(()=>{ let b=null; d.makDurum.forEach(m=>{ if(m.son){ const t=new Date(m.son.gercekBaslangic||m.son.baslangic).getTime()||0; if(!b||t>b.t) b={t,m}; } }); return b; })();
   return h("div",null,
@@ -841,21 +847,34 @@ function Us({d,ac,hareketler,go,talepler,onTalep,onMesaj,onTalepSil}){
         h(SecBaslik,{no:"1",txt:"📡 SAHADA · PAZARLAMACILAR",ek:d.ekip.length+" kişi"}),
         onMesaj?h("button",{onClick:onMesaj,style:{flexShrink:0,padding:"7px 12px",borderRadius:11,background:"var(--cyan)",color:"#fff",fontSize:12,fontWeight:800,marginLeft:8}},"✉️ Mesaj"):null),
       h("div",{style:{display:"grid",gap:8}},
-        d.ekip.length?d.ekip.map((e,i)=>{ const s2=sonHar[e.u.id];
-          return h("button",{key:i,onClick:()=>ac({tip:"ekip",e}),className:"card",style:{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",textAlign:"left",width:"100%",boxShadow:"none"}},
-            h("div",{style:{width:40,height:40,borderRadius:12,background:"var(--surf2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}},e.u.simge||"🎖️"),
-            h("div",{style:{flex:1,minWidth:0}},
-              h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},e.u.ad),
-              s2?h("div",{style:{fontSize:11.5,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(et[s2.x.tip]||"•")+" "+harMetni(s2.x)+(s2.x.yer?(" · 📍 "+s2.x.yer):"")):h("div",{style:{fontSize:11.5,color:"var(--mut2)"}},"henüz hareket yok")),
-            s2?h("div",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:700,flexShrink:0,textAlign:"right",maxWidth:70}},once(s2.t)):null); })
+        d.ekip.length?d.ekip.map((e,i)=>{ const s2=sonHar[e.u.id]; const acik=acikP===e.u.id; const adimlar=(harByK[e.u.id]||[]).slice(0,6);
+          return h("div",{key:i,className:"card",style:{boxShadow:"none",overflow:"hidden"}},
+            h("button",{onClick:()=>setAcikP(acik?null:e.u.id),style:{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",textAlign:"left",width:"100%",background:"none"}},
+              h("div",{style:{width:40,height:40,borderRadius:12,background:"var(--surf2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}},e.u.simge||"🎖️"),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},e.u.ad),
+                s2?h("div",{style:{fontSize:11.5,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(et[s2.x.tip]||"•")+" "+harMetni(s2.x)+(s2.x.yer?(" · 📍 "+s2.x.yer):"")):h("div",{style:{fontSize:11.5,color:"var(--mut2)"}},"henüz hareket yok")),
+              s2?h("div",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:700,flexShrink:0,textAlign:"right",maxWidth:64}},once(s2.t)):null,
+              h("span",{style:{fontSize:15,color:"var(--mut2)",flexShrink:0,marginLeft:4,transform:acik?"rotate(90deg)":"none",transition:"transform .15s"}},"›")),
+            acik?h("div",{style:{borderTop:"1px solid var(--line)",padding:"4px 13px 12px"}},
+              adimlar.length?adimlar.map((x,j)=>h("div",{key:j,style:{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderTop:j?"1px solid var(--line)":"none"}},
+                h("span",{style:{fontSize:15,flexShrink:0}},et[x.tip]||"•"),
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},harMetni(x)),
+                  h("div",{style:{fontSize:10.5,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(x.yer?("📍 "+x.yer+" · "):"")+once(new Date(x.tarih).getTime()))),
+                h("span",{style:{fontSize:11.5,fontWeight:800,flexShrink:0,color:"var(--mut2)"}},harTutar(x))))
+                :h("div",{style:{fontSize:12,color:"var(--mut2)",padding:"8px 0"}},"Kayıtlı adım yok."),
+              h("button",{onClick:()=>ac({tip:"ekip",e}),style:{width:"100%",marginTop:8,padding:"9px 0",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12,fontWeight:800,color:"var(--mut)"}},"👤 Kişi kartını aç ›")):null); })
           :h("div",{className:"card",style:{padding:20,textAlign:"center",color:"var(--mut)",boxShadow:"none"}},"Pazarlamacı yok."))),
-    // 🖨️ ÜRETİM — makineler + en son ne oldu
+    // 🖨️ ÜRETİM — tek satır özet (detay Üretim sekmesinde)
     h("div",{style:{padding:P}},
-      h(SecBaslik,{no:"2",txt:"🖨️ ÜRETİM",ek:d.aktifBaski+" baskıda · "+d.tablaBek+" tabla"}),
-      enSonUretim?h("div",{style:{fontSize:11.5,color:"var(--mut)",margin:"0 2px 8px"}},"Son: "+(enSonUretim.m.mk.ad||"?")+" · "+((enSonUretim.m.son.ad||"iş"))+" · "+(enSonUretim.m.durum==="basiyor"?"basıyor":enSonUretim.m.durum==="tabla"?"tabla bekliyor":"bitti")+" · "+once(enSonUretim.t)):null,
-      h("div",{style:{display:"grid",gap:8}},
-        d.makDurum.length?d.makDurum.map((m,i)=>h(MakineKart,{key:i,m,onClick:()=>ac({tip:"makine",m})})):
-          h("div",{className:"card",style:{padding:20,textAlign:"center",color:"var(--mut)",boxShadow:"none"}},"Makine tanımlı değil."))),
+      h("button",{onClick:()=>go("uretim"),className:"card",style:{display:"flex",alignItems:"center",gap:12,padding:"13px 14px",width:"100%",textAlign:"left",boxShadow:"none"}},
+        h("span",{style:{fontSize:22,flexShrink:0}},"🖨️"),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13.5,fontWeight:800}},"Üretim · "+d.aktifBaski+" baskıda"+(d.tablaBek?(" · "+d.tablaBek+" tabla"):"")),
+          h("div",{style:{fontSize:11,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+            enSonUretim?("Son: "+(enSonUretim.m.mk.ad||"?")+" · "+(enSonUretim.m.durum==="basiyor"?"basıyor":enSonUretim.m.durum==="tabla"?"tabla bekliyor":"bitti")+" · "+once(enSonUretim.t)):(d.makDurum.length?(d.makDurum.length+" makine hazır"):"Makine tanımlı değil"))),
+        h("span",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",flexShrink:0}},"detay ›"))),
     // ⚠️ minimal uyarılar
     (d.dusuk.length||d.alacakTop>0.5)?h("div",{style:{padding:P}},
       h(SecBaslik,{no:"3",txt:"⚠️ DİKKAT"}),
@@ -871,14 +890,17 @@ function Us({d,ac,hareketler,go,talepler,onTalep,onMesaj,onTalepSil}){
     h("div",{style:{height:24}}));
 }
 // 💬 TALEP CEVAP — gelen talebe cevap · veya gönderilen mesajın yanıtını gör
-function TalepCevapSheet({talep,onKaydet,bekle}){
+function TalepCevapSheet({talep,onKaydet,bekle,onRota}){
   const komutadan=talep.kaynak==="komuta";
+  const konumVar=talep.lat!=null&&talep.lng!=null;
   const [cevap,setCevap]=useState(talep.cevap||"");
   const kapali=talep.durum==="kapandi";
   return h(Sheet,{ik:komutadan?"✉️":(talep.simge||"💬"),hex:"#d97b12",baslik:(komutadan?"Mesaj · ":"Talep · ")+(talep.kullaniciAd||""),alt:once(new Date(talep.tarih).getTime())+(talep.tip?(" · "+talep.tip):""),onClose:()=>onKaydet(null),
     cta:bekle?"⏳…":(komutadan?"✔ Kapat":"📩 Cevabı gönder & kapat"),disabled:bekle,onCta:()=>onKaydet({...talep,cevap:komutadan?(talep.cevap||""):cevap.trim(),durum:"kapandi"})},
     h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",marginBottom:12,fontSize:14.5,fontWeight:600,lineHeight:1.5}},(komutadan?"📤 sen: ":"📥 ")+talep.mesaj),
-    (talep.lat&&talep.lng)?h("a",{href:"https://www.google.com/maps?q="+talep.lat+","+talep.lng,target:"_blank",style:{display:"block",padding:"12px 14px",borderRadius:12,background:"#0e8fce14",border:"1px solid #0e8fce44",fontSize:14,fontWeight:800,color:"var(--cyan)",textAlign:"center",marginBottom:12}},"🗺️ Paylaşılan konumu haritada aç"):null,
+    konumVar?h(React.Fragment,null,
+      h("button",{onClick:()=>onRota&&onRota(talep),style:{display:"block",width:"100%",padding:"13px 14px",borderRadius:12,background:"var(--cyan)",border:"none",fontSize:14,fontWeight:800,color:"#fff",textAlign:"center",marginBottom:8}},"🧭 Bu konumdan alan tara & rota kur"),
+      h("a",{href:"https://www.google.com/maps?q="+talep.lat+","+talep.lng,target:"_blank",style:{display:"block",padding:"11px 14px",borderRadius:12,background:"#0e8fce14",border:"1px solid #0e8fce44",fontSize:13.5,fontWeight:800,color:"var(--cyan)",textAlign:"center",marginBottom:12}},"🗺️ Google Haritalar'da aç")):null,
     komutadan?h(React.Fragment,null,
       talep.konumIste?h("div",{style:{fontSize:11.5,fontWeight:700,color:"var(--cyan)",marginBottom:8}},"📍 Anlık konum istendi"):null,
       talep.cevap?h("div",{style:{padding:"11px 13px",borderRadius:12,background:"#eef6ff",border:"1px solid #cfe6fb",fontSize:14,fontWeight:600,color:"#0b5f92"}},"↩️ "+(talep.kullaniciAd||"Pazarlamacı")+": "+talep.cevap):((talep.lat&&talep.lng)?null:h("div",{style:{fontSize:12.5,color:"var(--mut)",textAlign:"center",padding:"6px 0"}},"Henüz yanıtlamadı.")))
@@ -1062,8 +1084,8 @@ function AyarSheet({ayar,onKaydet,bekle}){
     alan("API anahtarı (kale/müşteri konumu için)",gkey,setGkey,true));
 }
 /* ————— HEDEF/GÖREV HARİTASI — poligon çiz → tara → rota/görev ata ————— */
-function HedefHarita({kullanicilar,gkey,onKaydet}){
-  const ref=useRef(null), mapRef=useRef(null), cizLg=useRef(null), sonucLg=useRef(null);
+function HedefHarita({kullanicilar,gkey,onKaydet,odak}){
+  const ref=useRef(null), mapRef=useRef(null), cizLg=useRef(null), sonucLg=useRef(null), odakLg=useRef(null);
   const [kose,setKose]=useState([]);
   const [sonuc,setSonuc]=useState([]);
   const [secili,setSecili]=useState({});
@@ -1073,10 +1095,17 @@ function HedefHarita({kullanicilar,gkey,onKaydet}){
   useEffect(()=>{ if(!window.L||!ref.current||mapRef.current) return; const L=window.L;
     const map=L.map(ref.current,{scrollWheelZoom:true,attributionControl:false}).setView([41.02,29.03],12);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
-    cizLg.current=L.layerGroup().addTo(map); sonucLg.current=L.layerGroup().addTo(map);
+    cizLg.current=L.layerGroup().addTo(map); sonucLg.current=L.layerGroup().addTo(map); odakLg.current=L.layerGroup().addTo(map);
     map.on("click",e=>setKose(k=>[...k,[+e.latlng.lat.toFixed(6),+e.latlng.lng.toFixed(6)]]));
     mapRef.current=map; setTimeout(()=>{ try{map.invalidateSize();}catch(x){} },200);
   },[]);
+  // 📍 pazarlamacının paylaştığı anlık konum → haritayı oraya uçur + iğnele
+  useEffect(()=>{ const L=window.L, map=mapRef.current, lg=odakLg.current; if(!L||!map||!lg||!odak||odak.lat==null||odak.lng==null) return;
+    lg.clearLayers(); const c=[+odak.lat,+odak.lng];
+    const ik=L.divIcon({className:"",iconSize:[34,34],iconAnchor:[17,17],html:"<div style='width:34px;height:34px;border-radius:50%;background:#0e8fce33;display:flex;align-items:center;justify-content:center'><div style='width:14px;height:14px;border-radius:50%;background:#0e8fce;border:2px solid #fff;box-shadow:0 0 0 2px #0e8fce55'></div></div>"});
+    L.marker(c,{icon:ik,interactive:false}).addTo(lg).bindTooltip("📍 "+((odak.ad||"Pazarlamacı"))+" · anlık konum",{direction:"top",permanent:false});
+    try{ map.setView(c,15); }catch(x){} setTimeout(()=>{ try{map.invalidateSize();}catch(x){} },150);
+  },[odak]);
   useEffect(()=>{ const L=window.L, lg=cizLg.current; if(!L||!lg) return; lg.clearLayers();
     kose.forEach(p=>L.circleMarker(p,{radius:5,color:"#b45309",fillColor:"#b45309",fillOpacity:1,weight:2}).addTo(lg));
     if(kose.length>=3) L.polygon(kose,{color:"#b45309",weight:2,fillColor:"#f59e0b",fillOpacity:0.14}).addTo(lg);
@@ -1133,6 +1162,7 @@ function HedefHarita({kullanicilar,gkey,onKaydet}){
   const katBtn=c=>{ const on=kat.includes(c.k); return h("button",{key:c.k,onClick:()=>setKat(s=>on?s.filter(x=>x!==c.k):[...s,c.k]),
     style:{padding:"7px 11px",borderRadius:10,fontSize:12,fontWeight:700,background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},c.ik+" "+c.ad); };
   return h("div",null,
+    odak?h("div",{style:{padding:"9px 13px",borderRadius:12,background:"#0e8fce14",border:"1px solid #0e8fce44",fontSize:12,fontWeight:700,color:"#0b5f92",marginBottom:8}},"📍 "+((odak.ad||"Pazarlamacı"))+"'nın anlık konumu haritada — çevresine dokunarak alan çiz, tara ve rota kur."):null,
     h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},KESIF_KAT.map(katBtn)),
     h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:6}},"🖊️ Haritaya dokunarak alan köşelerini işaretle (en az 3). Sonra '🔍 Alanı tara'."),
     h("div",{ref,style:{height:380,borderRadius:14,overflow:"hidden",border:"1px solid var(--line)",marginBottom:8}}),
@@ -1158,11 +1188,13 @@ function HedefHarita({kullanicilar,gkey,onKaydet}){
           h("option",{value:""},"👥 Tüm ekip"),(kullanicilar||[]).filter(u=>u.rol!=="admin"&&(u.ad||"").trim()).map(u=>h("option",{key:u.id,value:u.id},u.ad))),
         h("button",{onClick:gorevVer,style:{width:"100%",padding:13,borderRadius:13,background:"#b45309",color:"#fff",fontSize:14,fontWeight:800}},"📋 Görevi ver ("+secSay+" durak)"))):null);
 }
-function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil}){
-  const [alt,setAlt]=useState("ozet");   // ozet/paz/kons/alacak/mus/hareket
+function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak}){
+  const [alt,setAlt]=useState(odak?"hedef":"ozet");   // ozet/paz/kons/alacak/mus/hareket/hedef
   const [kod,setKod]=useState("hafta");
   const [hkisi,setHkisi]=useState("");
   const [det,setDet]=useState(null);
+  // pazarlamacı konum paylaşınca → doğrudan hedef (alan tara) sekmesine geç
+  useEffect(()=>{ if(odak) setAlt("hedef"); },[odak]);
   const donemler=[["bugun","Bugün"],["hafta","Bu hafta"],["ay","Bu ay"],["30","30 gün"]];
   const b0=(()=>{const g=new Date();g.setHours(0,0,0,0);
     if(kod==="bugun") return g.getTime();
@@ -1257,7 +1289,7 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
           h("span",{style:{fontSize:12.5,fontWeight:800,flexShrink:0}},x.tip==="tahsilat"?tl(x.tutar):x.tip==="satis"?tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)):(num(x.adet)+" ad"))))):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Kayıt yok."); })()):null,
     alt==="hedef"?h(React.Fragment,null,
       h("div",{className:"lbl",style:{marginBottom:8}},"🎯 Alan tara → görev ata"),
-      h(HedefHarita,{kullanicilar,gkey,onKaydet:onGorevKaydet}),
+      h(HedefHarita,{kullanicilar,gkey,onKaydet:onGorevKaydet,odak}),
       (()=>{ const gv=(hedefler||[]).filter(x=>(x.duraklar&&x.duraklar.length)).sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
         const kad={}; (kullanicilar||[]).forEach(u=>kad[u.id]=u.ad);
         return gv.length?h("div",{style:{marginTop:16}},
@@ -1317,11 +1349,12 @@ function App(){
   const [view,setView]=useState(()=>{ try{ return sessionStorage.getItem("tk_adm_view")||"us"; }catch(e){ return "us"; } });
   useEffect(()=>{ try{ sessionStorage.setItem("tk_adm_view",view); }catch(e){} },[view]);
   const [modal,setModal]=useState(null); const [toastMsg,setToastMsg]=useState("");
+  const [hedefOdak,setHedefOdak]=useState(null);   // 📍 pazarlamacının paylaştığı anlık konum → alan tara
   const say=m=>{ setToastMsg(m); clearTimeout(window.__t); window.__t=setTimeout(()=>setToastMsg(""),2200); };
   const veriHata=useVeriHata();
   const yuk=[plan,makineler,urunler,hareketler,kullanicilar,musteriler].some(x=>x===null);
   const d=useMemo(()=>yuk?null:hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,makCanli,filamentler),[plan,makineler,urunler,hareketler,kullanicilar,musteriler,makCanli,filamentler,yuk]);
-  const go=v=>{ setModal(null); setView(v); window.scrollTo(0,0); };
+  const go=v=>{ setModal(null); setHedefOdak(null); setView(v); window.scrollTo(0,0); };
   const [isBekle,setIsBekle]=useState(false);
   async function isKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ const eski=p2._eski; const {_eski,...kayit}=p2;
@@ -1374,6 +1407,7 @@ function App(){
     try{ await save("talep",{id:t.id,cevap:t.cevap||"",durum:t.durum||"kapandi",cevapTarih:new Date().toISOString()}); setModal(null); say(t.durum==="kapandi"?"📩 Talep cevaplandı":"↩️ Talep tekrar açıldı"); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function talepSil(t){ if(!t||!t.id) return; if(!confirm("🗑 Bu mesaj silinsin mi?")) return; try{ await remove("talep",t.id); say("🗑 Mesaj silindi"); }catch(e){ console.error(e); say("⚠ Silinemedi"); } }
+  function talepRota(t){ if(!t||t.lat==null||t.lng==null) return; setModal(null); setHedefOdak({lat:t.lat,lng:t.lng,ad:t.kullaniciAd||"",t:Date.now()}); setView("rapor"); window.scrollTo(0,0); }
   async function talepYaz(p){ if(p===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     const kad=(kullanicilar||[]).find(u=>u.id===p.kullaniciId);
     try{ await save("talep",{kaynak:"komuta",kullaniciId:p.kullaniciId,kullaniciAd:kad?kad.ad:"",simge:kad?(kad.simge||"👑"):"👑",mesaj:p.mesaj,konumIste:!!p.konumIste,durum:"acik",tarih:new Date().toISOString()}); setModal(null); say("📨 Mesaj gönderildi"); }
@@ -1423,7 +1457,7 @@ function App(){
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
-  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil});
+  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak});
   return h("div",null,
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
@@ -1446,7 +1480,7 @@ function App(){
     modal&&modal.tip==="filamentYonet"&&h(FilamentYonetimSheet,{filamentler,onClose:()=>setModal(null),onAc:setModal}),
     modal&&modal.tip==="filamentDuzen"&&h(FilamentDuzenSheet,{fl:modal.fl,bekle:isBekle,onKaydet:filamentKaydet,onSil:filamentSil}),
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
-    modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap}),
+    modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap,onRota:talepRota}),
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
     modal&&modal.tip==="urunDuzen"&&h(UrunDuzenSheet,{u:modal.u,bekle:isBekle,onKaydet:urunKaydet}),
     modal&&modal.tip==="kullanici"&&h(KullaniciSheet,{u:modal.u,bekle:isBekle,onKaydet:kullaniciKaydet}),
