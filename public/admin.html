@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A30";   // komuta (admin) deneme sürümü
+const SURUM="A31";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1197,12 +1197,11 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const [konsGrup,setKonsGrup]=useState("mekan");   // konsinye gruplama: mekan/urun/tarih
   // pazarlamacı konum paylaşınca → doğrudan hedef (alan tara) sekmesine geç
   useEffect(()=>{ if(odak) setAlt("hedef"); },[odak]);
-  const donemler=[["bugun","Bugün"],["hafta","Bu hafta"],["ay","Bu ay"],["30","30 gün"],["tum","Tüm zamanlar"],["ozel","📅 Özel"]];
+  const donemler=[["tum","Tüm zamanlar"],["bugun","Bugün"],["hafta","Bu hafta"],["ay","Bu ay"],["ozel","📅 Özel"]];
   const [b0,b1]=useMemo(()=>{ const g=new Date(); g.setHours(0,0,0,0); const t0=g.getTime();
     if(kod==="bugun") return [t0, t0+864e5];
     if(kod==="hafta"){ const gun=(g.getDay()+6)%7; const mon=t0-gun*864e5; return [mon, mon+7*864e5]; }   // pazartesi → pazar (içinde bulunduğumuz hafta)
     if(kod==="ay") return [new Date(g.getFullYear(),g.getMonth(),1).getTime(), new Date(g.getFullYear(),g.getMonth()+1,1).getTime()];   // bulunduğumuz ay
-    if(kod==="30") return [t0-29*864e5, t0+864e5];
     if(kod==="tum") return [0, Infinity];
     if(kod==="ozel"){ const a=ozelBas?new Date(ozelBas+"T00:00:00").getTime():0; const b=ozelBit?(new Date(ozelBit+"T00:00:00").getTime()+864e5):Infinity; return [a,b]; }
     return [0, Infinity]; },[kod,ozelBas,ozelBit]);
@@ -1227,9 +1226,9 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     acikByUrun[u]=(acikByUrun[u]||0)+num(x.kalan); } });
   const konsList=Object.values(konsByYer).sort((a,b)=>b.tutar-a.tutar);
   const acikAdAll=konsList.reduce((s,k)=>s+k.adet,0), acikTutAll=konsList.reduce((s,k)=>s+k.tutar,0);
-  // konsinye yaşam döngüsü (tüm zaman, ürün bazında) — bırak / satış / iade + ilk bırakış
+  // konsinye yaşam döngüsü (SEÇİLİ DÖNEM, ürün bazında) — bırak / satış / iade + ilk bırakış
   const cU={};
-  (hareketler||[]).forEach(x=>{ const u=x.urunAd||"?"; const t=new Date(x.tarih).getTime()||0;
+  R.forEach(x=>{ const u=x.urunAd||"?"; const t=new Date(x.tarih).getTime()||0;
     const o=cU[u]||(cU[u]={u,birak:0,sat:0,satTut:0,iade:0,ilk:t});
     if(x.tip==="konsinye"&&!x.gerilla){ o.birak+=num(x.adet); if(t&&t<o.ilk)o.ilk=t; }
     else if(x.tip==="satis"&&x.kaynak==="konsinye"){ o.sat+=num(x.adet); o.satTut+=num(x.adet)*num(x.satisFiyat); }
@@ -1257,12 +1256,12 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const srt=a=>a.slice().sort((x,y)=>new Date(y.tarih)-new Date(x.tarih));
   const harRow=(x,v,renk)=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.kullaniciAd||"?")+" · "+(x.yer||"—")+" · "+fmtS(x.tarih),v,renk});
   const acikRecs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0).sort((a,b)=>num(b.kalan)-num(a.kalan));
-  const satRecs=(hareketler||[]).filter(x=>x.tip==="satis"&&x.kaynak==="konsinye");
+  const satRecs=R.filter(x=>x.tip==="satis"&&x.kaynak==="konsinye");
   const detUrun=(baslik,ik,hex,sortF,vF,renk)=>({ik,hex,baslik,rows:cUList.filter(o=>o.birak>0||o.sat>0).sort(sortF).map(o=>({t:o.u,alt:"bırak "+o.birak+" · sat "+o.sat+" · açık "+o.acik+" · %"+Math.round(o.donusum*100),v:vF(o),renk}))});
   const detB={
     birakDon:()=>({ik:"📥",hex:"#7c46e6",baslik:"Bu dönem bırakılan konsinye",rows:srt(birakDon).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--violet)"))}),
     acik:()=>({ik:"🏬",hex:"#7c46e6",baslik:"Toplam açık konsinye",rows:acikRecs.map(x=>({t:num(x.kalan)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+(x.kullaniciAd||"?"),v:tl(num(x.kalan)*num(x.satisFiyat)),renk:"var(--txt)"}))}),
-    sat:()=>({ik:"✅",hex:"#16a34a",baslik:"Konsinyeden satılan (tüm zaman)",rows:srt(satRecs).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--green)"))}),
+    sat:()=>({ik:"✅",hex:"#16a34a",baslik:"Konsinyeden satılan · "+((donemler.find(x=>x[0]===kod)||["",""])[1]),rows:srt(satRecs).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--green)"))}),
     tah:()=>({ik:"🧾",hex:"#d97b12",baslik:"Tahsilatlar",rows:srt(R.filter(x=>x.tip==="tahsilat")).map(x=>({t:(x.kullaniciAd||"?")+" · "+(x.yer||"—"),alt:fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}))}),
     hakedis:()=>({ik:"🫰",hex:"#d97b12",baslik:"Hakediş — pazarlamacı bazında",rows:perf.filter(p=>p.hakedis>0).sort((a,b)=>b.hakedis-a.hakedis).map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"tahsilat "+tl(p.nakit),v:tl(p.hakedis),renk:"var(--gold)"}))}),
     uretici:()=>({ik:"🏭",hex:"#334155",baslik:"Üreticiye kalan — pazarlamacı bazında",rows:perf.filter(p=>p.uBorc>0).sort((a,b)=>b.uBorc-a.uBorc).map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"tahsilat "+tl(p.nakit),v:tl(p.uBorc),renk:"var(--txt)"}))}),
@@ -1322,8 +1321,8 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"2px 0 14px"}},
         h(Stat,{ik:"📥",v:birakDonAd+" ad",l:"bu dönem bırakılan ("+tl(birakDonTut)+") ›",renk:"var(--violet)",onClick:()=>setDet(detB.birakDon())}),
         h(Stat,{ik:"🏬",v:acikAdAll+" ad",l:"toplam açık konsinye ("+tl(acikTutAll)+") ›",renk:"var(--txt)",onClick:()=>setDet(detB.acik())})),
-      // konsinye → satış istatistikleri (tüm zaman)
-      h("div",{className:"lbl",style:{marginBottom:8}},"📈 Konsinye → satış istatistikleri (tüm zaman)"),
+      // konsinye → satış istatistikleri (seçili döneme göre)
+      h("div",{className:"lbl",style:{marginBottom:8}},"📈 Konsinye → satış istatistikleri · "+((donemler.find(x=>x[0]===kod)||["",""])[1])),
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
         h(Stat,{ik:"✅",v:satTopAd+" ad",l:"konsinyeden satılan ("+tl(satTopTut)+") ›",renk:"var(--green)",onClick:()=>setDet(detB.sat())}),
         h(Stat,{ik:"📉",v:"%"+Math.round(genelDonusum*100),l:"genel dönüşüm — ürün dökümü ›",renk:"var(--cyan)",onClick:()=>setDet(detUrun("Ürün dönüşüm oranları","📉","#0e8fce",(a,b)=>b.donusum-a.donusum,o=>"%"+Math.round(o.donusum*100),"var(--cyan)"))}),
