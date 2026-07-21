@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A29";   // komuta (admin) deneme sürümü
+const SURUM="A30";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1253,6 +1253,25 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const alacakList=(ekip||[]).filter(e=>e.alacak>0.5).sort((a,b)=>b.alacak-a.alacak);
   const mekanTop=new Set(R.filter(x=>(x.yer||"").trim()&&["satis","konsinye","tahsilat"].includes(x.tip)).map(x=>(x.yer||"").toLocaleLowerCase("tr"))).size;
   const konsTopAd=konsList.reduce((s,k)=>s+k.adet,0), konsTopTut=konsList.reduce((s,k)=>s+k.tutar,0), alacakTop=alacakList.reduce((s,e)=>s+e.alacak,0);
+  // ——— kutuların "bildiğimiz konsept" detay sayfaları ———
+  const srt=a=>a.slice().sort((x,y)=>new Date(y.tarih)-new Date(x.tarih));
+  const harRow=(x,v,renk)=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.kullaniciAd||"?")+" · "+(x.yer||"—")+" · "+fmtS(x.tarih),v,renk});
+  const acikRecs=(hareketler||[]).filter(x=>x.tip==="konsinye"&&num(x.kalan)>0).sort((a,b)=>num(b.kalan)-num(a.kalan));
+  const satRecs=(hareketler||[]).filter(x=>x.tip==="satis"&&x.kaynak==="konsinye");
+  const detUrun=(baslik,ik,hex,sortF,vF,renk)=>({ik,hex,baslik,rows:cUList.filter(o=>o.birak>0||o.sat>0).sort(sortF).map(o=>({t:o.u,alt:"bırak "+o.birak+" · sat "+o.sat+" · açık "+o.acik+" · %"+Math.round(o.donusum*100),v:vF(o),renk}))});
+  const detB={
+    birakDon:()=>({ik:"📥",hex:"#7c46e6",baslik:"Bu dönem bırakılan konsinye",rows:srt(birakDon).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--violet)"))}),
+    acik:()=>({ik:"🏬",hex:"#7c46e6",baslik:"Toplam açık konsinye",rows:acikRecs.map(x=>({t:num(x.kalan)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+(x.kullaniciAd||"?"),v:tl(num(x.kalan)*num(x.satisFiyat)),renk:"var(--txt)"}))}),
+    sat:()=>({ik:"✅",hex:"#16a34a",baslik:"Konsinyeden satılan (tüm zaman)",rows:srt(satRecs).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--green)"))}),
+    tah:()=>({ik:"🧾",hex:"#d97b12",baslik:"Tahsilatlar",rows:srt(R.filter(x=>x.tip==="tahsilat")).map(x=>({t:(x.kullaniciAd||"?")+" · "+(x.yer||"—"),alt:fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}))}),
+    hakedis:()=>({ik:"🫰",hex:"#d97b12",baslik:"Hakediş — pazarlamacı bazında",rows:perf.filter(p=>p.hakedis>0).sort((a,b)=>b.hakedis-a.hakedis).map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"tahsilat "+tl(p.nakit),v:tl(p.hakedis),renk:"var(--gold)"}))}),
+    uretici:()=>({ik:"🏭",hex:"#334155",baslik:"Üreticiye kalan — pazarlamacı bazında",rows:perf.filter(p=>p.uBorc>0).sort((a,b)=>b.uBorc-a.uBorc).map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"tahsilat "+tl(p.nakit),v:tl(p.uBorc),renk:"var(--txt)"}))}),
+    tabla:()=>({ik:"🧹",hex:"#7c46e6",baslik:"Tabla değişimleri",rows:srt(R.filter(x=>x.tip==="tabla")).map(x=>({t:(x.kullaniciAd||"?")+" · "+(x.yer||"—"),alt:fmtS(x.tarih),v:tl(x.tutar),renk:"var(--violet)"}))}),
+    aktif:()=>({ik:"🎖️",hex:"#0e8fce",baslik:"Aktif pazarlamacılar",rows:perf.map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"satış "+p.satA+" ad · kons "+p.konsA+" · mekan "+p.mekan,v:tl(p.nakit),renk:"var(--green)"}))}),
+    mekan:()=>{ const m={}; R.filter(x=>(x.yer||"").trim()&&["satis","konsinye","tahsilat"].includes(x.tip)).forEach(x=>{ const y=x.yer; const o=m[y]||(m[y]={yer:y,n:0,son:0}); o.n++; const t=new Date(x.tarih).getTime()||0; if(t>o.son)o.son=t; }); return {ik:"📍",hex:"#0e8fce",baslik:"Uğranılan mekanlar",rows:Object.values(m).sort((a,b)=>b.son-a.son).map(o=>({t:o.yer,alt:o.n+" işlem",v:fmtS(new Date(o.son).toISOString()),renk:"var(--cyan)"}))}; },
+    ciro:()=>({ik:"💰",hex:"#16a34a",baslik:"Kale satışları",rows:srt(R.filter(x=>x.tip==="satis"&&!x.gerilla)).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--green)"))}),
+    gerilla:()=>({ik:"⚡",hex:"#0e8fce",baslik:"Gerilla satışları",rows:srt(R.filter(x=>x.tip==="satis"&&x.gerilla)).map(x=>harRow(x,tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),"var(--cyan)"))}),
+  };
   const Tbl=(head,rows)=>h("div",{style:{overflowX:"auto",marginBottom:16}},
     h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:head.length*66}},
       h("thead",null,h("tr",null,head.map((hh,i)=>h("th",{key:i,style:{textAlign:i?"right":"left",padding:"7px 8px",color:"var(--mut)",fontWeight:800,whiteSpace:"nowrap",borderBottom:"1.5px solid var(--line)",position:i?"static":"sticky",left:0,background:"var(--bg)"}},hh)))),
@@ -1277,16 +1296,16 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     (alt==="ozet"||alt==="paz"||alt==="hareket"||alt==="kons")?donemBar:null,
     alt==="ozet"?h(React.Fragment,null,
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"6px 0 16px"}},
-        h(Stat,{ik:"💰",v:tl(ciro),l:adet+" adet kale ›",renk:"var(--green)",onClick:()=>setDet({ik:"💰",hex:"#16a34a",baslik:"Kale satışları",rows:R.filter(x=>x.tip==="satis"&&!x.gerilla).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.kullaniciAd||"?")+" · "+(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}))})}),
-        h(Stat,{ik:"⚡",v:tl(T.gerC),l:T.gerA+" adet gerilla ›",renk:"var(--cyan)",onClick:()=>setDet({ik:"⚡",hex:"#0e8fce",baslik:"Gerilla satışları",rows:R.filter(x=>x.tip==="satis"&&x.gerilla).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.kullaniciAd||"?")+" · "+(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}))})}),
-        h(Stat,{ik:"🧾",v:tl(T.tah),l:"tahsil edilen",renk:"var(--gold)"}),
-        h(Stat,{ik:"🫰",v:tl(T.hakedis),l:"toplam hakediş",renk:"var(--gold)"}),
-        h(Stat,{ik:"🏭",v:tl(T.uBorc),l:"üreticiye kalan",renk:"var(--txt)"}),
-        h(Stat,{ik:"🧹",v:tl(T.tablaKaz),l:T.tabla+" tabla değişimi",renk:"var(--violet)"}),
+        h(Stat,{ik:"💰",v:tl(ciro),l:adet+" adet kale ›",renk:"var(--green)",onClick:()=>setDet(detB.ciro())}),
+        h(Stat,{ik:"⚡",v:tl(T.gerC),l:T.gerA+" adet gerilla ›",renk:"var(--cyan)",onClick:()=>setDet(detB.gerilla())}),
+        h(Stat,{ik:"🧾",v:tl(T.tah),l:"tahsil edilen ›",renk:"var(--gold)",onClick:()=>setDet(detB.tah())}),
+        h(Stat,{ik:"🫰",v:tl(T.hakedis),l:"toplam hakediş ›",renk:"var(--gold)",onClick:()=>setDet(detB.hakedis())}),
+        h(Stat,{ik:"🏭",v:tl(T.uBorc),l:"üreticiye kalan ›",renk:"var(--txt)",onClick:()=>setDet(detB.uretici())}),
+        h(Stat,{ik:"🧹",v:tl(T.tablaKaz),l:T.tabla+" tabla değişimi ›",renk:"var(--violet)",onClick:()=>setDet(detB.tabla())}),
         h(Stat,{ik:"🏬",v:konsTopAd+" ad",l:"açık konsinye ("+tl(konsTopTut)+") ›",renk:"var(--violet)",onClick:()=>setAlt("kons")}),
         h(Stat,{ik:"💰",v:tl(alacakTop),l:"net açık alacak ›",renk:alacakTop>0.5?"var(--red)":"var(--green)",onClick:()=>setAlt("alacak")}),
-        h(Stat,{ik:"🎖️",v:perf.length+" / "+(ekip||[]).length,l:"aktif pazarlamacı",renk:"var(--txt)"}),
-        h(Stat,{ik:"📍",v:String(mekanTop),l:"uğranılan mekan",renk:"var(--cyan)"}),
+        h(Stat,{ik:"🎖️",v:perf.length+" / "+(ekip||[]).length,l:"aktif pazarlamacı ›",renk:"var(--txt)",onClick:()=>setDet(detB.aktif())}),
+        h(Stat,{ik:"📍",v:String(mekanTop),l:"uğranılan mekan ›",renk:"var(--cyan)",onClick:()=>setDet(detB.mekan())}),
         h(Stat,{ik:"📦",v:d.planAdet+" ad",l:"bu hafta planlanan üretim",renk:"var(--gold)"})),
       h("div",{className:"lbl",style:{marginBottom:8}},"🏅 Pazarlamacı performansı"),
       perf.length?Tbl(["Pazarlamacı","Satış","Ciro","⚡Ger.","Kons.","Tahsilat","Hakediş","Mekan"],
@@ -1301,15 +1320,15 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     alt==="kons"?h(React.Fragment,null,
       // dönemde bırakılan + toplam açık
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"2px 0 14px"}},
-        h(Stat,{ik:"📥",v:birakDonAd+" ad",l:"bu dönem bırakılan ("+tl(birakDonTut)+")",renk:"var(--violet)"}),
-        h(Stat,{ik:"🏬",v:acikAdAll+" ad",l:"toplam açık konsinye ("+tl(acikTutAll)+")",renk:"var(--txt)"})),
+        h(Stat,{ik:"📥",v:birakDonAd+" ad",l:"bu dönem bırakılan ("+tl(birakDonTut)+") ›",renk:"var(--violet)",onClick:()=>setDet(detB.birakDon())}),
+        h(Stat,{ik:"🏬",v:acikAdAll+" ad",l:"toplam açık konsinye ("+tl(acikTutAll)+") ›",renk:"var(--txt)",onClick:()=>setDet(detB.acik())})),
       // konsinye → satış istatistikleri (tüm zaman)
       h("div",{className:"lbl",style:{marginBottom:8}},"📈 Konsinye → satış istatistikleri (tüm zaman)"),
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
-        h(Stat,{ik:"✅",v:satTopAd+" ad",l:"konsinyeden satılan ("+tl(satTopTut)+")",renk:"var(--green)"}),
-        h(Stat,{ik:"📉",v:"%"+Math.round(genelDonusum*100),l:"genel dönüşüm (satılan/bırakılan)",renk:"var(--cyan)"}),
-        h(Stat,{ik:"🔥",v:enCok?enCok.u:"—",l:enCok?("en çok giden · "+enCok.sat+" ad"):"konsinye satışı yok",renk:"var(--gold)"}),
-        h(Stat,{ik:"⚡",v:enHizli?enHizli.u:"—",l:enHizli?("en hızlı · "+enHizli.hiz.toFixed(1)+" ad/gün"):"veri yetersiz",renk:"var(--violet)"})),
+        h(Stat,{ik:"✅",v:satTopAd+" ad",l:"konsinyeden satılan ("+tl(satTopTut)+") ›",renk:"var(--green)",onClick:()=>setDet(detB.sat())}),
+        h(Stat,{ik:"📉",v:"%"+Math.round(genelDonusum*100),l:"genel dönüşüm — ürün dökümü ›",renk:"var(--cyan)",onClick:()=>setDet(detUrun("Ürün dönüşüm oranları","📉","#0e8fce",(a,b)=>b.donusum-a.donusum,o=>"%"+Math.round(o.donusum*100),"var(--cyan)"))}),
+        h(Stat,{ik:"🔥",v:enCok?enCok.u:"—",l:enCok?("en çok giden · "+enCok.sat+" ad ›"):"konsinye satışı yok",renk:"var(--gold)",onClick:enCok?()=>setDet(detUrun("Konsinyeden en çok giden","🔥","#d97b12",(a,b)=>b.sat-a.sat,o=>o.sat+" ad","var(--gold)")):null}),
+        h(Stat,{ik:"⚡",v:enHizli?enHizli.u:"—",l:enHizli?("en hızlı · "+enHizli.hiz.toFixed(1)+" ad/gün ›"):"veri yetersiz",renk:"var(--violet)",onClick:enHizli?()=>setDet(detUrun("En hızlı satılan (ad/gün)","⚡","#7c46e6",(a,b)=>b.hiz-a.hiz,o=>o.hiz.toFixed(1)+" ad/gün","var(--violet)")):null})),
       enDonus?h("div",{style:{fontSize:11.5,color:"var(--mut)",margin:"-8px 2px 14px"}},"🏆 En yüksek dönüşüm: "+enDonus.u+" · %"+Math.round(enDonus.donusum*100)+" ("+enDonus.sat+"/"+enDonus.birak+")"):null,
       // gruplama seçenekleri
       h("div",{style:{display:"flex",gap:8,marginBottom:10}},
