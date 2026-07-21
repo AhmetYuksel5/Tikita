@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A42";   // komuta (admin) deneme sürümü
+const SURUM="A43";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -334,9 +334,15 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,canliR
     return ort(prints); };
   const stok=(urunler||[]).filter(u=>(u.ad||"").trim()).map(u=>{
     const canta=Object.values(u.pazStokK||{}).reduce((s,v)=>s+num(v),0);
-    const ud=urunDetayF(u); const mo=malMap[u.id];   // parça-duyarlı; yoksa makine-dahil ortalamaya düş
-    const maliyet=num(u.maliyet)>0?num(u.maliyet):(ud?ud.maliyet:(mo&&mo.a?mo.t/mo.a:0));
     const parts=u.parcalar||[];
+    // baskı maliyet dökümü — her baskının birim + toplam maliyeti (makine 12₺/sa + filament); adet-ağırlıklı ortalama
+    const maliyetDetay=(baskiByU[u.id]||[]).filter(p=>num(p.adet)>0).map(p=>{ const fl=filById[p.filamentId]; const kg=fl?num(fl.kgFiyat):0;
+      const ad=num(p.adet), mak=num(p.sureDk)/60*SAAT_MALIYET, fila=num(p.gram)/1000*kg, tutar=mak+fila;
+      return {ad:p.ad||"baskı",tarih:p.baslangic,adet:ad,mak,fila,tutar,birim:ad>0?tutar/ad:0,fl:fl?fl.ad:""}; }).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+    const dTut=maliyetDetay.reduce((s,d)=>s+d.tutar,0), dAd=maliyetDetay.reduce((s,d)=>s+d.adet,0);
+    const ortMaliyet=dAd>0?dTut/dAd:0;   // Σ(adet×birim) ÷ Σadet
+    const ud=parts.length?urunDetayF(u):null;   // parçalıda parça-duyarlı; teklide adet-ağırlıklı ortalama
+    const maliyet=num(u.maliyet)>0?num(u.maliyet):(parts.length?(ud?ud.maliyet:ortMaliyet):ortMaliyet);
     const parcaBilgi=parts.map(p=>({p,avail:parcaAvailF(u,p),ger:gerekenP(u,p),takim:parcaTakimF(u,p),basildi:num((bldParca[u.id]||{})[p])}));
     const hazirTakim=parts.length?Math.min.apply(null,parts.map(p=>parcaTakimF(u,p))):0;
     // bu hafta basılacak
@@ -347,7 +353,7 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,canliR
       if(Object.values(pp).some(v=>v>0)) buHafta={parcali:true,pp,set}; }
     else { const ad=bhB.reduce((s,p)=>s+num(p.adet||1),0); if(ad>0) buHafta={parcali:false,adet:ad}; }
     return {id:u.id,ad:u.ad,stokta:num(u.stokta),canta,sahada:num(sahadaU[u.id])+num(sahadaU["a:"+u.ad]),fiyat:num(u.satisFiyat),alis:num(u.pazFiyat),
-      maliyet,maliyetElle:num(u.maliyet)>0,maliyetKaynak:num(u.maliyet)>0?"elle":(ud?(parts.length?"parça":"oto"):(mo&&mo.a?"oto":"yok")),basimda:basimEqF(u),montajda:montajdaF(u),satildi:num(u.satildi),hediye:num(u.hediye),konsStok:num(u.konsinye),gram:num(u.gram),
+      maliyet,maliyetElle:num(u.maliyet)>0,maliyetKaynak:num(u.maliyet)>0?"elle":((parts.length&&ud)?"parça":(dAd>0?"oto":"yok")),maliyetDetay,ortMaliyet,basimda:basimEqF(u),montajda:montajdaF(u),satildi:num(u.satildi),hediye:num(u.hediye),konsStok:num(u.konsinye),gram:num(u.gram),
       zayiat:num(u.zayiat),parcalar:parts,parcaAdet:u.parcaAdet||{},parcaBilgi,hazirTakim,buHafta,proj:projF(u),baskilar:(baskiByU[u.id]||[]).slice().sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)),pazStokK:u.pazStokK||{},raw:u};
   }).sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   const dusuk=stok.filter(u=>u.stokta<=3).sort((a,b)=>a.stokta-b.stokta);
@@ -558,7 +564,7 @@ function EkipSheet({e,onClose,onDuzen}){
 }
 
 /* ————— STOK ————— */
-function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onGecmis,onKomut,onParca}){
+function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onGecmis,onKomut,onParca,onMaliyet}){
   const kad={}; (kullanicilar||[]).forEach(k=>kad[k.id]=k.ad||"?");
   const cantalar=Object.entries(u.pazStokK||{}).map(([id,v])=>({ad:kad[id]||id,adet:num(v)})).filter(x=>x.adet>0).sort((a,b)=>b.adet-a.adet);
   const konsK={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye"&&num(x.kalan)>0&&(x.urunId===u.id||(x.urunAd||"")===u.ad)){ const y=x.yer||"?"; konsK[y]=(konsK[y]||0)+num(x.kalan); } });
@@ -582,7 +588,7 @@ function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onGecmis,onKomut,o
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}},
       h(Stat,{ik:"💰",v:tl(u.fiyat),l:"satış",renk:"var(--green)"}),
       h(Stat,{ik:"🏭",v:tl(u.alis),l:"alış",renk:"var(--txt)"}),
-      h(Stat,{ik:"🧮",v:tl(u.maliyet),l:"maliyet · "+(u.maliyetKaynak||"oto"),renk:"var(--violet)"})),
+      h(Stat,{ik:"🧮",v:tl(u.maliyet),l:"maliyet · "+(u.maliyetKaynak||"oto")+((u.maliyetDetay&&u.maliyetDetay.length)?" ›":""),renk:"var(--violet)",onClick:(u.maliyetDetay&&u.maliyetDetay.length&&onMaliyet)?()=>onMaliyet(u):null})),
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       onDuzen?h("button",{onClick:onDuzen,style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--cyan)"}},"✏️ Düzenle"):null,
       onGecmis?h("button",{onClick:()=>onGecmis(u),style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--txt)"}},"🕘 Geçmiş"):null),
@@ -666,6 +672,26 @@ function StokGecmisSheet({u,stokHareket,onClose}){
         h("div",{style:{fontSize:11,color:"var(--mut)"}},fmtS(x.tarih)+(x.kullaniciAd?(" · "+x.kullaniciAd):""))),
       h("span",{style:{fontWeight:800,color:num(x.delta)>=0?"var(--green)":"var(--red)",flexShrink:0}},(num(x.delta)>=0?"+":"")+num(x.delta))))
     :h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Bu ürün için hareket kaydı yok."));
+}
+// 🧮 MALİYET GEÇMİŞİ — her baskının birim/toplam maliyeti + adet-ağırlıklı ortalama
+function MaliyetGecmisSheet({u,onClose}){
+  const rows=u.maliyetDetay||[]; const tAd=rows.reduce((s,d)=>s+d.adet,0), tTut=rows.reduce((s,d)=>s+d.tutar,0);
+  return h(Sheet,{ik:"🧮",hex:"#7c46e6",baslik:"Maliyet dökümü · "+(u.ad||""),alt:rows.length+" baskı · adet-ağırlıklı ortalama",onClose,cta:"Kapat",onCta:onClose},
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}},
+      h(Stat,{ik:"🧮",v:tl(tAd>0?tTut/tAd:0),l:"ortalama birim maliyet",renk:"var(--violet)"}),
+      h(Stat,{ik:"📦",v:tAd+" ad",l:"toplam basılan ("+tl(tTut)+")",renk:"var(--txt)"})),
+    u.parcalar&&u.parcalar.length?h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:10,padding:"8px 11px",borderRadius:10,background:"var(--surf2)"}},"ℹ️ Parçalı ürün — kart maliyeti parça-duyarlı hesaplanır; aşağıdaki liste tüm baskıların dökümüdür."):null,
+    h("div",{className:"lbl",style:{marginBottom:6}},"🖨️ Baskı maliyet geçmişi"),
+    rows.length?rows.map((d,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i?"1px solid var(--line)":"none"}},
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},d.adet+" × "+(d.ad||"baskı")),
+        h("div",{style:{fontSize:11,color:"var(--mut)"}},fmtS(d.tarih)+" · makine "+tl(d.mak)+(d.fila>0?(" + filament "+tl(d.fila)+(d.fl?(" ("+d.fl+")"):"")):""))),
+      h("div",{style:{textAlign:"right",flexShrink:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800,color:"var(--violet)"}},tl(d.birim)+"/ad"),
+        h("div",{style:{fontSize:10.5,color:"var(--mut)"}},"toplam "+tl(d.tutar)))))
+    :h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Bu ürünün süreli baskısı yok — maliyet hesaplanamıyor."),
+    rows.length?h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,paddingTop:11,marginTop:6,borderTop:"2px solid var(--line)"}},
+      h("span",null,"ORTALAMA (Σ adet×birim ÷ Σadet)"),h("span",{style:{color:"var(--violet)"}},tl(tAd>0?tTut/tAd:0)+"/ad")):null);
 }
 
 /* ————— GANTT — haftalık üretim takvimi (yeni konsept) ————— */
@@ -1919,7 +1945,8 @@ function App(){
     modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:modal.e.u})}),
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
       return h(StokSheet,{u:s,kullanicilar,hareketler,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
-        onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v)}); })(),
+        onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v),onMaliyet:(uu)=>setModal({tip:"maliyetGec",u:uu,uid:s.id})}); })(),
+    modal&&modal.tip==="maliyetGec"&&h(MaliyetGecmisSheet,{u:modal.u,onClose:()=>setModal(modal.uid?{tip:"stok",u:{id:modal.uid}}:null)}),
     modal&&modal.tip==="stokKomut"&&h(StokKomutSheet,{cfg:modal.cfg,onClose:()=>setModal(modal.uid?{tip:"stok",u:{id:modal.uid}}:null)}),
     modal&&modal.tip==="stokAks"&&h(StokAksiyonSheet,{u:modal.u,tip:modal.aks,bekle:isBekle,onKaydet:stokAksiyon}),
     modal&&modal.tip==="stokGec"&&h(StokGecmisSheet,{u:modal.u,stokHareket,onClose:()=>setModal(null)}),
