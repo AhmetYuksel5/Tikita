@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A35";   // komuta (admin) deneme sürümü
+const SURUM="A36";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -797,14 +797,23 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
   const parcaToggle=pt=>setParcaSec(s=>s.includes(pt)?s.filter(x=>x!==pt):[...s,pt]);
   const isAd=serbest?ad.trim():((seciliUrun&&seciliUrun.ad)||"");
   const gecerli=!!makineId&&!!isAd&&num(sure)>0&&num(adet)>0&&bas;
+  // ⚠️ geçmişe girilen saat, aynı makinede başlamış (biten/basan) bir baskıyla çakışıyor mu?
+  const cakismaIs=(()=>{ if(!bas||!(num(sure)>0)||!makineId) return null; const s=new Date(bas).getTime(), e=s+num(sure)*60000;
+    return (plan||[]).find(p=>{ if(duzen&&p.id===kayit.id) return false; if(p.makineId!==makineId||!p.basladi) return false;
+      const ps=new Date(p.gercekBaslangic||p.baslangic).getTime(), pe=ps+num(p.sureDk)*60000; return s<pe&&e>ps; }); })();
   const onCta=()=>{ let pAdlar=[],pAd="";
     if(!serbest&&parcalar.length){ const arr=parcaSec.filter(x=>parcalar.includes(x));
       if(arr.length&&arr.length<parcalar.length){ pAdlar=arr; pAd=arr.length===1?arr[0]:""; } }
+    const sMs=new Date(bas).getTime();
+    // eski panel kuralı: yalnız TAMAMEN geçmişte kalmış (başlangıç+süre ≤ şimdi) yeni baskı = zaten basılmış → o saatte başlamış sayılır
+    const basladiN=duzen?!!kayit.basladi:(sMs+num(sure)*60000<=Date.now());
+    const gercekN=basladiN?((duzen&&kayit.gercekBaslangic)||new Date(bas).toISOString()):null;
+    if(cakismaIs && !confirm("⚠ Bu saat aralığı, "+(cakismaIs.ad||"başka bir")+" baskısıyla ("+new Date(cakismaIs.gercekBaslangic||cakismaIs.baslangic).toLocaleString("tr-TR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})+") çakışıyor.\nYine de kaydedilsin mi?")) return;
     onKaydet({ ...(duzen?{id:kayit.id,_eski:{makineId:kayit.makineId,baslangic:kayit.baslangic,sureDk:num(kayit.sureDk)}}:{}),
       makineId, ad:isAd, adet:num(adet), urunId:serbest?"":(urunId||""), parcaAd:pAd, parcaAdlar:pAdlar,
       baslangic:new Date(bas).toISOString(), sureDk:num(sure), planSureDk:num(sure), gram:num(gram),
       filamentId, ams, not:nott,
-      basladi:duzen?!!kayit.basladi:false, gercekBaslangic:duzen?(kayit.gercekBaslangic||null):null }); };
+      basladi:basladiN, gercekBaslangic:gercekN }); };
   return h(Sheet,{ik:duzen?"✏️":"➕",hex:"#0e8fce",baslik:duzen?("Düzenle · "+(kayit.ad||"iş")):"İş planla",alt:"Gantt'a işlenir — eski panelle ortak plan",
     onClose:()=>onKaydet(null),cta:bekle?"⏳…":((duzen?"💾 Kaydet":"➕ Planla")+" · "+(bas?new Date(bas).toLocaleString("tr-TR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"")),
     disabled:!gecerli||bekle,onCta},
@@ -839,6 +848,10 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"📅 Başlangıç"),
         h("input",{type:"datetime-local",value:bas,onChange:e=>setBas(e.target.value),style:{...inp,padding:"12px 8px",fontSize:13}}))),
     h("button",{onClick:()=>setBas(toLoc(kuyrukSonu(makineId))),style:{width:"100%",padding:11,borderRadius:12,background:"var(--surf2)",border:"1px dashed var(--cyan)",color:"var(--cyan)",fontSize:12.5,fontWeight:800,marginBottom:14}},"⏱ Kuyruk sonuna yerleştir"),
+    cakismaIs?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12,fontWeight:700,color:"#b91c1c",marginBottom:12}},
+      "⚠ Bu saat, "+(cakismaIs.ad||"başlamış bir")+" baskısıyla çakışıyor ("+new Date(cakismaIs.gercekBaslangic||cakismaIs.baslangic).toLocaleString("tr-TR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})+" · "+dkYaz(num(cakismaIs.sureDk))+"). Kaydederken onay istenir."):
+    (!duzen&&bas&&(new Date(bas).getTime()+num(sure)*60000<=Date.now()))?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#f0fdf4",border:"1px solid #86efac",fontSize:12,fontWeight:700,color:"#166534",marginBottom:12}},
+      "✅ Bu saat geçmişte — baskı 'zaten basıldı' olarak o saate kaydedilir (şimdiki saate çekilmez)."):null,
     (filamentler&&filamentler.length)?h("div",{style:{marginBottom:12}},
       h("div",{className:"lbl",style:{marginBottom:8}},"🧵 Filament (ops.)"),
       h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
