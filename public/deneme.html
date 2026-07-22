@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v48";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v49";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan pazarlamacının id'si (index.html giriş kapısı yazar)
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
@@ -1630,7 +1630,12 @@ function App(){
   const ov=useMemo(()=>emirHar.filter(x=>new Date(x.tarih).getTime()>=Date.now()-48*3600e3)
     .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,30),[emirHar]);
   const aktifSefer=(seferler||[]).filter(s=>s.durum==="acik"&&(s.kullaniciId||"")===emirId).sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))[0]||null;
-  const donemOzet=aktifSefer?donemRapor(emirHar.filter(x=>new Date(x.tarih)>=new Date(aktifSefer.sonRapor||aktifSefer.baslangic))):null;
+  const donemOzet=(()=>{ if(!aktifSefer) return null;
+    const bugunBas=(()=>{const t=new Date();t.setHours(0,0,0,0);return t.getTime();})();
+    let cut=new Date(aktifSefer.sonRapor||aktifSefer.baslangic).getTime();
+    const enEski=emirHar.reduce((m,x)=>{const t=new Date(x.tarih).getTime();return t<m?t:m;},Infinity);
+    if(cut<=enEski) cut=bugunBas;   // eski/otomatik sefer geçmişe sarkmışsa bugünden say
+    return donemRapor(emirHar.filter(x=>new Date(x.tarih).getTime()>=cut)); })();
   const emirHedef=(hedefler||[]).filter(g=>!g.arsiv&&(!g.kullaniciId||g.kullaniciId===emirId));
   const soru=useMemo(()=>d?gunlukSoru(d.kaleler):null,[d]);
   // 🧹 toplanacak tablalar — ana uygulama ile aynı kural (en son başlayan baskı bitti + toplanmadı)
@@ -1853,11 +1858,15 @@ function App(){
   // 📡 komuta raporu — sefer görünmez arkaplan detayı: yoksa sessizce açılır, rapor dönemini tutar
   async function raporVer(){ let sef=aktifSefer;
     try{
-      if(!sef){ const eski=emirHar.slice().sort((a,b)=>new Date(a.tarih)-new Date(b.tarih))[0];
-        const bas=eski?eski.tarih:new Date().toISOString();
+      if(!sef){ const t=new Date(); t.setHours(0,0,0,0); const bas=t.toISOString();   // ilk rapor tüm geçmişi boşaltmasın → bugünden başlat
         const id=await save("sefer",{baslangic:bas,sonRapor:bas,durum:"acik",kullaniciId:emirId});
         sef={id,baslangic:bas,sonRapor:bas}; }
-      const donemRecs=emirHar.filter(x=>new Date(x.tarih)>=new Date(sef.sonRapor||sef.baslangic));
+      const bugunBas=(()=>{const t=new Date();t.setHours(0,0,0,0);return t.getTime();})();
+      let cut=new Date(sef.sonRapor||sef.baslangic).getTime();
+      // eski/otomatik sefer tüm geçmişe sarkmışsa (ilk kayıttan önce başlıyorsa) → bugünden raporla, eski şeyler gelmesin
+      const enEski=emirHar.reduce((m,x)=>{const t=new Date(x.tarih).getTime();return t<m?t:m;},Infinity);
+      if(cut<=enEski) cut=bugunBas;
+      const donemRecs=emirHar.filter(x=>new Date(x.tarih).getTime()>=cut);
       setSeferSheet({mod:"rapor",sefId:sef.id,recs:donemRecs,veri:donemRapor(donemRecs)});
     }catch(e){ console.error(e); say("⚠ Rapor hazırlanamadı"); } }
   async function seferOnay(){ const sid=(seferSheet&&seferSheet.sefId)||(aktifSefer&&aktifSefer.id); if(!sid||sbekle) return; setSbekle(true);
