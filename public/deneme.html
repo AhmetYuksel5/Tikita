@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v45";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v46";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -1186,7 +1186,7 @@ function GerillaSheet({d,onClose,onFire}){
               paraN>=maliyet?("🫰 Hakedişin: "+tl(paraN-maliyet)):("⚠ Alış toplamının altında — en az "+tl(maliyet))):null):null));
 }
 /* ————— YENİ KALE (müşteri) ekle — konumlu (ana uygulamadaki KonumSec sistemi) ————— */
-function YeniKaleSheet({onClose,onKaydet,bekle,ilk,kayit,onArsiv}){
+function YeniKaleSheet({onClose,onKaydet,bekle,ilk,kayit,onArsiv,onSil}){
   const duzen=!!(kayit&&(kayit.id||kayit.key));
   const [ad,setAd]=useState(duzen?(kayit.ad||""):"");
   const [bolge,setBolge]=useState(duzen?(kayit.bolge||""):"");
@@ -1280,7 +1280,9 @@ function YeniKaleSheet({onClose,onKaydet,bekle,ilk,kayit,onArsiv}){
     h("div",{className:"lbl",style:{marginBottom:8}},"Not (isteğe bağlı)"),
     h("textarea",{value:not,onChange:e=>setNot(e.target.value),placeholder:"örn. salı günleri kapalı, kasadaki Ayşe hanımla konuş…",
       style:{...inp,minHeight:64,fontSize:14,fontWeight:600,resize:"none"}}),
-    (duzen&&kayit&&kayit.id)?h("button",{onClick:()=>onArsiv&&onArsiv(kayit),style:{width:"100%",padding:"13px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"📦 Kaleyi arşivle (listelerden kalkar)"):null);
+    (duzen&&kayit&&(kayit.id||kayit.key))?h("div",{style:{marginTop:6}},
+      h("button",{onClick:()=>onArsiv&&onArsiv(kayit),style:{width:"100%",padding:"12px 0 4px",fontSize:12.5,fontWeight:800,color:"var(--gold)"}},"📦 Kaleyi arşivle (listelerden kalkar · geri açılabilir)"),
+      h("button",{onClick:()=>onSil&&onSil(kayit),style:{width:"100%",padding:"8px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"🗑 Kaleyi tamamen sil")):null);
 }
 /* ————— GEÇMİŞ TARİHLİ İŞLEM — çanta/stok oynamaz, seçilen güne yazılır ————— */
 function GecmisSheet({k,d,onClose,onFire}){
@@ -1791,9 +1793,25 @@ function App(){
       else { say("🏰 "+ad+" eklendi — ilk akınla kaleye dönüşür");
         openSheet("satis",{key:"m:"+kayitId,musteriId:kayitId,ad,bolge,borc:0,acikKons:0,konsKalem:[],ciro:0,satisAdet:0}); }
     }catch(e){ console.error(e); say("⚠ Kaydedilemedi — tekrar dene"); } finally{ setYkBekle(false); } }
-  async function kaleArsivle(kayit){ if(!confirm("📦 "+kayit.ad+" arşivlensin mi?\nListelerden ve haritadan kalkar (geri açılabilir).")) return;
-    try{ await save("musteri",{id:kayit.id,arsiv:true}); setYeniKale(false); setKale(null); say("📦 Arşivlendi · "+kayit.ad); }
+  async function kaleArsivle(kayit){ if(!kayit) return;
+    if(!confirm("📦 "+(kayit.ad||"Kale")+" arşivlensin mi?\nListelerden ve haritadan kalkar (geri açılabilir).")) return;
+    try{
+      if(kayit.id){ await save("musteri",{id:kayit.id,arsiv:true}); }
+      else if(kayit.key){ // serbest yer adlı kale → arşivli müşteri oluştur + geçmişi bağla (yeniden görünmesin)
+        const kayitId=await save("musteri",{ad:kayit.ad,bolge:kayit.bolge||"",telefon:kayit.telefon||"",not:kayit.not||"",lat:kayit.lat||"",lng:kayit.lng||"",arsiv:true,tarih:new Date().toISOString()});
+        const eskiler=(hareketler||[]).filter(x=>kkOf(x)===kayit.key);
+        for(const x of eskiler){ await save("pazarlama_hareket",{id:x.id,musteriId:kayitId,yer:kayit.ad,bolge:kayit.bolge||""}); } }
+      setYeniKale(false); setKale(null); say("📦 Arşivlendi · "+(kayit.ad||"")); }
     catch(e){ console.error(e); say("⚠ Arşivlenemedi"); } }
+  async function kaleSil(kayit){ if(!kayit||!kayit.key) return;
+    const eskiler=(hareketler||[]).filter(x=>kkOf(x)===kayit.key);
+    const acikKons=eskiler.filter(x=>x.tip==="konsinye"&&num(x.kalan)>0).reduce((s,x)=>s+num(x.kalan),0);
+    if(!confirm("🗑 "+(kayit.ad||"Kale")+" TAMAMEN silinsin mi?\n\n• "+eskiler.length+" hareket kaydı (satış/konsinye/tahsilat) silinecek"+(acikKons>0?("\n• ⚠ "+acikKons+" adet AÇIK konsinye de silinecek (stoğa dönmez)"):"")+"\n\nBu geri alınamaz. Sadece listeden kaldırmak için 'Arşivle' kullan.")) return;
+    try{
+      for(const x of eskiler){ if(x.id) await remove("pazarlama_hareket",x.id); }
+      if(kayit.id) await remove("musteri",kayit.id);
+      setYeniKale(false); setKale(null); say("🗑 Silindi · "+(kayit.ad||"")); }
+    catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   // yenileme sonrası açık kaleyi geri yükle (veri gelince, bir kez)
   const restRef=useRef(false);
   useEffect(()=>{ if(restRef.current||!d) return; restRef.current=true;
@@ -1893,7 +1911,7 @@ function App(){
     yeniKale&&h(YeniKaleSheet,{bekle:ykBekle,
       ilk:(typeof yeniKale==="object"&&yeniKale.lat&&!yeniKale.kayit)?yeniKale:null,
       kayit:(typeof yeniKale==="object"&&yeniKale.kayit)?yeniKale.kayit:null,
-      onArsiv:kaleArsivle,onClose:()=>setYeniKale(false),onKaydet:yeniKaleKaydet}),
+      onArsiv:kaleArsivle,onSil:kaleSil,onClose:()=>setYeniKale(false),onKaydet:yeniKaleKaydet}),
     urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),
       recs:hareketler.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
       kaleler:d.kaleler,say,
