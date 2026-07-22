@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A65";   // komuta (admin) deneme sürümü
+const SURUM="A66";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1603,7 +1603,7 @@ function HakedisDuzenSheet({sales,onClose,onKaydet}){
           degisti?h("span",{style:{fontSize:11.5,fontWeight:800,color:"var(--gold)"}},tl(num(x.alisFiyat))+" → "+tl(alis)):null)); })
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde kale satışı yok."));
 }
-function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet}){
+function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil}){
   const [alt,setAlt]=useState(odak?"hedef":"ozet");   // ozet/paz/kons/alacak/mus/hareket/hedef
   const [kod,setKod]=useState("hafta");
   const [hkisi,setHkisi]=useState("");
@@ -1802,9 +1802,29 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
           .map(o=>[o.yer,String(o.ad),String(num(konsByYer[o.yer]&&konsByYer[o.yer].adet)),tl(o.tut)]);
         return rows.length?Tbl(["Mekan","Bırakılan","Açık","₺"],rows,{fit:true}):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Konsinye kaydı yok.");
       })()):null,
-    alt==="alacak"?h(React.Fragment,null,
-      h("div",{className:"lbl",style:{marginBottom:8}},"💰 Sahada açık alacak — pazarlamacı bazında · "+tl(alacakList.reduce((s,e)=>s+e.alacak,0))),
-      alacakList.length?Tbl(["Pazarlamacı","Kale","Açık alacak"],alacakList.map(e=>[(e.u.simge||"")+" "+e.u.ad,String(e.kaleSay),tl(e.alacak)])):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--green)",fontWeight:700}},"✅ Açık alacak yok.")):null,
+    alt==="alacak"?(()=>{
+      const musAd={}; (musteriler||[]).forEach(m=>musAd[m.id]=m.ad);
+      const kad={}; (kullanicilar||[]).forEach(k=>kad[k.id]=k.ad||"?");
+      // açık alacak = tahsili eksik satışlar (konsinye/veresiye) — kaynak satış kaydı bazında
+      const acik=(hareketler||[]).filter(x=>x.tip==="satis"&&!x.gerilla).map(x=>{ const bek=num(x.adet)*num(x.satisFiyat); const th=x.tahsil==null?bek:num(x.tahsil); return {x,yer:(x.musteriId&&musAd[x.musteriId])||x.yer||"?",paz:kad[x.kullaniciId||""]||"?",bek,th,acik:Math.max(0,bek-th)}; }).filter(o=>o.acik>0.5);
+      const g={}; acik.forEach(o=>{ const k=g[o.yer]||(g[o.yer]={yer:o.yer,top:0,rows:[]}); k.top+=o.acik; k.rows.push(o); });
+      const gruplar=Object.values(g).sort((a,b)=>b.top-a.top);
+      const toplam=acik.reduce((s,o)=>s+o.acik,0);
+      return h(React.Fragment,null,
+        h("div",{className:"lbl",style:{marginBottom:8}},"💰 Sahada açık alacak — kale bazında · "+tl(toplam)),
+        gruplar.length?gruplar.map((k,i)=>h("div",{key:i,className:"card",style:{padding:"12px 14px",marginBottom:10,boxShadow:"none"}},
+          h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}},
+            h("div",{style:{fontSize:14,fontWeight:800,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🏬 "+k.yer),
+            h("div",{style:{fontSize:14,fontWeight:800,color:"var(--red)",flexShrink:0}},tl(k.top))),
+          k.rows.sort((a,b)=>b.acik-a.acik).map((o,j)=>h("div",{key:j,style:{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderTop:"1px solid var(--line)"}},
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},num(o.x.adet)+" × "+(o.x.urunAd||"?")),
+              h("div",{style:{fontSize:10.5,color:"var(--mut)"}},o.paz+" · "+fmtS(o.x.tarih)+" · açık "+tl(o.acik)+" / "+tl(o.bek))),
+            h("button",{onClick:()=>onAlacakKapat&&onAlacakKapat(o),style:{flexShrink:0,padding:"7px 10px",borderRadius:10,background:"var(--green)",color:"#fff",fontSize:11.5,fontWeight:800}},"✓ Borcu sıfırla"),
+            h("button",{onClick:()=>onAlacakSil&&onAlacakSil(o),style:{flexShrink:0,width:32,height:32,borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13}},"🗑")))))
+          :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--green)",fontWeight:700}},"✅ Açık alacak yok."),
+        h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:8,padding:"0 2px"}},"ℹ️ 'Borcu sıfırla' o satışı tahsil edilmiş sayar — kayıt ve cirosu korunur, alacak 0 olur. 🗑 satışı tümden siler (ciro/istatistikten de düşer)."));
+    })():null,
     alt==="mus"?h(React.Fragment,null,
       h("div",{className:"lbl",style:{marginBottom:8}},"🗺️ Müşteriler · "+musList.length),
       musList.length?h("div",{style:{display:"grid",gap:8}},musList.slice(0,80).map((x,i)=>h("div",{key:i,className:"card",style:{display:"flex",alignItems:"center",gap:10,padding:"11px 13px",boxShadow:"none"}},
@@ -1921,6 +1941,14 @@ function App(){
       await save("kullanici",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,rol:p2.rol,simge:p2.simge,renkH:adRenk(p2.ad).H,...ekPin});
       setModal(null); say((p2.id?"💾 Güncellendi":"➕ Kullanıcı eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  async function alacakKapat(o){ if(!o||!o.x||!o.x.id||isBekle) return;
+    if(!confirm("✓ "+(o.yer||"kale")+" · "+tl(o.acik)+" açık borç kapatılsın mı?\nSatış kaydı ve cirosu korunur; alacak 0 olur.")) return; setIsBekle(true);
+    try{ await save("pazarlama_hareket",{id:o.x.id,tahsil:o.bek}); say("✓ Borç kapatıldı · "+tl(o.acik)); }
+    catch(e){ console.error(e); say("⚠ İşlem başarısız"); } finally{ setIsBekle(false); } }
+  async function alacakSil(o){ if(!o||!o.x||!o.x.id||isBekle) return;
+    if(!confirm("🗑 Bu satış kaydı tümden silinsin mi?\n"+num(o.x.adet)+" × "+(o.x.urunAd||"?")+" · "+(o.yer||"")+"\nCiro/istatistiklerden de düşer.")) return; setIsBekle(true);
+    try{ await remove("pazarlama_hareket",o.x.id); say("🗑 Kayıt silindi"); }
+    catch(e){ console.error(e); say("⚠ Silinemedi"); } finally{ setIsBekle(false); } }
   async function kullaniciArsivle(u){ if(!u||!u.id||isBekle) return; if(!confirm("📦 "+(u.ad||"kullanıcı")+" arşive kaldırılsın mı?\nListeden çıkar; tüm işlem kayıtları saklı kalır.")) return; setIsBekle(true);
     try{ await save("kullanici",{id:u.id,arsiv:true}); setModal(null); say("📦 Arşive kaldırıldı · "+(u.ad||"")); }
     catch(e){ console.error(e); say("⚠ İşlem başarısız"); } finally{ setIsBekle(false); } }
@@ -2070,7 +2098,7 @@ function App(){
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
-  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet});
+  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil});
   return h("div",null,
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
