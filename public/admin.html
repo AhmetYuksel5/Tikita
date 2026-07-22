@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A55";   // komuta (admin) deneme sürümü
+const SURUM="A56";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -414,6 +414,15 @@ function Stat({ik,v,l,renk,onClick}){ const inner=[
   h("div",{key:"l",style:{fontSize:11,color:onClick?"var(--cyan)":"var(--mut)",marginTop:2,fontWeight:onClick?800:600}},l)];
   return onClick? h("button",{onClick,className:"card",style:{padding:"14px 13px",boxShadow:"none",textAlign:"left",width:"100%"}},inner)
     : h("div",{className:"card",style:{padding:"14px 13px",boxShadow:"none"}},inner); }
+// konsinye kutusu: üstte simge+açıklama, altında büyük adet, en altta ikinci rakam (₺)
+function KStat({ik,l,v,s,renk,onClick}){ const inner=[
+  h("div",{key:"h",style:{display:"flex",alignItems:"center",gap:6,marginBottom:8}},
+    h("span",{style:{fontSize:15,flexShrink:0}},ik),
+    h("span",{style:{fontSize:12,fontWeight:700,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},l)),
+  h("div",{key:"v",style:{fontSize:22,fontWeight:800,color:renk||"var(--txt)",lineHeight:1.05,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},v),
+  s?h("div",{key:"s",style:{fontSize:12.5,color:"var(--mut)",marginTop:3,fontWeight:700}},s):null];
+  return onClick? h("button",{onClick,className:"card",style:{padding:"13px 14px",boxShadow:"none",textAlign:"left",width:"100%"}},inner)
+    : h("div",{className:"card",style:{padding:"13px 14px",boxShadow:"none"}},inner); }
 function Chip({on,onClick,children}){ return h("button",{onClick,style:{flexShrink:0,padding:"9px 13px",borderRadius:11,fontSize:13,fontWeight:800,
   background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},children); }
 function DetayListSheet({ik,hex,baslik,alt,rows,onClose}){
@@ -1671,7 +1680,7 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   };
   const Tbl=(head,rows,opts)=>{ const fit=opts&&opts.fit;   // fit: ekrana sığdır — ilk sütun (isim) satır kaydırır, yatay kaydırma/… yok
     const stik=(i)=>fit?{}:{position:i?"static":"sticky",left:0,background:"var(--bg)"};
-    const wr=(i)=>(fit&&i===0)?{whiteSpace:"normal",wordBreak:"break-word"}:{whiteSpace:"nowrap"};
+    const wr=(i)=>(fit&&i===0)?{whiteSpace:"normal",wordBreak:"break-word",width:"58%"}:{whiteSpace:"nowrap"};
     return h("div",{style:{overflowX:fit?"visible":"auto",marginBottom:16}},
     h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12,...(fit?{}:{minWidth:head.length*66})}},
       h("thead",null,h("tr",null,head.map((hh,i)=>h("th",{key:i,style:{textAlign:i?"right":"left",padding:"7px 8px",color:"var(--mut)",fontWeight:800,borderBottom:"1.5px solid var(--line)",...wr(i),...stik(i)}},hh)))),
@@ -1724,32 +1733,31 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     alt==="kons"?h(React.Fragment,null,
       // dönemde bırakılan + toplam açık
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"2px 0 14px"}},
-        h(Stat,{ik:"📥",v:birakDonAd+" ad",l:"bu dönem bırakılan ("+tl(birakDonTut)+") ›",renk:"var(--violet)",onClick:()=>setDet(detB.birakDon())}),
-        h(Stat,{ik:"🏬",v:acikAdAll+" ad",l:"toplam açık konsinye ("+tl(acikTutAll)+") ›",renk:"var(--txt)",onClick:()=>setDet(detB.acik())})),
+        h(KStat,{ik:"📥",l:"bırakılan",v:birakDonAd+" adet",s:tl(birakDonTut),renk:"var(--violet)",onClick:()=>setDet(detB.birakDon())}),
+        h(KStat,{ik:"🏬",l:"açık konsinye",v:acikAdAll+" adet",s:tl(acikTutAll),renk:"var(--txt)",onClick:()=>setDet(detB.acik())})),
       // konsinye → satış istatistikleri (seçili döneme göre)
       h("div",{className:"lbl",style:{marginBottom:8}},"📈 Konsinye → satış istatistikleri"),
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
-        h(Stat,{ik:"✅",v:satTopAd+" adet",l:"satıldı · "+tl(satTopTut)+" ›",renk:"var(--green)",onClick:()=>setDet(detB.sat())}),
-        h(Stat,{ik:"📉",v:"%"+Math.round(genelDonusum*100),l:"genel dönüşüm — ürün dökümü ›",renk:"var(--cyan)",onClick:()=>setDet(detUrun("Ürün dönüşüm oranları","📉","#0e8fce",(a,b)=>b.donusum-a.donusum,o=>"%"+Math.round(o.donusum*100),"var(--cyan)"))}),
-        h(Stat,{ik:"🔥",v:enCok?enCok.u:"—",l:enCok?("en çok giden · "+enCok.sat+" ad ›"):"konsinye satışı yok",renk:"var(--gold)",onClick:enCok?()=>setDet(detUrun("Konsinyeden en çok giden","🔥","#d97b12",(a,b)=>b.sat-a.sat,o=>o.sat+" ad","var(--gold)")):null}),
-        h("button",{onClick:()=>setDet(detUrun("⭐ Reyting — ürün satış hızları","⭐","#7c46e6",(a,b)=>b.hiz-a.hiz,o=>o.hiz.toFixed(1)+" ad/gün","var(--violet)")),className:"card",style:{padding:"14px 13px",boxShadow:"none",textAlign:"left",width:"100%"}},
-          h("div",{style:{fontSize:16,marginBottom:5}},"⭐"),
-          h("div",{style:{fontSize:18,fontWeight:800,color:"var(--violet)",lineHeight:1.1}},hizToplam.toFixed(1)+" ad/gün"),
-          h("div",{style:{fontSize:11,color:"var(--cyan)",marginTop:2,fontWeight:800}},"Reyting ›"),
-          enHizli?h("div",{style:{fontSize:10,color:"var(--mut)",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"⚡ en hızlı: "+enHizli.u+" · "+enHizli.hiz.toFixed(1)):null)),
+        h(KStat,{ik:"✅",l:"satıldı",v:satTopAd+" adet",s:tl(satTopTut),renk:"var(--green)",onClick:()=>setDet(detB.sat())}),
+        h(KStat,{ik:"📉",l:"genel dönüşüm",v:"%"+Math.round(genelDonusum*100),s:"ürün dökümü",renk:"var(--cyan)",onClick:()=>setDet(detUrun("Ürün dönüşüm oranları","📉","#0e8fce",(a,b)=>b.donusum-a.donusum,o=>"%"+Math.round(o.donusum*100),"var(--cyan)"))}),
+        h(KStat,{ik:"🔥",l:"en çok giden",v:enCok?enCok.u:"—",s:enCok?(enCok.sat+" adet"):"konsinye satışı yok",renk:"var(--gold)",onClick:enCok?()=>setDet(detUrun("Konsinyeden en çok giden","🔥","#d97b12",(a,b)=>b.sat-a.sat,o=>o.sat+" adet","var(--gold)")):null}),
+        h("button",{onClick:()=>setDet(detUrun("⭐ Reyting — ürün satış hızları","⭐","#7c46e6",(a,b)=>b.hiz-a.hiz,o=>o.hiz.toFixed(1)+" adet/gün","var(--violet)")),className:"card",style:{padding:"13px 14px",boxShadow:"none",textAlign:"left",width:"100%"}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:6,marginBottom:8}},h("span",{style:{fontSize:15}},"⭐"),h("span",{style:{fontSize:12,fontWeight:700,color:"var(--mut)"}},"Reyting")),
+          h("div",{style:{fontSize:22,fontWeight:800,color:"var(--violet)",lineHeight:1.05}},hizToplam.toFixed(1)+" adet/gün"),
+          enHizli?h("div",{style:{fontSize:12.5,color:"var(--mut)",marginTop:3,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"⚡ en hızlı: "+enHizli.u+" · "+enHizli.hiz.toFixed(1)):null)),
       enDonus?h("div",{style:{fontSize:11.5,color:"var(--mut)",margin:"-8px 2px 14px"}},"🏆 En yüksek dönüşüm: "+enDonus.u+" · %"+Math.round(enDonus.donusum*100)+" ("+enDonus.sat+"/"+enDonus.birak+")"):null,
       // gruplama seçenekleri
       h("div",{style:{display:"flex",gap:8,marginBottom:10}},
-        [["mekan","🏬 Mekana göre"],["urun","📦 Ürüne göre"],["tarih","📅 Tarihe göre"]].map(([g,lbl])=>h(Chip,{key:g,on:konsGrup===g,onClick:()=>setKonsGrup(g)},lbl))),
+        [["mekan","🏬 Mekana göre"],["urun","📦 Ürüne göre"],["tarih","📅 Tarihe göre"]].map(([g,lbl])=>h("button",{key:g,onClick:()=>setKonsGrup(g),style:{flex:1,minWidth:0,padding:"9px 4px",borderRadius:11,fontSize:12,fontWeight:800,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",background:konsGrup===g?"#1b1e25":"var(--surf2)",color:konsGrup===g?"#fff":"var(--mut)",border:"1px solid "+(konsGrup===g?"#1b1e25":"var(--line)")}},lbl))),
       (()=>{
         if(konsGrup==="urun"){
           const rows=cUList.filter(o=>o.birak>0||o.sat>0||o.acik>0).sort((a,b)=>b.sat-a.sat)
-            .map(o=>[o.u,o.birak+" ad",o.sat+" ad",o.acik+" ad","%"+Math.round(o.donusum*100)]);
+            .map(o=>[o.u,String(o.birak),String(o.sat),String(o.acik),"%"+Math.round(o.donusum*100)]);
           return rows.length?Tbl(["Ürün","Bırakılan","Satılan","Açık","Dönüşüm"],rows,{fit:true}):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Konsinye kaydı yok.");
         }
         if(konsGrup==="tarih"){
           const g2={}; birakDon.forEach(x=>{ const gun=(x.tarih||"").slice(0,10); const o=g2[gun]||(g2[gun]={gun,ad:0,tut:0}); o.ad+=num(x.adet); o.tut+=num(x.adet)*num(x.satisFiyat); });
-          const rows=Object.values(g2).sort((a,b)=>b.gun.localeCompare(a.gun)).map(o=>[o.gun.split("-").reverse().join("."),o.ad+" ad",tl(o.tut)]);
+          const rows=Object.values(g2).sort((a,b)=>b.gun.localeCompare(a.gun)).map(o=>[o.gun.split("-").reverse().join("."),String(o.ad),tl(o.tut)]);
           return rows.length?Tbl(["Tarih","Bırakılan","Tutar"],rows,{fit:true}):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde konsinye bırakılmamış.");
         }
         // mekana göre — dönemde bırakılan + şu an açık
@@ -1757,8 +1765,8 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         // dönemde hiç bırakılmayan ama açık konsinyesi olan mekanları da göster
         konsList.forEach(k=>{ if(!g2[k.yer]) g2[k.yer]={yer:k.yer,ad:0,tut:0,paz:k.paz}; });
         const rows=Object.values(g2).sort((a,b)=>(num(konsByYer[b.yer]&&konsByYer[b.yer].adet)-num(konsByYer[a.yer]&&konsByYer[a.yer].adet))||b.ad-a.ad)
-          .map(o=>[o.yer,o.ad+" ad",num(konsByYer[o.yer]&&konsByYer[o.yer].adet)+" ad",tl(o.tut),o.paz]);
-        return rows.length?Tbl(["Mekan","Dönem bırak","Açık","Dönem ₺","Pazarlamacı"],rows,{fit:true}):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Konsinye kaydı yok.");
+          .map(o=>[o.yer,String(o.ad),String(num(konsByYer[o.yer]&&konsByYer[o.yer].adet)),tl(o.tut)]);
+        return rows.length?Tbl(["Mekan","Bırakılan","Açık","₺"],rows,{fit:true}):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Konsinye kaydı yok.");
       })()):null,
     alt==="alacak"?h(React.Fragment,null,
       h("div",{className:"lbl",style:{marginBottom:8}},"💰 Sahada açık alacak — pazarlamacı bazında · "+tl(alacakList.reduce((s,e)=>s+e.alacak,0))),
