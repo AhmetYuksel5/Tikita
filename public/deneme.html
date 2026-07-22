@@ -54,7 +54,8 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v46";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v47";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan pazarlamacının id'si (index.html giriş kapısı yazar)
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -195,7 +196,7 @@ function useColl(name){ const [rows,setRows]=useState(null);
   return rows; }
 
 function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
-  const emir=(kullanicilar||[]).find(u=>(u.ad||"").trim().toLocaleLowerCase("tr")==="emir")||{id:"mr14ih8vc39wug",ad:"Emir",simge:"🎖️"};
+  const emir=(kullanicilar||[]).find(u=>u.id===BEN_ID)||(kullanicilar||[]).find(u=>(u.ad||"").trim().toLocaleLowerCase("tr")==="emir")||{id:BEN_ID||"mr14ih8vc39wug",ad:"Pazarlamacı",simge:"🎖️"};
   const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
   const kk=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
   const kM={};
@@ -1591,6 +1592,11 @@ function App(){
   const urunFoto=useColl("urun_foto");   // 📦 ürün fotoğrafları
   const plan=useColl("plan"), makineler=useColl("makineler");   // 🧹 tabla görevleri
   const talepler=useColl("talep");   // 💬 komuta hattı
+  // 🔐 giriş kontrolü — giriş yoksa kapıya, yönetici ise admin paneline yönlen
+  useEffect(()=>{ if(!BEN_ID){ location.replace("index.html?giris=1"); return; }
+    if(kullanicilar){ const me=kullanicilar.find(u=>u.id===BEN_ID);
+      if(!me){ location.replace("index.html?giris=1"); return; }
+      if(me.rol==="admin") location.replace("admin.html"); } },[kullanicilar]);
   // yenileme (pull-to-refresh) sonrası aynı ekranda kal — sekme oturumunda saklanır
   const [view,setView]=useState(()=>{ try{ return sessionStorage.getItem("tk_view")||"us"; }catch(e){ return "us"; } });
   const [kale,setKale]=useState(null); const [toastMsg,setToastMsg]=useState("");
@@ -1897,7 +1903,7 @@ function App(){
     h(Nav,{aktif:kaleGuncel?"kaleler":view,go}),
     h(Toast,{msg:toastMsg}),
     !kaleGuncel&&view!=="harita"&&h("button",{onClick:()=>{ if(confirm("Hesap değiştir / yönetici girişine geç?")) location.href="index.html?giris=1"; },
-      style:{display:"block",width:"100%",textAlign:"center",padding:"20px 0 6px",color:"var(--mut2)",fontSize:11}},"⚔️ Tikita · Emir · "+SURUM+" · hesap değiştir"),
+      style:{display:"block",width:"100%",textAlign:"center",padding:"20px 0 6px",color:"var(--mut2)",fontSize:11}},"⚔️ Tikita · "+((d&&d.emir&&d.emir.ad)||"Pazarlamacı")+" · "+SURUM+" · hesap değiştir"),
     sheet&&(sheet.type==="gerilla"
       ? h(GerillaSheet,{d,onClose:()=>setSheet(null),onFire:fire})
       : sheet.type==="gecmis"
