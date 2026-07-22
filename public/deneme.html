@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v47";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v48";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan pazarlamacının id'si (index.html giriş kapısı yazar)
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
@@ -196,7 +196,9 @@ function useColl(name){ const [rows,setRows]=useState(null);
   return rows; }
 
 function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
-  const emir=(kullanicilar||[]).find(u=>u.id===BEN_ID)||(kullanicilar||[]).find(u=>(u.ad||"").trim().toLocaleLowerCase("tr")==="emir")||{id:BEN_ID||"mr14ih8vc39wug",ad:"Pazarlamacı",simge:"🎖️"};
+  const emir=(kullanicilar||[]).find(u=>u.id===BEN_ID)||{id:BEN_ID||"",ad:"Pazarlamacı",simge:"🎖️"};
+  const _tumHar=hareketler||[];                                              // GLOBAL — sadece lider tablosu için
+  hareketler=_tumHar.filter(x=>(x.kullaniciId||"")===emir.id);               // ⬇️ bundan sonrası: SADECE bu pazarlamacının kayıtları (kişisel istatistik sızmasın)
   const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
   const kk=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
   const kM={};
@@ -260,7 +262,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
   rz(toplamGuc>=900,"🎖️","Yüzbaşı gücü"); rz(toplamGuc>=2000,"⚔️","Binbaşı gücü");
   rz(hafCiro>=5000,"💰","Haftalık ciro"); rz(gerillaGanimet>=1000,"🥷","Gerilla ustası");
   // takım lider tablosu
-  const lider=liderHesap(hareketler,kullanicilar);
+  const lider=liderHesap(_tumHar,kullanicilar);
   const emirSira=lider.findIndex(x=>x.uid===emir.id);
   // dashboard genel toplamları + bugün
   const toplamCiro=kaleler.reduce((s,k)=>s+k.ciro,0);
@@ -1788,7 +1790,7 @@ function App(){
       // müşteri kaydı olmayan (serbest yer adlı) kale düzenleniyor → önce müşteri oluştur, geçmişi ona bağla
       if(!id && key){
         const kayitId=await save("musteri",{ad,bolge,telefon,not:not||"",lat:lat||"",lng:lng||"",tarih:new Date().toISOString()});
-        const eskiler=(hareketler||[]).filter(x=>kkOf(x)===key);
+        const eskiler=emirHar.filter(x=>kkOf(x)===key);
         for(const x of eskiler){ await save("pazarlama_hareket",{id:x.id,musteriId:kayitId,yer:ad,bolge}); }
         setYeniKale(false); setKale({key:"m:"+kayitId,musteriId:kayitId,ad,bolge,borc:0,acikKons:0,konsKalem:[],ciro:0,satisAdet:0,guc:0,seviye:1});
         say("💾 "+ad+" güncellendi"); return;
@@ -1805,12 +1807,12 @@ function App(){
       if(kayit.id){ await save("musteri",{id:kayit.id,arsiv:true}); }
       else if(kayit.key){ // serbest yer adlı kale → arşivli müşteri oluştur + geçmişi bağla (yeniden görünmesin)
         const kayitId=await save("musteri",{ad:kayit.ad,bolge:kayit.bolge||"",telefon:kayit.telefon||"",not:kayit.not||"",lat:kayit.lat||"",lng:kayit.lng||"",arsiv:true,tarih:new Date().toISOString()});
-        const eskiler=(hareketler||[]).filter(x=>kkOf(x)===kayit.key);
+        const eskiler=emirHar.filter(x=>kkOf(x)===kayit.key);
         for(const x of eskiler){ await save("pazarlama_hareket",{id:x.id,musteriId:kayitId,yer:kayit.ad,bolge:kayit.bolge||""}); } }
       setYeniKale(false); setKale(null); say("📦 Arşivlendi · "+(kayit.ad||"")); }
     catch(e){ console.error(e); say("⚠ Arşivlenemedi"); } }
   async function kaleSil(kayit){ if(!kayit||!kayit.key) return;
-    const eskiler=(hareketler||[]).filter(x=>kkOf(x)===kayit.key);
+    const eskiler=emirHar.filter(x=>kkOf(x)===kayit.key);
     const acikKons=eskiler.filter(x=>x.tip==="konsinye"&&num(x.kalan)>0).reduce((s,x)=>s+num(x.kalan),0);
     if(!confirm("🗑 "+(kayit.ad||"Kale")+" TAMAMEN silinsin mi?\n\n• "+eskiler.length+" hareket kaydı (satış/konsinye/tahsilat) silinecek"+(acikKons>0?("\n• ⚠ "+acikKons+" adet AÇIK konsinye de silinecek (stoğa dönmez)"):"")+"\n\nBu geri alınamaz. Sadece listeden kaldırmak için 'Arşivle' kullan.")) return;
     try{
@@ -1882,7 +1884,7 @@ function App(){
   // güncel kale nesnesini tazele (canlı veri değişince)
   const kaleGuncel=kale?(d.kaleler.find(x=>x.key===kale.key)||kale):null;
   const kaleOv=kaleGuncel?ov.filter(x=>kkOf(x)===kaleGuncel.key).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
-  const kaleHar=kaleGuncel?hareketler.filter(x=>kkOf(x)===kaleGuncel.key&&["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi"].includes(x.tip)).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
+  const kaleHar=kaleGuncel?emirHar.filter(x=>kkOf(x)===kaleGuncel.key&&["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi"].includes(x.tip)).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
   let ekran;
   if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar,
     openDuzen:k=>setYeniKale({kayit:{id:k.musteriId||"",key:k.key,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}})});
@@ -1894,7 +1896,7 @@ function App(){
     digerKaleler,hedefDuraklar,
     onYeniKale:()=>setYeniKale(true),onYeniKaleAt:(la,lo)=>setYeniKale({lat:la,lng:lo})});
   else if(view==="cephane") ekran=h(Cephane,{d,say,cantaAc:()=>setCantaSheet(true),openUrun:u=>setUrunSec(u)});
-  else ekran=h(Rapor,{d,say,raporVer,hareketler,ovList:ov,geriAl:geriAlKayit});
+  else ekran=h(Rapor,{d,say,raporVer,hareketler:emirHar,ovList:ov,geriAl:geriAlKayit});
 
   return h("div",null,
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
