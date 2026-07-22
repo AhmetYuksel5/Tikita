@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A47";   // komuta (admin) deneme sürümü
+const SURUM="A48";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1582,6 +1582,8 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     return {u:e.u,kaleSay:e.kaleSay,alacak:e.alacak,satA,satT,konsA,konsT,tah,gerA,gerC,gerU,gerM,hakedis:marj+gerM,uBorc:uPay+gerU,tabla,tablaKaz,nakit:tah+gerC,mekan:mek.size};
   }).filter(p=>p.satA||p.gerA||p.tah||p.konsA||p.tabla).sort((a,b)=>b.nakit-a.nakit);
   const T={}; ["satA","satT","konsA","konsT","tah","gerA","gerC","gerU","gerM","hakedis","uBorc","tabla","tablaKaz","nakit"].forEach(k=>T[k]=perf.reduce((s,p)=>s+p[k],0));
+  // hakediş (satış marjı bazlı, canlı) = Σ kale-satış (satış−veriliş)×adet + gerilla marjı — fiyat düzenlemesi anında yansır
+  const hakMarj=R.reduce((s,x)=>(x.tip==="satis"&&!x.gerilla)?s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)):s,0)+num(T.gerM);
   // açık konsinye (tüm zaman) — mekana ve ürüne göre (canlı snapshot)
   const konsByYer={}, acikByUrun={};
   (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye"&&num(x.kalan)>0){ const y=x.yer||"?", u=x.urunAd||"?";
@@ -1674,7 +1676,7 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const paylas=()=>{ const t="📊 Tikita Komuta — "+new Date().toLocaleDateString("tr-TR")+"\n"
     +"Dönem: "+(donemler.find(x=>x[0]===kod)||["",""])[1]+"\n"
     +"💰 Kale ciro: "+tl(ciro)+" ("+adet+" ad.) · ⚡ gerilla: "+tl(T.gerC)+"\n"
-    +"🧾 Tahsilat: "+tl(T.tah)+" · 🫰 hakediş: "+tl(T.hakedis)+" · 🏭 üretici: "+tl(T.uBorc);
+    +"🧾 Tahsilat: "+tl(T.tah)+" · 🫰 hakediş: "+tl(hakMarj)+" · 🏭 üretici: "+tl(T.uBorc);
     window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 84px"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:12}},"📊 Pazarlama Takip"),
@@ -1686,7 +1688,7 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         h(Stat,{ik:"💰",v:tl(ciro),l:adet+" adet kale ›",renk:"var(--green)",onClick:()=>setDet(detB.ciro())}),
         h(Stat,{ik:"⚡",v:tl(T.gerC),l:T.gerA+" adet gerilla ›",renk:"var(--cyan)",onClick:()=>setDet(detB.gerilla())}),
         h(Stat,{ik:"🧾",v:tl(T.tah),l:"tahsil edilen ›",renk:"var(--gold)",onClick:()=>setDet(detB.tah())}),
-        h(Stat,{ik:"🫰",v:tl(T.hakedis),l:"toplam hakediş · satışlar ›",renk:"var(--gold)",onClick:()=>setHakDuzen(true)}),
+        h(Stat,{ik:"🫰",v:tl(hakMarj),l:"toplam hakediş · satışlar ›",renk:"var(--gold)",onClick:()=>setHakDuzen(true)}),
         h(Stat,{ik:"🏭",v:tl(T.uBorc),l:"üreticiye kalan ›",renk:"var(--txt)",onClick:()=>setDet(detB.uretici())}),
         h(Stat,{ik:"🧹",v:tl(T.tablaKaz),l:T.tabla+" tabla değişimi ›",renk:"var(--violet)",onClick:()=>setDet(detB.tabla())}),
         h(Stat,{ik:"🏬",v:konsTopAd+" ad",l:"açık konsinye ("+tl(konsTopTut)+") ›",renk:"var(--violet)",onClick:()=>setAlt("kons")}),
