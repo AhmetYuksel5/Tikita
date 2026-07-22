@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A66";   // komuta (admin) deneme sürümü
+const SURUM="A67";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1220,10 +1220,23 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const [now,setNow]=useState(Date.now());
   const [containerW,setContainerW]=useState(360);
   const scrollRef=useRef(null);
+  const [yardim,setYardim]=useState(false);      // ? renk açıklaması modalı
+  const [ekle,setEkle]=useState(false);          // ＋ ekle (makine/filament) seçici
+  const [mkBilgi,setMkBilgi]=useState(null);     // makine bilgi kartı
+  const zoomRef=useRef(1); useEffect(()=>{ zoomRef.current=zoom; },[zoom]);
+  const posRef=useRef(null);                     // yatay konum bir kez ayarlansın (hafta başına)
   useEffect(()=>{ const t=setInterval(()=>setNow(Date.now()),30000); return ()=>clearInterval(t); },[]);
   useEffect(()=>{ const el=scrollRef.current; if(!el) return; const measure=()=>setContainerW(el.clientWidth||360); measure();
     let ro; if(window.ResizeObserver){ ro=new ResizeObserver(measure); ro.observe(el); } window.addEventListener("resize",measure);
     return ()=>{ if(ro)ro.disconnect(); window.removeEventListener("resize",measure); }; },[]);
+  // 🤏 parmakla yakınlaştırma → sayfa değil, Gantt içeriği büyür/küçülür
+  useEffect(()=>{ const el=scrollRef.current; if(!el) return; let d0=0,z0=1;
+    const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+    const ts=e=>{ if(e.touches.length===2){ d0=dist(e.touches); z0=zoomRef.current; } };
+    const tm=e=>{ if(e.touches.length===2&&d0>0){ e.preventDefault(); const r=dist(e.touches)/d0; setZoom(Math.max(1,Math.min(6,Math.round(z0*r*10)/10))); } };
+    const te=e=>{ if(e.touches.length<2) d0=0; };
+    el.addEventListener("touchstart",ts,{passive:false}); el.addEventListener("touchmove",tm,{passive:false}); el.addEventListener("touchend",te);
+    return ()=>{ el.removeEventListener("touchstart",ts); el.removeEventListener("touchmove",tm); el.removeEventListener("touchend",te); }; },[]);
   const LABEL_W=96, ROW_H=74;
   const baslaMs=bas, bitMs=bas+gunSayisi*24*3600*1000, toplamMs=bitMs-baslaMs;
   const fitGunW=Math.max(150,(containerW-LABEL_W)/gunSayisi);
@@ -1235,6 +1248,11 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const timelines=useMemo(()=>{ const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id,plan,baslaMs,bitMs,now); }); return m; },[plan,makineler,baslaMs,bitMs,now]);
   const gunler=Array.from({length:gunSayisi},(_,i)=>new Date(baslaMs+i*24*3600*1000));
   const tarihAralik=gTarih(baslaMs)+" – "+gTarih(bitMs-1)+" "+new Date(baslaMs).getFullYear();
+  // açılışta yatay görünüm dünden başlasın (hafta Cumartesi'den başlar, geri kaydırınca ulaşılır)
+  useEffect(()=>{ const el=scrollRef.current; if(!el||!containerW) return; if(posRef.current===bas) return;
+    const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-1); const ms=t.getTime();
+    el.scrollLeft=(ms>baslaMs&&ms<bitMs)?Math.max(0,(ms-baslaMs)*px):0; posRef.current=bas;
+  },[bas,containerW,px]);
   const gramMak={}; let gramTop=0;
   (plan||[]).forEach(p=>{ const g=num(p.gram); if(g<=0) return; const s=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000, e=s+dur; let pay=0;
     if(dur<=0){ if(s>=baslaMs&&s<bitMs) pay=g; } else { const ovS=Math.max(s,baslaMs), ovE=Math.min(e,bitMs); if(ovE>ovS) pay=g*(ovE-ovS)/dur; }
@@ -1259,11 +1277,6 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     ac({tip:"is",x:{p,es:x.s,ee:x.e,durum,mkAd:mk.ad||"?"}}); };
   const Lej=(renk,ad)=>h("div",{style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#fff"}},h("span",{style:{width:12,height:12,borderRadius:4,background:renk,display:"inline-block"}}),ad);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
-    h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:8,marginBottom:10,padding:"0 4px"}},
-      h("div",null,
-        h("div",{style:{fontSize:19,fontWeight:800,color:GC.navyHdr}},"🧊 HAFTALIK ÜRETİM PLANI"),
-        h("div",{style:{fontSize:12,color:"var(--mut)",fontWeight:600}},"Gantt Takvimi")),
-      h("button",{onClick:()=>ac({tip:"isEkle"}),style:{flexShrink:0,padding:"9px 14px",borderRadius:11,background:GC.navyHdr,color:"#fff",fontSize:13,fontWeight:800}},"+ Baskı")),
     h("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:8,padding:"0 4px"}},
       h("button",{style:GS.ibtn,onClick:()=>haftaKaydir(-1)},"‹"),
       h("button",{style:{...GS.ibtn,flex:1,minWidth:110}},tarihAralik),
@@ -1271,18 +1284,11 @@ function Uretim({d,plan,makineler,ac,onTabla}){
       h("button",{style:GS.ibtn,onClick:buHafta},"Bu hafta")),
     h("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:12,padding:"0 4px"}},
       h("select",{style:GS.input,value:gunSayisi,onChange:e=>setGunSayisi(num(e.target.value))},[3,4,7,14].map(g=>h("option",{key:g,value:g},g+" gün"))),
-      h("button",{style:GS.ibtn,onClick:()=>setZoom(z=>Math.max(1,Math.round((z-0.5)*10)/10))},"🔍−"),
-      h("span",{style:{fontSize:12,color:"var(--mut)",minWidth:26,textAlign:"center"}},zoom+"x"),
-      h("button",{style:GS.ibtn,onClick:()=>setZoom(z=>Math.min(6,Math.round((z+0.5)*10)/10))},"🔍+"),
+      h("button",{style:{...GS.ibtn,fontWeight:800,minWidth:38},onClick:()=>setYardim(true),title:"Renkler ne demek?"},"?"),
       h("div",{style:{flex:1}}),
-      h("button",{style:GS.ibtn,onClick:()=>ac({tip:"makineYonet"})},"⚙ Makineler"),
-      h("button",{style:GS.ibtn,onClick:()=>ac({tip:"filamentYonet"})},"🧵")),
+      h("button",{style:{...GS.ibtn,fontWeight:800},onClick:()=>setEkle(true)},"＋ Ekle")),
     h("div",{style:{...GS.card,overflow:"hidden",marginBottom:16}},
-      h("div",{style:{...GS.hdr,borderRadius:0,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}},
-        h("span",null,"📅 "+tarihAralik),
-        h("div",{style:{display:"flex",gap:9,flexWrap:"wrap"}},
-          Lej(GC.yesil,"Çalışıyor"),Lej(GC.planBg,"Planlı"),Lej(GC.onayBg,"Onay bekliyor"),Lej(GC.kirmizi,"Boşta"),Lej("#e3aba4","⚠ Kayıp"),Lej(GC.mavi,"AMS"),Lej(GC.sari,"AMS'siz"))),
-      h("div",{ref:scrollRef,style:{overflowX:"auto"}},
+      h("div",{ref:scrollRef,style:{overflowX:"auto",touchAction:"pan-x pan-y"}},
         h("div",{style:{minWidth:LABEL_W+toplamW}},
           h("div",{style:{display:"flex",borderBottom:"1px solid "+GC.line,background:"#f3f6fb"}},
             h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 8px",position:"sticky",left:0,background:"#f3f6fb",zIndex:3,borderRight:"1px solid "+GC.line}},
@@ -1300,9 +1306,8 @@ function Uretim({d,plan,makineler,ac,onTabla}){
             const tablaIs=(sonBaski&&!sonBaski.tablaAlindi&&new Date(sonBaski.baslangic).getTime()+num(sonBaski.sureDk)*60000<=now)?sonBaski:null;
             return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+GC.line,minHeight:ROW_H}},
               h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 8px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+GC.line,display:"flex",flexDirection:"column",justifyContent:"center"}},
-                h("div",{style:{fontWeight:800,fontSize:13,color:GC.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},mk.ad),
+                h("div",{onClick:()=>setMkBilgi(mk),style:{fontWeight:800,fontSize:13,color:GC.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer",textDecoration:"underline dotted",textDecorationColor:GC.line,textUnderlineOffset:3}},mk.ad),
                 gramMak[mk.id]>0?h("div",{style:{fontSize:10,fontWeight:700,color:GC.mut}},Math.round(gramMak[mk.id]).toLocaleString("tr")+" gr"):null,
-                mk.tur?h("div",{style:{fontSize:10.5,color:GC.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},mk.tur):null,
                 tablaIs?h("button",{onClick:()=>onTabla&&onTabla(tablaIs),style:{marginTop:5,fontSize:10,fontWeight:800,color:"#7a3e00",background:"#ffe2b8",border:"1px solid #fb8c00",borderRadius:6,padding:"2px 5px",lineHeight:1.2,alignSelf:"flex-start"}},"🧹 Tabla topla"):null),
               h("div",{style:{position:"relative",width:toplamW,flexShrink:0,backgroundImage:"repeating-linear-gradient(90deg,#c8d3e0 0 1px,transparent 1px "+GUN_W+"px),repeating-linear-gradient(90deg,#eef2f7 0 1px,transparent 1px "+(GUN_W*step/24)+"px)"}},
                 tl.bos.flatMap((b,i)=>{ const parts=[]; const pe=Math.min(b.end,now); if(pe>b.start) parts.push({k:"k"+i,s:b.start,e:pe,kayip:true});
@@ -1351,7 +1356,34 @@ function Uretim({d,plan,makineler,ac,onTabla}){
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center"}},h("div",{style:{fontSize:11,color:GC.mut,fontWeight:700}},"BOŞTA"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamBosGelecek/60000)),h("div",{style:{fontWeight:800,color:GC.kirmiziB}},"%"+yuzde(toplamBosGelecek))),
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center",borderColor:GC.kirmiziB}},h("div",{style:{fontSize:11,color:GC.kirmiziB,fontWeight:700}},"⚠ KAYIP"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamKayip/60000)),h("div",{style:{fontWeight:800,color:GC.kirmiziB}},"%"+yuzde(toplamKayip))),
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center",borderColor:"#c2410c"}},h("div",{style:{fontSize:11,color:"#c2410c",fontWeight:700}},"⏱ GECİKME"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamGecikme/60000)),h("div",{style:{fontWeight:800,color:"#c2410c"}},toplamGecikmeSayi+" baskı"))))),
-    h("div",{style:{textAlign:"right",fontSize:11,color:"var(--mut2)",margin:"12px 4px 0"}},"Güncelleme: "+fmtS(now)));
+    h("div",{style:{textAlign:"right",fontSize:11,color:"var(--mut2)",margin:"12px 4px 0"}},"Güncelleme: "+fmtS(now)),
+    yardim?h(Sheet,{ik:"🎨",hex:GC.navyHdr,baslik:"Renkler ne anlama geliyor?",alt:"Gantt takvimi göstergesi",onClose:()=>setYardim(false),cta:"Anladım",onCta:()=>setYardim(false)},
+      [[GC.yesil,"Çalışıyor","Baskı şu an sürüyor (başlatılmış, henüz bitmemiş)."],
+       [GC.planBg,"Planlı","İleri tarihli plan — başlama zamanı henüz gelmedi."],
+       [GC.onayBg,"Onay bekliyor","Başlama saati geçti ama 'başlat' onayı verilmedi."],
+       [GC.bitBg,"Bitti","Süresi dolmuş, tamamlanmış baskı."],
+       [GC.kirmizi,"Boşta","Makine boş — iş yok. Boş raya dokun, iş planla."],
+       ["#e3aba4","⚠ Kayıp","Geçmişte boş geçen (kaçırılmış) zaman."]].map((r,i)=>h("div",{key:i,style:{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
+         h("span",{style:{width:16,height:16,borderRadius:5,background:r[0],flexShrink:0,marginTop:1}}),
+         h("div",{style:{minWidth:0}},h("div",{style:{fontSize:13.5,fontWeight:800}},r[1]),h("div",{style:{fontSize:11.5,color:"var(--mut)"}},r[2])))).concat([
+       h("div",{key:"ams",style:{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:"1px solid var(--line)"}},
+         h("span",{style:{width:16,height:16,borderRadius:9,background:GC.mavi,flexShrink:0,marginTop:1}}),
+         h("div",null,h("div",{style:{fontSize:13.5,fontWeight:800}},"AMS (mavi nokta)"),h("div",{style:{fontSize:11.5,color:"var(--mut)"}},"AMS'li — çok renkli baskı."))),
+       h("div",{key:"amssiz",style:{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:"1px solid var(--line)"}},
+         h("span",{style:{width:16,height:16,borderRadius:9,background:GC.sari,flexShrink:0,marginTop:1}}),
+         h("div",null,h("div",{style:{fontSize:13.5,fontWeight:800}},"AMS'siz (sarı nokta)"),h("div",{style:{fontSize:11.5,color:"var(--mut)"}},"Tek renkli baskı.")))])):null,
+    ekle?h(Sheet,{ik:"＋",hex:GC.navyHdr,baslik:"Ekle",alt:"Makine mi filament mi?",onClose:()=>setEkle(false),cta:"Kapat",onCta:()=>setEkle(false)},
+      h("button",{onClick:()=>{ setEkle(false); ac({tip:"makineYonet"}); },style:{width:"100%",padding:15,borderRadius:14,marginBottom:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,textAlign:"left"}},"🖨️ Makine ekle / yönet"),
+      h("button",{onClick:()=>{ setEkle(false); ac({tip:"filamentYonet"}); },style:{width:"100%",padding:15,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,textAlign:"left"}},"🧵 Filament ekle / yönet")):null,
+    mkBilgi?(()=>{ const tl=timelines[mkBilgi.id]||{}; const dol=toplamMs?Math.round((tl.printMs||0)/toplamMs*100):0; const gr=Math.round(gramMak[mkBilgi.id]||0);
+      const satir=(l,v,c)=>h("div",{style:{display:"flex",justifyContent:"space-between",gap:10,padding:"11px 0",borderTop:"1px solid var(--line)",fontSize:13.5}},h("span",{style:{color:"var(--mut)"}},l),h("span",{style:{fontWeight:800,color:c||"var(--txt)"}},v));
+      return h(Sheet,{ik:"🖨️",hex:GC.navyHdr,baslik:mkBilgi.ad,alt:"makine bilgi kartı",onClose:()=>setMkBilgi(null),cta:"Düzenle / yönet",onCta:()=>{ setMkBilgi(null); ac({tip:"makineYonet"}); }},
+        satir("Tür",mkBilgi.tur||"—"),
+        satir("Bu hafta baskı",dkYaz((tl.printMs||0)/60000)),
+        satir("Bu hafta filament",gr>0?(gr.toLocaleString("tr")+" gr"):"—"),
+        satir("Kayıp zaman",dkYaz((tl.kayipMs||0)/60000),tl.kayipMs>0?GC.kirmiziB:null),
+        satir("Gecikme",dkYaz((tl.gecikmeMs||0)/60000),tl.gecikmeMs>0?"#c2410c":null),
+        satir("Bu hafta doluluk","%"+dol)); })():null);
 }
 // ⚙️ MAKİNE YÖNETİMİ — makine ekle/düzenle/sil
 function MakineYonetimSheet({makineler,onClose,onAc}){
