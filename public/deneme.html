@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v44";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v45";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -113,11 +113,13 @@ function raporHesap(hareketler,kod){ const [b0,ad]=donemAralik(kod);
   // gerilla peşin paranın bölüşümü: önce üretici maliyeti, kalan marj pazarlamacının
   let gerU=0,gerP=0; ger.forEach(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat);
     gerU+=Math.min(th,K); gerP+=Math.max(0,th-K); });
-  const T={ciro:satList.reduce((s,x)=>s+x.ciro,0),adet:satList.reduce((s,x)=>s+x.adet,0),
-    uret:satList.reduce((s,x)=>s+x.uret,0),marj:satList.reduce((s,x)=>s+x.marj,0),
-    tahsil:tahList.reduce((s,x)=>s+x.t,0),
-    uPay:tah.reduce((s,x)=>s+num(x.ureticiPay),0)+gerU,
-    pPay:tah.reduce((s,x)=>s+num(x.pazPay),0)+gerP,
+  const ciro=satList.reduce((s,x)=>s+x.ciro,0), adet=satList.reduce((s,x)=>s+x.adet,0);
+  const uret=satList.reduce((s,x)=>s+x.uret,0), marj=satList.reduce((s,x)=>s+x.marj,0);
+  const tahsil=tahList.reduce((s,x)=>s+x.t,0);
+  const orn=ciro>0?Math.min(1,marj/ciro):0;   // canlı marj oranı — veriliş fiyatı değişince güncellenir
+  const T={ciro,adet,uret,marj,tahsil,
+    uPay:tahsil*(1-orn)+gerU,   // tahsilattan üreticiye giden (canlı oran)
+    pPay:tahsil*orn+gerP,        // tahsilattan pazarlamacıya (hakedişine) giren (canlı oran)
     gerCiro:ger.reduce((s,x)=>s+(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),0)};
   return {ad,satList,tahList,T}; }
 
@@ -223,9 +225,10 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
     k.borc=Math.max(0,(borcK[k.key]||0)-(ovTah[k.key]||0)); k.son=sonK[k.key]||0; k.gunGecti=k.son?gunFark(k.son):999;
     const coz=ovCozList[k.key]||{};
     k.konsKalem=Object.entries(k.konsList).map(([ad,adet])=>({ad,adet:Math.max(0,adet-(coz[ad]||0))})).filter(c=>c.adet>0).sort((a,b)=>b.adet-a.adet);
-    // pazarlamacı hakedişi: tahsil edilen paradan düşen marj payı (önce üretici)
+    // pazarlamacı hakedişi: tahsil edilen paradan düşen marj payı (önce üretici) — canlı marj oranına bağlı
+    //  (admin veriliş fiyatını güncellerse marjTop değişir → hakediş anında güncellenir; frozen pazPay kullanılmaz)
     k.marjTop=Math.max(0,marjK[k.key]||0); const orn=k.ciro>0?Math.min(1,k.marjTop/k.ciro):0;
-    k.hakedisAlinan=(tahByK[k.key]||[]).reduce((s,x)=>s+(x.pazPay!=null?num(x.pazPay):num(x.tutar)*orn),0);
+    k.hakedisAlinan=(tahByK[k.key]||[]).reduce((s,x)=>s+num(x.tutar)*orn,0);
     k.hakedisBekleyen=Math.max(0,k.marjTop-k.hakedisAlinan);
     k.durum=kaleDurum(k); return k; }).filter(k=>k.ad&&!k.arsiv).sort((a,b)=>b.guc-a.guc);
   const toplamGuc=kaleler.reduce((s,k)=>s+k.guc,0);
