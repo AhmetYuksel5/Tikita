@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A51";   // komuta (admin) deneme sürümü
+const SURUM="A52";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1605,13 +1605,13 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const satVY={}; R.forEach(x=>{ if(x.tip==="satis"&&x.kaynak==="konsinye"){ const k=(x.urunAd||"?")+SEP+(x.yer||"?"); satVY[k]=(satVY[k]||0)+num(x.adet); } });
   const birakVY={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye"&&!x.gerilla){ const k=(x.urunAd||"?")+SEP+(x.yer||"?"); (birakVY[k]||(birakVY[k]=[])).push({t:new Date(x.tarih).getTime()||0,adet:num(x.adet)}); } });
   Object.values(birakVY).forEach(a=>a.sort((p,q)=>p.t-q.t));
-  const hizAgg={};   // urunAd -> {sold, wsum(vel*sold), gunW(gün*sold)}
+  const hizAgg={};   // urunAd -> {sold, hizSum(mekan hızları TOPLAMI), gunW(gün*sold)}
   Object.keys(satVY).forEach(k=>{ const sold=satVY[k]; if(sold<=0) return; const u=k.split(SEP)[0];
     const leaves=birakVY[k]; if(!leaves||!leaves.length) return;
     let run=0, tarih=leaves[0].t; for(const lv of leaves){ run+=lv.adet; tarih=lv.t; if(run>=sold) break; }   // en az `sold` adet hangi tarihten beri var
     const gun=Math.max(0.5,(simdiMs-tarih)/864e5); const vel=sold/gun;
-    const o=hizAgg[u]||(hizAgg[u]={sold:0,wsum:0,gunW:0}); o.sold+=sold; o.wsum+=vel*sold; o.gunW+=gun*sold; });
-  const hizMap={}, gunMap={}; Object.entries(hizAgg).forEach(([u,o])=>{ hizMap[u]=o.sold>0?o.wsum/o.sold:0; gunMap[u]=o.sold>0?o.gunW/o.sold:0; });
+    const o=hizAgg[u]||(hizAgg[u]={sold:0,hizSum:0,gunW:0}); o.sold+=sold; o.hizSum+=vel; o.gunW+=gun*sold; });
+  const hizMap={}, gunMap={}; Object.entries(hizAgg).forEach(([u,o])=>{ hizMap[u]=o.hizSum; gunMap[u]=o.sold>0?o.gunW/o.sold:0; });   // ürün hızı = tüm mekanlardaki hızların TOPLAMI (günde toplam kaç adet satılıyor)
   const cUList=Object.values(cU).map(o=>({...o,acik:num(acikByUrun[o.u]),
     donusum:o.birak>0?o.sat/o.birak:0,
     hiz:num(hizMap[o.u]), gunOrt:num(gunMap[o.u])}));   // adet/gün (mekanda kalış süresine göre)
