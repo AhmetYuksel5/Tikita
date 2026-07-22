@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A63";   // komuta (admin) deneme sürümü
+const SURUM="A64";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -260,7 +260,7 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,canliR
   // — ekip (pazarlamacılar) —
   const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
   const kk=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
-  const ekip=(kullanicilar||[]).filter(u=>u.rol!=="admin"&&!u.demo&&(u.ad||"").trim()).map(u=>{
+  const ekip=(kullanicilar||[]).filter(u=>u.rol!=="admin"&&!u.demo&&!u.arsiv&&(u.ad||"").trim()).map(u=>{
     const mine=har.filter(x=>(x.kullaniciId||"")===u.id);
     let bugunC=0,hafC=0,hafPay=0,alacak=0,sonT=0;
     const km={};
@@ -593,7 +593,8 @@ function EkipSatir({e,onClick}){
         "hafta "+tl(e.hafC)+" · bugün "+tl(e.bugunC)+(e.alacak>0.5?(" · 🧾 "+tl(e.alacak)):""))),
     h("span",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",flexShrink:0}},"💪 "+e.guc.toLocaleString("tr-TR")));
 }
-function EkipSheet({e,onClose,onDuzen}){
+function EkipSheet({e,onClose,onDuzen,onSil,onArsiv}){
+  const islemli=(e.mine||[]).length>0;   // herhangi bir hareket varsa → sadece arşiv (kayıtlar saklı); yoksa → silinebilir
   const son=e.mine.filter(x=>["satis","tahsilat","konsinye","iade","stant","tabla"].includes(x.tip))
     .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,10);
   const oz=x=>{ if(x.tip==="satis") return {t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"};
@@ -622,7 +623,14 @@ function EkipSheet({e,onClose,onDuzen}){
           h("div",{style:{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},o.t),
           h("div",{style:{fontSize:10.5,color:"var(--mut)"}},(x.yer||"—")+" · "+fmtS(x.tarih))),
         h("span",{style:{fontWeight:800,color:o.renk,fontSize:12.5,flexShrink:0}},o.v));})
-      :h("div",{style:{padding:"10px 0",color:"var(--mut)",fontSize:13}},"İşlem yok."));
+      :h("div",{style:{padding:"10px 0",color:"var(--mut)",fontSize:13}},"İşlem yok."),
+    (onSil||onArsiv)?h("div",{style:{marginTop:16,paddingTop:14,borderTop:"1px solid var(--line)"}},
+      islemli?h(React.Fragment,null,
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:8}},"ℹ️ Bu kullanıcının işlem geçmişi var — silinemez. Arşive kaldırınca listeden çıkar ama tüm satış/tahsilat/konsinye kayıtları saklı kalır."),
+        h("button",{onClick:()=>onArsiv&&onArsiv(e.u),style:{width:"100%",padding:13,borderRadius:14,background:"#fff7ed",border:"1px solid #fdba74",color:"#9a3412",fontSize:14,fontWeight:800}},"📦 Arşive kaldır"))
+      :h(React.Fragment,null,
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:8}},"ℹ️ Bu kullanıcının hiç işlemi yok — kalıcı olarak silinebilir."),
+        h("button",{onClick:()=>onSil&&onSil(e.u),style:{width:"100%",padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--red)",color:"var(--red)",fontSize:14,fontWeight:800}},"🗑 Kalıcı olarak sil"))):null);
 }
 
 /* ————— STOK ————— */
@@ -1565,7 +1573,7 @@ function HedefHarita({kullanicilar,gkey,onKaydet,odak}){
         h("div",{className:"lbl",style:{marginBottom:8,color:"#9a3412"}},"📋 Görev olarak ver — "+secSay+" durak"),
         h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"Görev adı (örn. Beylerbeyi turu)",style:{...inp,marginBottom:8}}),
         h("select",{value:kime,onChange:e=>setKime(e.target.value),style:{...inp,marginBottom:8}},
-          h("option",{value:""},"👥 Tüm ekip"),(kullanicilar||[]).filter(u=>u.rol!=="admin"&&(u.ad||"").trim()).map(u=>h("option",{key:u.id,value:u.id},u.ad))),
+          h("option",{value:""},"👥 Tüm ekip"),(kullanicilar||[]).filter(u=>u.rol!=="admin"&&!u.arsiv&&(u.ad||"").trim()).map(u=>h("option",{key:u.id,value:u.id},u.ad))),
         h("button",{onClick:gorevVer,style:{width:"100%",padding:13,borderRadius:13,background:"#b45309",color:"#fff",fontSize:14,fontWeight:800}},"📋 Görevi ver ("+secSay+" durak)"))):null);
 }
 // 🫰 HAKEDİŞ — satışlar + pazarlamacıya veriliş fiyatını düzenle → hakediş güncelle → bildir
@@ -1913,6 +1921,15 @@ function App(){
       await save("kullanici",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,rol:p2.rol,simge:p2.simge,renkH:adRenk(p2.ad).H,...ekPin});
       setModal(null); say((p2.id?"💾 Güncellendi":"➕ Kullanıcı eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  async function kullaniciArsivle(u){ if(!u||!u.id||isBekle) return; if(!confirm("📦 "+(u.ad||"kullanıcı")+" arşive kaldırılsın mı?\nListeden çıkar; tüm işlem kayıtları saklı kalır.")) return; setIsBekle(true);
+    try{ await save("kullanici",{id:u.id,arsiv:true}); setModal(null); say("📦 Arşive kaldırıldı · "+(u.ad||"")); }
+    catch(e){ console.error(e); say("⚠ İşlem başarısız"); } finally{ setIsBekle(false); } }
+  async function kullaniciSil(u){ if(!u||!u.id||isBekle) return;
+    const islemVar=(hareketler||[]).some(x=>(x.kullaniciId||"")===u.id);
+    if(islemVar){ say("⚠ İşlemi olan kullanıcı silinemez — arşive kaldır"); return; }
+    if(!confirm("🗑 "+(u.ad||"kullanıcı")+" kalıcı olarak silinsin mi?\nHiç işlemi olmadığı için güvenle silinebilir.")) return; setIsBekle(true);
+    try{ await remove("kullanici",u.id); setModal(null); say("🗑 Silindi · "+(u.ad||"")); }
+    catch(e){ console.error(e); say("⚠ Silinemedi"); } finally{ setIsBekle(false); } }
   async function makineKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ await save("makineler",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,tur:p2.tur}); setModal(null); say((p2.id?"💾 Güncellendi":"➕ Makine eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
@@ -2080,7 +2097,7 @@ function App(){
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
     modal&&modal.tip==="urunDuzen"&&h(UrunDuzenSheet,{u:modal.u,bekle:isBekle,onKaydet:urunKaydet}),
     modal&&modal.tip==="kullanici"&&h(KullaniciSheet,{u:modal.u,bekle:isBekle,onKaydet:kullaniciKaydet}),
-    modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:modal.e.u})}),
+    modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:modal.e.u}),onSil:kullaniciSil,onArsiv:kullaniciArsivle}),
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
       return h(StokSheet,{u:s,kullanicilar,hareketler,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
         onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v),onMaliyet:(uu)=>setModal({tip:"maliyetGec",u:uu,uid:s.id})}); })(),
