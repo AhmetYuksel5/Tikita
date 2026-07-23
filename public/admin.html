@@ -43,7 +43,8 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A69";   // komuta (admin) deneme sürümü
+const SURUM="A70";   // komuta (admin) deneme sürümü
+let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -2130,6 +2131,18 @@ function App(){
     window.addEventListener("popstate",onPop);
     return ()=>window.removeEventListener("popstate",onPop);
   },[]);
+  // 🔐 giriş kapısı — giriş yoksa PIN ekranına, yönetici değilse pazarlamacı sayfasına yönlen
+  useEffect(()=>{ if(!BEN_ID){ location.replace("index.html?giris=1"); return; }
+    if(kullanicilar){ const me=kullanicilar.find(u=>u.id===BEN_ID);
+      if(!me){ location.replace("index.html?giris=1"); return; }
+      if(me.rol!=="admin") location.replace("deneme.html"); } },[kullanicilar]);
+  const benKul=kullanicilar?kullanicilar.find(u=>u.id===BEN_ID):undefined;
+  const yetkili=!!(BEN_ID&&benKul&&benKul.rol==="admin");
+  const engelle=h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
+    h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
+    h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"🔒 Giriş gerekli — yönlendiriliyor…"));
+  if(!BEN_ID) return engelle;                                  // giriş yok
+  if(kullanicilar&&!yetkili) return engelle;                   // kullanıcı bulunamadı ya da yönetici değil
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Komuta merkezi hazırlanıyor…"));
