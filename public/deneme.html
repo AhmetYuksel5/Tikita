@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v51";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v52";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -281,7 +281,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,cantaOv){
   const bugunTah=(hareketler||[]).filter(x=>x.tip==="tahsilat"&&new Date(x.tarih).getTime()>=bg).reduce((s,x)=>s+num(x.tutar),0);
   // 🔭 adaylar / gözcüler — müşteri kaydı var ama henüz kale değil (hiç akın yapılmamış)
   const kaleKeySet=new Set(kaleler.map(k=>k.key));
-  const adaylar=(musteriler||[]).filter(m=>!m.arsiv&&(m.ad||"").trim()&&!kaleKeySet.has("m:"+m.id))
+  const adaylar=(musteriler||[]).filter(m=>!m.arsiv&&(m.ad||"").trim()&&(m.kullaniciId||"")===emir.id&&!kaleKeySet.has("m:"+m.id))
     .map(m=>({id:m.id,ad:m.ad,bolge:m.bolge||"",telefon:(m.telefon||"").trim(),lat:m.lat||"",lng:m.lng||"",kesif:!!m.kesif,
       gozcu:!!((m.telefon||"").trim())&&!!(m.lat&&m.lng)}))
     .sort((a,b)=>(b.gozcu-a.gozcu)||(b.kesif-a.kesif));
@@ -1803,13 +1803,13 @@ function App(){
     try{
       // müşteri kaydı olmayan (serbest yer adlı) kale düzenleniyor → önce müşteri oluştur, geçmişi ona bağla
       if(!id && key){
-        const kayitId=await save("musteri",{ad,bolge,telefon,not:not||"",lat:lat||"",lng:lng||"",tarih:new Date().toISOString()});
+        const kayitId=await save("musteri",{ad,bolge,telefon,not:not||"",lat:lat||"",lng:lng||"",kullaniciId:emirId,tarih:new Date().toISOString()});
         const eskiler=emirHar.filter(x=>kkOf(x)===key);
         for(const x of eskiler){ await save("pazarlama_hareket",{id:x.id,musteriId:kayitId,yer:ad,bolge}); }
         setYeniKale(false); setKale({key:"m:"+kayitId,musteriId:kayitId,ad,bolge,borc:0,acikKons:0,konsKalem:[],ciro:0,satisAdet:0,guc:0,seviye:1,son:0,gunGecti:0,durum:kaleDurum({borc:0,gunGecti:0})});
         say("💾 "+ad+" güncellendi"); return;
       }
-      const kayitId=await save("musteri",{...(id?{id}:{}),ad,bolge,telefon,not:not||"",lat:lat||"",lng:lng||"",tarih:new Date().toISOString()});
+      const kayitId=await save("musteri",{...(id?{id}:{}),ad,bolge,telefon,not:not||"",lat:lat||"",lng:lng||"",kullaniciId:emirId,tarih:new Date().toISOString()});
       setYeniKale(false);
       if(id){ say("💾 "+ad+" güncellendi"); openKale(adayKale({id,ad,bolge,telefon,lat,lng,not})); }
       else { say("🔭 "+ad+" eklendi — Gözcü olarak listende; ilk işlemle kaleye dönüşür");
@@ -1820,7 +1820,7 @@ function App(){
     try{
       if(kayit.id){ await save("musteri",{id:kayit.id,arsiv:true}); }
       else if(kayit.key){ // serbest yer adlı kale → arşivli müşteri oluştur + geçmişi bağla (yeniden görünmesin)
-        const kayitId=await save("musteri",{ad:kayit.ad,bolge:kayit.bolge||"",telefon:kayit.telefon||"",not:kayit.not||"",lat:kayit.lat||"",lng:kayit.lng||"",arsiv:true,tarih:new Date().toISOString()});
+        const kayitId=await save("musteri",{ad:kayit.ad,bolge:kayit.bolge||"",telefon:kayit.telefon||"",not:kayit.not||"",lat:kayit.lat||"",lng:kayit.lng||"",kullaniciId:emirId,arsiv:true,tarih:new Date().toISOString()});
         const eskiler=emirHar.filter(x=>kkOf(x)===kayit.key);
         for(const x of eskiler){ await save("pazarlama_hareket",{id:x.id,musteriId:kayitId,yer:kayit.ad,bolge:kayit.bolge||""}); } }
       setYeniKale(false); setKale(null); say("📦 Arşivlendi · "+(kayit.ad||"")); }
@@ -1913,7 +1913,7 @@ function App(){
     openDuzen:k=>setYeniKale({kayit:{id:k.musteriId||"",key:k.key,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}})});
   else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,stype,openBrif:()=>setBrifAcik(true),goView:go,openBilgi,toplanacak,tablaTopla,tablaUc});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say,onYeniKale:()=>setYeniKale(true),adaylar:adayGoster,openAday:a=>setAdaySec(a),
-    kesifRedSet:redSet,kesifEkle:async r=>{ try{ await save("musteri",{ad:r.ad,bolge:r.bolge||"",lat:String(r.lat),lng:String(r.lng),kesif:true,tarih:new Date().toISOString()}); say("🧭 Aday eklendi · "+r.ad); }catch(e){ say("⚠ Eklenemedi"); } },
+    kesifRedSet:redSet,kesifEkle:async r=>{ try{ await save("musteri",{ad:r.ad,bolge:r.bolge||"",lat:String(r.lat),lng:String(r.lng),kesif:true,kullaniciId:emirId,tarih:new Date().toISOString()}); say("🧭 Aday eklendi · "+r.ad); }catch(e){ say("⚠ Eklenemedi"); } },
     kesifReddet:async r=>{ try{ await save("kesif_red",{id:adNorm(r.ad),ad:r.ad}); }catch(e){} }});
   else if(view==="harita") ekran=h(Harita,{d,openKale,say,adaylar:adayGoster,openAday:a=>setAdaySec(a),
     digerKaleler,hedefDuraklar,
