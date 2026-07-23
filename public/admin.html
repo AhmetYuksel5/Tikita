@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A68";   // komuta (admin) deneme sürümü
+const SURUM="A69";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -943,6 +943,12 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
   const tekrarla=p=>{ const u=urunListe.find(x=>x.id===p.urunId); if(u){ setSerbest(false); setUrunId(u.id); } else { setSerbest(true); setAd(p.ad||""); setUrunId(""); }
     setParcaSec((p.parcaAdlar||[]).slice()); setAdet(num(p.adet)||1); setSure(String(num(p.sureDk)||"")); setGram(p.gram?String(p.gram):""); setFilamentId(p.filamentId||""); setAms(p.ams!==false); setNott(p.not||""); };
   const seciliUrun=urunListe.find(u=>u.id===urunId);
+  // seçili ürünün önceki baskıları — adet/süre/gram/filament/parçaya göre tekilleştir
+  const urunBaskilari=(()=>{ if(serbest||!urunId) return []; const seen=new Set(),out=[];
+    (plan||[]).filter(p=>p.urunId===urunId).sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)).forEach(p=>{
+      const k=num(p.adet)+"|"+num(p.sureDk)+"|"+num(p.gram)+"|"+(p.filamentId||"")+"|"+((p.parcaAdlar||[]).slice().sort().join(","));
+      if(seen.has(k))return; seen.add(k); if(out.length<8) out.push(p); }); return out; })();
+  const baskiUygula=p=>{ setParcaSec((p.parcaAdlar||[]).slice()); setAdet(num(p.adet)||1); setSure(String(num(p.sureDk)||"")); setGram(p.gram?String(p.gram):""); setFilamentId(p.filamentId||""); setAms(p.ams!==false); setNott(p.not||""); };
   const parcalar=(seciliUrun&&seciliUrun.parcalar)||[];
   const parcaToggle=pt=>setParcaSec(s=>s.includes(pt)?s.filter(x=>x!==pt):[...s,pt]);
   const isAd=serbest?ad.trim():((seciliUrun&&seciliUrun.ad)||"");
@@ -970,7 +976,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
     h("div",{className:"lbl",style:{marginBottom:8}},"🖨️ Makine"),
     h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:14}},
       makList.map(mk=>h(Chip,{key:mk.id,on:makineId===mk.id,onClick:()=>makSec(mk.id)},"🖨️ "+mk.ad))),
-    (!duzen&&oncekiler.length)?h("div",{style:{marginBottom:14}},
+    (!duzen&&!urunId&&oncekiler.length)?h("div",{style:{marginBottom:14}},
       h("div",{className:"lbl",style:{marginBottom:8}},"🔁 Önceki baskıdan seç"),
       h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
         oncekiler.map((p,i)=>h("button",{key:i,onClick:()=>tekrarla(p),style:{flexShrink:0,padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700,textAlign:"left"}},
@@ -984,6 +990,14 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
       h("option",{value:""},(urunListe.length?"— ürün seç —":"— önce Stok'tan ürün ekle —")),
       urunListe.map(u=>h("option",{key:u.id,value:u.id},u.ad+((u.parcalar||[]).length?(" · "+u.parcalar.length+" parça"):""))),
       h("option",{value:"__serbest"},"✍️ Diğer (elle gir)…")),
+    (!serbest&&urunId&&urunBaskilari.length)?h("div",{style:{margin:"2px 0 14px"}},
+      h("div",{className:"lbl",style:{marginBottom:8}},"🔁 Bu ürünün önceki baskıları — dokun, bilgiler gelsin"),
+      h("div",{style:{display:"grid",gap:8}},
+        urunBaskilari.map((p,i)=>{ const fl=(filamentler||[]).find(f=>f.id===p.filamentId);
+          const secili=num(adet)===num(p.adet)&&num(sure)===num(p.sureDk)&&num(gram)===num(p.gram)&&(filamentId||"")===(p.filamentId||"");
+          return h("button",{key:i,onClick:()=>baskiUygula(p),style:{width:"100%",textAlign:"left",padding:"10px 12px",borderRadius:12,background:secili?"#eaf4fb":"var(--surf2)",border:"1px solid "+(secili?"#0e8fce":"var(--line)")}},
+            h("div",{style:{fontWeight:800,fontSize:13.5,color:"var(--txt)"}},(num(p.adet)||1)+"× · "+dkYaz(num(p.sureDk))+(num(p.gram)>0?(" · "+num(p.gram)+" gr"):"")),
+            h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:2}},(fl?("🧵 "+fl.ad):"filament yok")+((p.parcaAdlar&&p.parcaAdlar.length)?(" · 🧩 "+p.parcaAdlar.join("+")):"")+" · "+new Date(p.baslangic).toLocaleDateString("tr-TR",{day:"2-digit",month:"short"}))); }))):null,
     serbest?h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"iş adı — örn. Özel sipariş",
       style:{...inp,fontSize:15,fontWeight:600,marginBottom:14}}):null,
     (!serbest&&parcalar.length)?h("div",{style:{marginBottom:14}},
