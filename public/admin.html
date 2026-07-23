@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A70";   // komuta (admin) deneme sürümü
+const SURUM="A71";   // komuta (admin) deneme sürümü
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
@@ -1106,6 +1106,27 @@ function KullaniciSheet({u,onKaydet,bekle}){
     h("div",{className:"lbl",style:{marginBottom:8}},duzen?"Yeni PIN (opsiyonel)":"PIN *"),
     h("input",{value:pin,onChange:e=>setPin(e.target.value),inputMode:"numeric",type:"password",placeholder:"••••",style:inp}));
 }
+// 🔑 ŞİFRELER — yönetici + tüm kullanıcıların şifresini gör/değiştir; 👁 ile şifresiz onların ekranına geç
+function SifreSheet({kullanicilar,onSet,onView,onClose,bekle}){
+  const list=(kullanicilar||[]).filter(u=>(u.ad||"").trim()&&!u.arsiv).slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr"));
+  const [draft,setDraft]=useState({}); const [ac,setAc]=useState({});   // ac: hangi satırın şifresi görünür
+  return h(Sheet,{ik:"🔑",hex:"#1e3a5f",baslik:"Şifreler",alt:"yönetici ve tüm kullanıcılar",onClose,cta:"Kapat",onCta:onClose},
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:12}},"ℹ️ Her kullanıcının şifresini görüp değiştirebilirsin. Eski (hash'li) şifreler görünmez — yeni belirleyince görünür olur. 👁 ile şifresiz onun ekranına geçersin."),
+    h("div",{style:{display:"grid",gap:10}},
+      list.map(u=>{ const cur=(u.pin!=null&&u.pin!=="")?String(u.pin):""; const gizli=!cur&&!!u.pinHash;
+        const val=draft[u.id]!=null?draft[u.id]:cur; const gor=!!ac[u.id];
+        return h("div",{key:u.id,className:"card",style:{padding:"11px 13px",boxShadow:"none"}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:8}},
+            h("span",{style:{fontSize:18}},u.simge||(u.rol==="admin"?"👑":"🎖️")),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+              h("div",{style:{fontSize:11,color:"var(--mut)"}},(u.rol==="admin"?"👑 Yönetici":"🎖️ Pazarlamacı")+" · şifre: "+(cur?(gor?cur:"••••"):(gizli?"gizli":"yok")))),
+            u.rol!=="admin"?h("button",{onClick:()=>onView&&onView(u),style:{flexShrink:0,padding:"7px 10px",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:11.5,fontWeight:800,color:"var(--cyan)"}},"👁 Ekranı gör"):null),
+          h("div",{style:{display:"flex",gap:8}},
+            h("input",{value:gor?val:(val?"••••":""),onChange:e=>{ setAc(s=>({...s,[u.id]:true})); setDraft(s=>({...s,[u.id]:e.target.value})); },onFocus:()=>setAc(s=>({...s,[u.id]:true})),inputMode:"numeric",placeholder:gizli?"eski şifre gizli — yeni gir":"şifre (en az 4 hane)",style:{...inp,flex:1,fontSize:15,letterSpacing:gor?3:6}}),
+            h("button",{onClick:()=>setAc(s=>({...s,[u.id]:!gor})),style:{flexShrink:0,width:44,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:15}},gor?"🙈":"👁"),
+            h("button",{disabled:bekle||!(String(val).trim().length>=4)||String(val).trim()===cur,onClick:()=>onSet(u.id,String(val).trim()),style:{flexShrink:0,padding:"0 16px",borderRadius:12,background:(String(val).trim().length>=4&&String(val).trim()!==cur)?"var(--cyan)":"var(--line)",color:"#fff",fontSize:13,fontWeight:800}},"💾"))); })));
+}
 
 /* ————— EKRANLAR ————— */
 // sağa kaydır → 🗑 Sil çıkar
@@ -1485,7 +1506,9 @@ function Ekip({d,ac}){
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 84px"}},
     h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"🎖️ Ekip"),
-      h("button",{onClick:()=>ac({tip:"ayar"}),style:{padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"⚙️ Ayarlar")),
+      h("div",{style:{display:"flex",gap:8}},
+        h("button",{onClick:()=>ac({tip:"sifre"}),style:{padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"🔑 Şifreler"),
+        h("button",{onClick:()=>ac({tip:"ayar"}),style:{padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"⚙️ Ayarlar"))),
     h("button",{onClick:()=>ac({tip:"kullanici",u:null}),style:{width:"100%",padding:12,borderRadius:14,marginBottom:12,
       background:"var(--surf)",border:"1.5px dashed var(--cyan)",color:"var(--cyan)",fontSize:14,fontWeight:800}},"➕ Yeni kullanıcı ekle"),
     h("div",{style:{display:"grid",gap:8}},
@@ -1978,10 +2001,14 @@ function App(){
       setModal(null); say((p2.id?"💾 Güncellendi":"➕ Ürün eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function kullaniciKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
-    try{ const ekPin=p2.pin?await yeniKullaniciPin(p2.pin):{};
+    try{ const ekPin=p2.pin?{pin:p2.pin,pinHash:"",pinSalt:""}:{};   // görünür şifre (yönetici görebilsin diye düz metin)
       await save("kullanici",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,rol:p2.rol,simge:p2.simge,renkH:adRenk(p2.ad).H,...ekPin});
       setModal(null); say((p2.id?"💾 Güncellendi":"➕ Kullanıcı eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  async function sifreSet(id,pin){ if(!id||!pin||String(pin).trim().length<4||isBekle) return; setIsBekle(true);
+    try{ await save("kullanici",{id,pin:String(pin).trim(),pinHash:"",pinSalt:""}); say("🔑 Şifre güncellendi"); }
+    catch(e){ console.error(e); say("⚠ Güncellenemedi"); } finally{ setIsBekle(false); } }
+  const sifreGor=u=>{ if(u&&u.id) location.href="deneme.html?as="+u.id; };   // 👁 şifresiz o kullanıcının ekranına geç
   async function alacakKapat(o){ if(!o||!o.x||!o.x.id||isBekle) return;
     if(!confirm("✓ "+(o.yer||"kale")+" · "+tl(o.acik)+" açık borç kapatılsın mı?\nSatış kaydı ve cirosu korunur; alacak 0 olur.")) return; setIsBekle(true);
     try{ await save("pazarlama_hareket",{id:o.x.id,tahsil:o.bek}); say("✓ Borç kapatıldı · "+tl(o.acik)); }
@@ -2178,6 +2205,7 @@ function App(){
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
     modal&&modal.tip==="urunDuzen"&&h(UrunDuzenSheet,{u:modal.u,bekle:isBekle,onKaydet:urunKaydet}),
     modal&&modal.tip==="kullanici"&&h(KullaniciSheet,{u:modal.u,bekle:isBekle,onKaydet:kullaniciKaydet}),
+    modal&&modal.tip==="sifre"&&h(SifreSheet,{kullanicilar,bekle:isBekle,onSet:sifreSet,onView:sifreGor,onClose:()=>setModal(null)}),
     modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:modal.e.u}),onSil:kullaniciSil,onArsiv:kullaniciArsivle}),
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
       return h(StokSheet,{u:s,kullanicilar,hareketler,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
