@@ -54,8 +54,10 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v50";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
-let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan pazarlamacının id'si (index.html giriş kapısı yazar)
+const SURUM="v51";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
+let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
+let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
 let GKEY="";   // Google Places anahtarı — ayarlardan (App her render atar), ana uygulama ile aynı
 
 // Google Places (New) metin araması — anahtar yoksa null → Nominatim/Overpass'a düşülür (ana uygulama ile birebir)
@@ -1600,11 +1602,12 @@ function App(){
   const urunFoto=useColl("urun_foto");   // 📦 ürün fotoğrafları
   const plan=useColl("plan"), makineler=useColl("makineler");   // 🧹 tabla görevleri
   const talepler=useColl("talep");   // 💬 komuta hattı
-  // 🔐 giriş kontrolü — giriş yoksa kapıya, yönetici ise admin paneline yönlen
-  useEffect(()=>{ if(!BEN_ID){ location.replace("index.html?giris=1"); return; }
-    if(kullanicilar){ const me=kullanicilar.find(u=>u.id===BEN_ID);
-      if(!me){ location.replace("index.html?giris=1"); return; }
-      if(me.rol==="admin") location.replace("admin.html"); } },[kullanicilar]);
+  // 🔐 giriş kontrolü — giriş yoksa kapıya; view-as yalnız yönetici; yönetici kendi başına gelirse admin paneline
+  useEffect(()=>{ if(!REAL_ID){ location.replace("index.html?giris=1"); return; }
+    if(kullanicilar){ const real=kullanicilar.find(u=>u.id===REAL_ID);
+      if(!real){ location.replace("index.html?giris=1"); return; }
+      if(AS_ID){ if(real.rol!=="admin") location.replace("index.html?giris=1"); return; }   // 👁 view-as sadece yönetici
+      if(real.rol==="admin") location.replace("admin.html"); } },[kullanicilar]);
   // yenileme (pull-to-refresh) sonrası aynı ekranda kal — sekme oturumunda saklanır
   const [view,setView]=useState(()=>{ try{ return sessionStorage.getItem("tk_view")||"us"; }catch(e){ return "us"; } });
   const [kale,setKale]=useState(null); const [toastMsg,setToastMsg]=useState("");
@@ -1891,6 +1894,11 @@ function App(){
           else await cantaDelta(it.id,it.ad,+num(it.adet),-num(it.adet)); } }       // atölyeden çantaya (stok düşer)
       setCantaSheet(false); say(bosalt?"📤 Atölyeye bırakıldı — stoğa eklendi":"🎒 Çantaya eklendi — atölyeden düşüldü"); }
     catch(e){ console.error(e); say(bosalt?"⚠ Boşaltılamadı":"⚠ Eklenemedi"); } finally{ setSbekle(false); } }
+  // 🔑 kendi şifreni değiştir
+  async function sifremiDegistir(){ const np=prompt("Yeni şifren (en az 4 hane):"); if(np==null) return; const v=String(np).trim();
+    if(v.length<4){ say("⚠ Şifre en az 4 hane olmalı"); return; }
+    try{ await save("kullanici",{id:emirId,pin:v,pinHash:"",pinSalt:""}); say("🔑 Şifren güncellendi"); }
+    catch(e){ console.error(e); say("⚠ Güncellenemedi"); } }
 
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--gold)",animation:"spin .8s linear infinite"}}),
@@ -1914,13 +1922,18 @@ function App(){
   else ekran=h(Rapor,{d,say,raporVer,hareketler:emirHar,ovList:ov,geriAl:geriAlKayit});
 
   return h("div",null,
+    AS_ID?h("div",{style:{background:"#1e3a5f",color:"#fff",fontSize:12,fontWeight:800,padding:"calc(env(safe-area-inset-top,0px) + 7px) 14px 7px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}},
+      h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"👁 "+((d&&d.emir&&d.emir.ad)||"kullanıcı")+" ekranı · yönetici görünümü"),
+      h("button",{onClick:()=>location.href="admin.html",style:{flexShrink:0,padding:"5px 11px",borderRadius:8,background:"rgba(255,255,255,.22)",color:"#fff",fontSize:11.5,fontWeight:800}},"← Komuta")):null,
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor, yeni veriler gecikebilir. Yarın otomatik düzelir."):null,
     ekran,
     h(Nav,{aktif:kaleGuncel?"kaleler":view,go}),
     h(Toast,{msg:toastMsg}),
-    !kaleGuncel&&view!=="harita"&&h("button",{onClick:()=>{ if(confirm("Hesap değiştir / yönetici girişine geç?")) location.href="index.html?giris=1"; },
-      style:{display:"block",width:"100%",textAlign:"center",padding:"20px 0 6px",color:"var(--mut2)",fontSize:11}},"⚔️ Tikita · "+((d&&d.emir&&d.emir.ad)||"Pazarlamacı")+" · "+SURUM+" · hesap değiştir"),
+    (!AS_ID&&!kaleGuncel&&view!=="harita")?h("button",{onClick:sifremiDegistir,
+      style:{display:"block",margin:"8px auto 0",padding:"7px 15px",borderRadius:11,background:"var(--surf)",border:"1px solid var(--line)",color:"var(--mut)",fontSize:12,fontWeight:800}},"🔑 Şifremi değiştir"):null,
+    !kaleGuncel&&view!=="harita"&&h("button",{onClick:()=>{ if(AS_ID){ location.href="admin.html"; return; } if(confirm("Hesap değiştir / yönetici girişine geç?")) location.href="index.html?giris=1"; },
+      style:{display:"block",width:"100%",textAlign:"center",padding:"14px 0 6px",color:"var(--mut2)",fontSize:11}},AS_ID?("👁 "+((d&&d.emir&&d.emir.ad)||"")+" · ← Komuta'ya dön"):("⚔️ Tikita · "+((d&&d.emir&&d.emir.ad)||"Pazarlamacı")+" · "+SURUM+" · hesap değiştir")),
     sheet&&(sheet.type==="gerilla"
       ? h(GerillaSheet,{d,onClose:()=>setSheet(null),onFire:fire})
       : sheet.type==="gecmis"
