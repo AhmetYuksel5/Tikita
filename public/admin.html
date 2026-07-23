@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A67";   // komuta (admin) deneme sürümü
+const SURUM="A68";   // komuta (admin) deneme sürümü
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -1683,27 +1683,21 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
     if(x.tip==="konsinye"&&!x.gerilla){ o.birak+=num(x.adet); if(t&&t<o.ilk)o.ilk=t; }
     else if(x.tip==="satis"&&x.kaynak==="konsinye"){ o.sat+=num(x.adet); o.satTut+=num(x.adet)*num(x.satisFiyat); }
     else if(x.tip==="iade"&&x.kaynak==="konsinye"){ o.iade+=num(x.adet); } });
-  const simdiMs=Date.now();
-  const SEP="|::|";
-  // ⚡ HIZ = konsinyeden satılan adet ÷ ürünün o MEKANDA kaldığı gün (mekan bazında), sonra ürün başına satış-ağırlıklı
-  //  "o mekanda en az (satılan kadar) adet hangi tarihten beri var" → bırakışların kümülatifi o sayıya ulaştığı tarih.
-  const satVY={}; R.forEach(x=>{ if(x.tip==="satis"&&x.kaynak==="konsinye"){ const k=(x.urunAd||"?")+SEP+(x.yer||"?"); satVY[k]=(satVY[k]||0)+num(x.adet); } });
-  const birakVY={}; (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye"&&!x.gerilla){ const k=(x.urunAd||"?")+SEP+(x.yer||"?"); (birakVY[k]||(birakVY[k]=[])).push({t:new Date(x.tarih).getTime()||0,adet:num(x.adet)}); } });
-  Object.values(birakVY).forEach(a=>a.sort((p,q)=>p.t-q.t));
-  const hizAgg={};   // urunAd -> {sold, hizSum(mekan hızları TOPLAMI), gunW(gün*sold)}
-  Object.keys(satVY).forEach(k=>{ const sold=satVY[k]; if(sold<=0) return; const u=k.split(SEP)[0];
-    const leaves=birakVY[k]; if(!leaves||!leaves.length) return;
-    let run=0, tarih=leaves[0].t; for(const lv of leaves){ run+=lv.adet; tarih=lv.t; if(run>=sold) break; }   // en az `sold` adet hangi tarihten beri var
-    const gun=Math.max(0.5,(simdiMs-tarih)/864e5); const vel=sold/gun;
-    const o=hizAgg[u]||(hizAgg[u]={sold:0,hizSum:0,gunW:0}); o.sold+=sold; o.hizSum+=vel; o.gunW+=gun*sold; });
-  const hizMap={}, gunMap={}; Object.entries(hizAgg).forEach(([u,o])=>{ hizMap[u]=o.hizSum; gunMap[u]=o.sold>0?o.gunW/o.sold:0; });   // ürün hızı = tüm mekanlardaki hızların TOPLAMI (günde toplam kaç adet satılıyor)
+  const GUN_MS=864e5;
+  const bugunBas=(()=>{const t=new Date();t.setHours(0,0,0,0);return t.getTime();})();
+  // 📅 gerçek günlük ortalama için dönem gün sayısı (payda) — dönemde geçen gün
+  const donemGun=(()=>{ if(kod==="bugun") return 1;
+    let bas=b0>0?b0:(hareketler||[]).reduce((m,x)=>{ if(x.tip==="satis"&&x.kaynak==="konsinye"){const t=new Date(x.tarih).getTime()||0; if(t&&t<m)return t;} return m; },Infinity);   // Tümü → ilk konsinye satışı
+    if(!isFinite(bas)) bas=bugunBas;
+    const bit=Math.min(b1===Infinity?(bugunBas+GUN_MS):b1, bugunBas+GUN_MS);   // gelecekteki bitişi bugüne kırp
+    return Math.max(1,Math.round((bit-bas)/GUN_MS)); })();
   const cUList=Object.values(cU).map(o=>({...o,acik:num(acikByUrun[o.u]),
     donusum:o.birak>0?o.sat/o.birak:0,
-    hiz:num(hizMap[o.u]), gunOrt:num(gunMap[o.u])}));   // adet/gün (mekanda kalış süresine göre)
+    hiz:donemGun>0?o.sat/donemGun:0}));   // adet/gün = konsinyeden satılan ÷ dönem gün sayısı (gerçek günlük ortalama)
   const satTopAd=cUList.reduce((s,o)=>s+o.sat,0), satTopTut=cUList.reduce((s,o)=>s+o.satTut,0), birakTopAll=cUList.reduce((s,o)=>s+o.birak,0);
   const enCok=cUList.filter(o=>o.sat>0).sort((a,b)=>b.sat-a.sat)[0]||null;
-  const enHizli=cUList.filter(o=>o.sat>=3&&o.hiz>0).sort((a,b)=>b.hiz-a.hiz)[0]||null;
-  const hizToplam=cUList.reduce((s,o)=>s+num(o.hiz),0);   // ⭐ Reyting = tüm ürünlerin satış hızı toplamı
+  const enHizli=cUList.filter(o=>o.sat>0).sort((a,b)=>b.hiz-a.hiz)[0]||null;   // en yüksek günlük ortalamaya sahip ürün
+  const hizToplam=donemGun>0?satTopAd/donemGun:0;   // ⭐ Reyting = gerçek günlük ortalama (dönem konsinye satışı ÷ gün)
   const enDonus=cUList.filter(o=>o.birak>=5&&o.sat>0).sort((a,b)=>b.donusum-a.donusum)[0]||null;
   const genelDonusum=birakTopAll>0?satTopAd/birakTopAll:0;
   // seçili döneme göre bırakılan konsinye
@@ -1810,7 +1804,7 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         h(KStat,{ik:h(Icn,{n:"check",c:"var(--green)"}),l:"Satıldı",v:satTopAd,birim:"adet",s:tl(satTopTut),renk:"var(--green)",onClick:()=>setDet(detB.sat())}),
         h(KStat,{ik:h(Icn,{n:"percent",c:"var(--cyan)"}),l:"Genel dönüşüm",v:"%"+Math.round(genelDonusum*100),s:"ürün dökümü",renk:"var(--cyan)",onClick:()=>setDet(detUrun("Ürün dönüşüm oranları","📉","#0e8fce",(a,b)=>b.donusum-a.donusum,o=>"%"+Math.round(o.donusum*100),"var(--cyan)"))}),
         h(KStat,{ik:h(Icn,{n:"trend",c:"var(--gold)"}),l:"En çok giden",v:enCok?enCok.u:"—",s:enCok?(enCok.sat+" adet"):"konsinye satışı yok",renk:"var(--gold)",onClick:enCok?()=>setDet(detUrun("Konsinyeden en çok giden","🔥","#d97b12",(a,b)=>b.sat-a.sat,o=>o.sat+" adet","var(--gold)")):null}),
-        h(KStat,{ik:h(Icn,{n:"star",c:"var(--violet)"}),l:"Reyting",v:hizToplam.toFixed(1),birim:"adet/gün",s:enHizli?("en hızlı: "+enHizli.u+" · "+enHizli.hiz.toFixed(1)):null,renk:"var(--violet)",onClick:()=>setDet(detUrun("⭐ Reyting — ürün satış hızları","⭐","#7c46e6",(a,b)=>b.hiz-a.hiz,o=>o.hiz.toFixed(1)+" adet/gün","var(--violet)"))})),
+        h(KStat,{ik:h(Icn,{n:"star",c:"var(--violet)"}),l:"Reyting",v:kod==="bugun"?String(Math.round(hizToplam)):hizToplam.toFixed(1),birim:kod==="bugun"?"adet (bugün)":"adet/gün",s:enHizli?("en çok: "+enHizli.u+" · "+(kod==="bugun"?Math.round(enHizli.hiz):enHizli.hiz.toFixed(1))):null,renk:"var(--violet)",onClick:()=>setDet(detUrun("⭐ Reyting — günlük ortalama satış","⭐","#7c46e6",(a,b)=>b.hiz-a.hiz,o=>kod==="bugun"?(Math.round(o.hiz)+" adet"):(o.hiz.toFixed(1)+" adet/gün"),"var(--violet)"))})),
       enDonus?h("button",{onClick:()=>setDet(detUrun("Ürün dönüşüm oranları","📉","#0e8fce",(a,b)=>b.donusum-a.donusum,o=>"%"+Math.round(o.donusum*100),"var(--cyan)")),className:"card",style:{width:"100%",textAlign:"left",boxShadow:"none",padding:"11px 13px",margin:"-4px 0 14px",fontSize:12.5,fontWeight:700,color:"var(--mut)",display:"flex",alignItems:"center",gap:7}},h(Icn,{n:"medal",c:"var(--gold)",s:16}),h("span",null,"En yüksek dönüşüm: "+enDonus.u+" · %"+Math.round(enDonus.donusum*100)+" ("+enDonus.sat+"/"+enDonus.birak+")")):null,
       // gruplama seçenekleri
       h("div",{style:{display:"flex",gap:8,marginBottom:10}},
