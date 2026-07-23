@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v55";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v56";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -149,6 +149,12 @@ function kaleDurum(k){
   if(k.borc>0.5) return {key:"borc",label:"Tahsilat",renk:"var(--gold)",hex:"#d97b12",ik:"🧾",aksiyon:tl(k.borc)+" tahsil et",cta:"🧾 Tahsil et"};
   if(k.gunGecti>=14&&k.gunGecti<900) return {key:"ihmal",label:"İhmal",renk:"var(--cyan)",hex:"#0e8fce",ik:"⚔️",aksiyon:k.gunGecti+" gündür uğranmadı",cta:"⚔️ Ziyaret et"};
   return {key:"saglam",label:"Sağlam",renk:"var(--green)",hex:"#16a34a",ik:"🛡️",aksiyon:"ilişki güçlü — yeni akın",cta:"⚔️ Akına git"};
+}
+// 📈 belirli tarihte ürünün geçerli satış/veriliş fiyatı — fiyat_gecmisi kayıtları "bu tarihe kadar geçerliydi"
+function fiyatEtkin(urunId,dateMs,curSatis,curVeris,fgList){
+  const recs=(fgList||[]).filter(r=>r.urunId===urunId&&r.gecerliBit).sort((a,b)=>new Date(a.gecerliBit)-new Date(b.gecerliBit));
+  for(const r of recs){ if(new Date(r.gecerliBit).getTime()>dateMs) return {satis:num(r.satis),veris:num(r.veris),eski:true}; }
+  return {satis:num(curSatis),veris:num(curVeris),eski:false};
 }
 // 🔭 gözcü = kaydedilmiş ama henüz hiç işlem yapılmamış kale (müşteri kaydı var, hareket yok)
 const GOZCU_DURUM={key:"gozcu",label:"Gözcü",renk:"var(--cyan)",hex:"#0e8fce",ik:"🔭",aksiyon:"henüz işlem yok — ilk akını yap",cta:"⚔️ İlk akın"};
@@ -1297,8 +1303,9 @@ function YeniKaleSheet({onClose,onKaydet,bekle,ilk,kayit,onArsiv,onSil}){
       h("button",{onClick:()=>onSil&&onSil(kayit),style:{width:"100%",padding:"8px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"🗑 Kaleyi tamamen sil")):null);
 }
 /* ————— GEÇMİŞ TARİHLİ İŞLEM — çanta/stok oynamaz, seçilen güne yazılır ————— */
-function GecmisSheet({k,d,onClose,onFire}){
+function GecmisSheet({k,d,fgList,onClose,onFire}){
   const [tarih,setTarih]=useState("");
+  const [elleFiyat,setElleFiyat]=useState(false);   // kullanıcı fiyatı elle değiştirdiyse otomatik ezme
   const [tip,setTip]=useState("satis");
   const [urun,setUrun]=useState(d.cephane[0]||{ad:"",fiyat:0});
   const [adet,setAdet]=useState(1);
@@ -1309,10 +1316,14 @@ function GecmisSheet({k,d,onClose,onFire}){
   const [tut,setTut]=useState("");
   const [smod,setSmod]=useState("hediye"); const [sfiyat,setSfiyat]=useState("");
   const [bekle,setBekle]=useState(false);
+  // 📈 ürün/tarih değişince o tarihteki fiyatı otomatik uygula (kullanıcı elle değiştirmediyse)
+  const secDMs=tarih?new Date(tarih+"T12:00:00").getTime():Date.now();
+  const etkin=(urun&&urun.id)?fiyatEtkin(urun.id,secDMs,urun.fiyat,urun.pazFiyat,fgList):{satis:0,veris:0,eski:false};
+  useEffect(()=>{ if(elleFiyat||!urun||!urun.id) return; setFiyat(etkin.satis); setVeris(etkin.veris); },[urun,tarih,elleFiyat]);
   const tips=[["satis","💰 Satış"],["konsinye","🏬 Konsinye"],["konsatis","💵 Kons. satıldı"],["iade","↩ İade"],["tahsilat","🧾 Tahsilat"],["stant","🎪 Stant"]];
   const urunSec=h("div",{style:{marginBottom:14}},h("div",{className:"lbl",style:{marginBottom:8}},"Ürün"),
     h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
-      d.cephane.slice(0,10).map((u,i)=>h(Chip,{key:i,on:urun.ad===u.ad,onClick:()=>{setUrun(u);setFiyat(num(u.fiyat));setVeris(num(u.pazFiyat));}},u.ad))));
+      d.cephane.slice(0,10).map((u,i)=>h(Chip,{key:i,on:urun.ad===u.ad,onClick:()=>{setUrun(u);setElleFiyat(false);}},u.ad))));
   const kalemSec=h("div",{style:{marginBottom:14}},h("div",{className:"lbl",style:{marginBottom:8}},"Ürün (bu kaledeki konsinyeden)"),
     konsList.length?h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
       konsList.map((c,i)=>h(Chip,{key:i,on:kkalem.ad===c.ad,onClick:()=>{setKkalem(c);setAdet(c.adet);}},c.ad+" ("+c.adet+")")))
@@ -1330,7 +1341,7 @@ function GecmisSheet({k,d,onClose,onFire}){
   return h(Sheet,{ik:"📅",hex:"#334155",baslik:"Geçmiş işlem · "+(k?k.ad:""),alt:"eski tarihli kayıt — çanta/stok oynamaz",
     onClose,cta:bekle?"⏳…":ctaTxt,disabled:!gecerli||bekle,onCta},
     h("div",{className:"lbl",style:{marginBottom:8}},"İşlem tarihi *"),
-    h("input",{type:"date",value:tarih,onChange:e=>setTarih(e.target.value),style:{...inp,fontSize:15,marginBottom:14}}),
+    h("input",{type:"date",value:tarih,onChange:e=>{setTarih(e.target.value);setElleFiyat(false);},style:{...inp,fontSize:15,marginBottom:14}}),
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}},
       tips.map(([kk2,lbl])=>h(Chip,{key:kk2,on:tip===kk2,onClick:()=>setTip(kk2)},lbl))),
     (tip==="satis"||tip==="konsinye")?urunSec:null,
@@ -1339,9 +1350,10 @@ function GecmisSheet({k,d,onClose,onFire}){
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
         adetIn,
         h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Satış ₺/ad"),
-          h("input",{type:"number",inputMode:"numeric",value:fiyat||"",onChange:e=>setFiyat(num(e.target.value)),style:inp}))),
+          h("input",{type:"number",inputMode:"numeric",value:fiyat||"",onChange:e=>{setFiyat(num(e.target.value));setElleFiyat(true);},style:inp}))),
       h("div",{style:{marginTop:12}},h("div",{className:"lbl",style:{marginBottom:8}},"Veriliş ₺/ad · o günkü maliyet"),
-        h("input",{type:"number",inputMode:"numeric",value:veris||"",onChange:e=>setVeris(num(e.target.value)),style:inp}),
+        h("input",{type:"number",inputMode:"numeric",value:veris||"",onChange:e=>{setVeris(num(e.target.value));setElleFiyat(true);},style:inp}),
+        (tarih&&etkin.eski&&!elleFiyat)?h("div",{style:{fontSize:11,color:"var(--green)",marginTop:6,fontWeight:700}},"📈 O tarihteki fiyat otomatik uygulandı (fiyat geçmişinden). Gerekirse değiştir."):null,
         h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:6}},"ℹ️ O tarihteki fiyatlar bugünden farklıysa buraya gerçek değerleri gir — hakediş = adet × (satış − veriliş).")),
       (num(fiyat)>0||num(veris)>0)?h("div",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",marginTop:8}},"🫰 Hakediş: "+tl(num(adet)*Math.max(0,num(fiyat)-num(veris)))):null):null,
     (tip==="konsinye"||tip==="konsatis"||tip==="iade")?adetIn:null,
@@ -1607,6 +1619,7 @@ function App(){
   GKEY=(((ayarlar||[]).find(a=>a.id==="genel")||{}).googleKey||"").trim();   // Places anahtarı — ana uygulama ile aynı kaynak
   const seferler=useColl("sefer"), kesifRed=useColl("kesif_red");
   const urunFoto=useColl("urun_foto");   // 📦 ürün fotoğrafları
+  const fgList=useColl("fiyat_gecmisi");   // 📈 ürün fiyat geçmişi (geçmiş işlemlerde o günkü fiyat)
   const plan=useColl("plan"), makineler=useColl("makineler");   // 🧹 tabla görevleri
   const talepler=useColl("talep");   // 💬 komuta hattı
   // 🔐 giriş kontrolü — giriş yoksa kapıya; view-as yalnız yönetici; yönetici kendi başına gelirse admin paneline
@@ -1944,7 +1957,7 @@ function App(){
     sheet&&(sheet.type==="gerilla"
       ? h(GerillaSheet,{d,onClose:()=>setSheet(null),onFire:fire})
       : sheet.type==="gecmis"
-      ? h(GecmisSheet,{k:sheet.k,d,onClose:()=>setSheet(null),onFire:fire})
+      ? h(GecmisSheet,{k:sheet.k,d,fgList,onClose:()=>setSheet(null),onFire:fire})
       : sheet.type==="talep"
       ? h(TalepSheet,{talepler:emirTalep,onGonder:talepGonder,onCevapla:talepCevapla,onKonum:talepKonum,onSil:talepSil,onClose:()=>setSheet(null)})
       : h(ActionSheet,{type:sheet.type,k:(sheet.k&&sheet.k.key?(d.kaleler.find(x=>x.key===sheet.k.key)||sheet.k):sheet.k),d,onClose:()=>setSheet(null),onFire:fire})),

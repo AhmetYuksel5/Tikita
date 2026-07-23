@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A71";   // komuta (admin) deneme sürümü
+const SURUM="A72";   // komuta (admin) deneme sürümü
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
@@ -1995,7 +1995,12 @@ function App(){
     try{ await save("plan",p2); setModal(null); say("📋 Baskı kaydedildi · "+(p2.ad||"iş")+" ×"+num(p2.adet)); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi — tekrar dene"); } finally{ setIsBekle(false); } }
   async function urunKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
-    try{ const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
+    try{
+      // 📈 fiyat geçmişi: fiyat değiştiyse ESKİ fiyatı "bu tarihe kadar geçerliydi" olarak logla (geçmiş işlemlerde o günkü fiyat gelsin)
+      if(p2.id){ const esk=(urunler||[]).find(x=>x.id===p2.id);
+        if(esk && (num(esk.satisFiyat)!==num(p2.satisFiyat)||num(esk.pazFiyat)!==num(p2.pazFiyat)))
+          try{ await save("fiyat_gecmisi",{urunId:p2.id,urunAd:p2.ad||esk.ad||"",satis:num(esk.satisFiyat),veris:num(esk.pazFiyat),gecerliBit:new Date().toISOString()}); }catch(e){ console.error(e); } }
+      const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
       const delta=p2.stokta-(p2._eskiStok||0);
       if(delta) await stokLogla({id,ad:p2.ad},delta,"elle");   // elle düzeltme logu — eski panel uyumu
       setModal(null); say((p2.id?"💾 Güncellendi":"➕ Ürün eklendi")+" · "+p2.ad); }
