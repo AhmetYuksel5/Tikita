@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v53";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v54";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -1302,6 +1302,7 @@ function GecmisSheet({k,d,onClose,onFire}){
   const [urun,setUrun]=useState(d.cephane[0]||{ad:"",fiyat:0});
   const [adet,setAdet]=useState(1);
   const [fiyat,setFiyat]=useState(num((d.cephane[0]||{}).fiyat));
+  const [veris,setVeris]=useState(num((d.cephane[0]||{}).pazFiyat));   // veriliş (o günkü maliyet) — elle girilebilir
   const konsList=(k&&k.konsKalem)||[];
   const [kkalem,setKkalem]=useState(konsList[0]||{ad:"",adet:0});
   const [tut,setTut]=useState("");
@@ -1310,7 +1311,7 @@ function GecmisSheet({k,d,onClose,onFire}){
   const tips=[["satis","💰 Satış"],["konsinye","🏬 Konsinye"],["konsatis","💵 Kons. satıldı"],["iade","↩ İade"],["tahsilat","🧾 Tahsilat"],["stant","🎪 Stant"]];
   const urunSec=h("div",{style:{marginBottom:14}},h("div",{className:"lbl",style:{marginBottom:8}},"Ürün"),
     h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
-      d.cephane.slice(0,10).map((u,i)=>h(Chip,{key:i,on:urun.ad===u.ad,onClick:()=>{setUrun(u);setFiyat(num(u.fiyat));}},u.ad))));
+      d.cephane.slice(0,10).map((u,i)=>h(Chip,{key:i,on:urun.ad===u.ad,onClick:()=>{setUrun(u);setFiyat(num(u.fiyat));setVeris(num(u.pazFiyat));}},u.ad))));
   const kalemSec=h("div",{style:{marginBottom:14}},h("div",{className:"lbl",style:{marginBottom:8}},"Ürün (bu kaledeki konsinyeden)"),
     konsList.length?h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
       konsList.map((c,i)=>h(Chip,{key:i,on:kkalem.ad===c.ad,onClick:()=>{setKkalem(c);setAdet(c.adet);}},c.ad+" ("+c.adet+")")))
@@ -1318,7 +1319,7 @@ function GecmisSheet({k,d,onClose,onFire}){
   const adetIn=h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
     h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp}));
   let gecerli=!!tarih, ctaTxt="📅 Geçmişe kaydet", payload=null;
-  if(tip==="satis"){ gecerli=gecerli&&!!urun.ad&&adet>0; payload={type:"satis",urun,adet,fiyat}; ctaTxt="📅 "+tl(adet*fiyat)+" satış ekle (borç yazar)"; }
+  if(tip==="satis"){ gecerli=gecerli&&!!urun.ad&&adet>0; payload={type:"satis",urun,adet,fiyat,veris}; ctaTxt="📅 "+tl(adet*fiyat)+" satış ekle (borç yazar)"; }
   else if(tip==="konsinye"){ gecerli=gecerli&&!!urun.ad&&adet>0; payload={type:"konsinye",kmod:"birak",urun,adet}; ctaTxt="📅 Konsinye ekle"; }
   else if(tip==="konsatis"){ gecerli=gecerli&&konsList.length>0&&adet>0; payload={type:"konsinye",kmod:"satis",kkalem,adet}; ctaTxt="📅 Kons. satışı ekle"; }
   else if(tip==="iade"){ gecerli=gecerli&&konsList.length>0&&adet>0; payload={type:"konsinye",kmod:"iade",kkalem,adet}; ctaTxt="📅 İade ekle"; }
@@ -1333,10 +1334,15 @@ function GecmisSheet({k,d,onClose,onFire}){
       tips.map(([kk2,lbl])=>h(Chip,{key:kk2,on:tip===kk2,onClick:()=>setTip(kk2)},lbl))),
     (tip==="satis"||tip==="konsinye")?urunSec:null,
     (tip==="konsatis"||tip==="iade")?kalemSec:null,
-    tip==="satis"?h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
-      adetIn,
-      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Birim ₺"),
-        h("input",{type:"number",inputMode:"numeric",value:fiyat||"",onChange:e=>setFiyat(num(e.target.value)),style:inp}))):null,
+    tip==="satis"?h(React.Fragment,null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+        adetIn,
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Satış ₺/ad"),
+          h("input",{type:"number",inputMode:"numeric",value:fiyat||"",onChange:e=>setFiyat(num(e.target.value)),style:inp}))),
+      h("div",{style:{marginTop:12}},h("div",{className:"lbl",style:{marginBottom:8}},"Veriliş ₺/ad · o günkü maliyet"),
+        h("input",{type:"number",inputMode:"numeric",value:veris||"",onChange:e=>setVeris(num(e.target.value)),style:inp}),
+        h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:6}},"ℹ️ O tarihteki fiyatlar bugünden farklıysa buraya gerçek değerleri gir — hakediş = adet × (satış − veriliş).")),
+      (num(fiyat)>0||num(veris)>0)?h("div",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",marginTop:8}},"🫰 Hakediş: "+tl(num(adet)*Math.max(0,num(fiyat)-num(veris)))):null):null,
     (tip==="konsinye"||tip==="konsatis"||tip==="iade")?adetIn:null,
     tip==="tahsilat"?h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Tahsil edilen ₺"),
       h("input",{type:"number",inputMode:"numeric",value:tut,onChange:e=>setTut(e.target.value),style:inp})):null,
@@ -1699,7 +1705,7 @@ function App(){
     } else if(p.type==="satis"){
       const u=p.urun||{}; const gerilla=!k; const satisId=uid();
       await save("pazarlama_hareket",{id:satisId,...kul,tip:"satis",...(gerilla?{gerilla:true,kaynak:"gerilla"}:gecEk),urunId:u.id||"",urunAd:u.ad||"?",
-        adet:num(p.adet),alisFiyat:num(u.pazFiyat),satisFiyat:num(p.fiyat),tahsil:gerilla?num(p.adet)*num(p.fiyat):0,
+        adet:num(p.adet),alisFiyat:(p.veris!=null&&p.veris!=="")?num(p.veris):num(u.pazFiyat),satisFiyat:num(p.fiyat),tahsil:gerilla?num(p.adet)*num(p.fiyat):0,
         yer:gerilla?"⚡ Seyyar":k.ad,bolge:k?(k.bolge||""):"",musteriId:k?(k.musteriId||""):"",tarih:now});
       if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-num(p.adet));
       // satışta anında alınan: satışın tahsil'i artar (borç kapanır) + tahsilat kaydı (önce üretici) — ana uygulama ile aynı
