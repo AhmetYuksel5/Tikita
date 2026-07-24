@@ -54,7 +54,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek: açılış anında cihazdan, sunucudan yalnız değişenler
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="v56";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v57";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -1707,7 +1707,7 @@ function App(){
     const kul={kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir"};
     const yerB=k?{yer:k.ad,bolge:k.bolge||"",musteriId:k.musteriId||""}:{};
     if(p.type==="tahsilat"){
-      const acik=hareketler.filter(x=>x.tip==="satis"&&!x.gerilla&&kkOf(x)===key)
+      const acik=emirHar.filter(x=>x.tip==="satis"&&!x.gerilla&&kkOf(x)===key)
         .map(x=>{const bek=num(x.adet)*num(x.satisFiyat);const onceki=x.tahsil==null?bek:num(x.tahsil);return {x,bek,onceki,borc:Math.max(0,bek-onceki)};})
         .filter(o=>o.borc>0).sort((a,b)=>new Date(a.x.tarih)-new Date(b.x.tarih));
       let kalan=Math.min(num(p.tut),k?k.borc:num(p.tut)),uP=0,pP=0,uyg=0;   // kalenin güncel borcunu aşma
@@ -1765,7 +1765,7 @@ function App(){
           } }
       } else {
         const ad=(p.kkalem&&p.kkalem.ad)||"?";
-        const recs=hareketler.filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&kkOf(x)===key&&(x.urunAd||"?")===ad).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
+        const recs=emirHar.filter(x=>x.tip==="konsinye"&&num(x.kalan)>0&&kkOf(x)===key&&(x.urunAd||"?")===ad).sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
         let dus=num(p.adet);   // açık konsinyeden FIFO düş — ana uygulama ile aynı
         for(const r of recs){ if(dus<=0)break; const dd=Math.min(dus,num(r.kalan));
           await save("pazarlama_hareket",{id:r.id,kalan:increment(-dd)}); dus-=dd; }
@@ -1790,11 +1790,11 @@ function App(){
   const geriAlKayit=async(x)=>{ const o=ovOzet(x); if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
     try{
       const ad2=num(x.adet); const gecmisMi=x.kaynak==="gecmis";
-      const sonKons=()=>hareketler.filter(h2=>h2.tip==="konsinye"&&h2.id!==x.id&&kkOf(h2)===kkOf(x)&&(h2.urunAd||"?")===(x.urunAd||"?")).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih))[0];
+      const sonKons=()=>emirHar.filter(h2=>h2.tip==="konsinye"&&h2.id!==x.id&&kkOf(h2)===kkOf(x)&&(h2.urunAd||"?")===(x.urunAd||"?")).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih))[0];
       if(x.tip==="konsinye"&&num(x.kalan)!==ad2) return alert("Bu konsinyenin bir kısmı satılmış/iade olmuş.\nÖnce ilgili satış/iadeleri geri al.");
       if(x.tip==="tahsilat"){ // satışların tahsil'ini geri düş — borç geri gelir (ana uygulama ile aynı)
         let kalan=num(x.tutar);
-        const tahsilli=hareketler.filter(s=>s.tip==="satis"&&!s.gerilla&&kkOf(s)===kkOf(x)&&num(s.tahsil)>0).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+        const tahsilli=emirHar.filter(s=>s.tip==="satis"&&!s.gerilla&&kkOf(s)===kkOf(x)&&num(s.tahsil)>0).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
         for(const s of tahsilli){ if(kalan<=0.001)break; const dd=Math.min(kalan,num(s.tahsil)); await save("pazarlama_hareket",{id:s.id,tahsil:increment(-dd)}); kalan-=dd; } }
       if(x.tip==="satis"&&x.kaynak==="konsinye"){ const kx=sonKons(); if(kx) await save("pazarlama_hareket",{id:kx.id,kalan:increment(ad2)}); }
       if(x.tip==="iade"){ const kx=sonKons(); if(kx) await save("pazarlama_hareket",{id:kx.id,kalan:increment(ad2)}); }
@@ -1969,12 +1969,12 @@ function App(){
       kayit:(typeof yeniKale==="object"&&yeniKale.kayit)?yeniKale.kayit:null,
       onArsiv:kaleArsivle,onSil:kaleSil,onClose:()=>setYeniKale(false),onKaydet:yeniKaleKaydet}),
     urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),
-      recs:hareketler.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
+      recs:emirHar.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
       kaleler:d.kaleler,say,
       kisiler:(()=>{ const tm={}; (tumMus||[]).forEach(m=>{const t=(m.telefon||"").trim(); if(t) tm[m.id]=t;});
         const out=[],seen=new Set();
         d.kaleler.forEach(k=>{ const t=k.musteriId&&tm[k.musteriId]; if(t&&!seen.has(t)){ seen.add(t); out.push({ad:k.ad,tel:t}); } });
-        (tumMus||[]).forEach(m=>{ const t=(m.telefon||"").trim(); if(t&&!seen.has(t)){ seen.add(t); out.push({ad:m.ad||t,tel:t}); } });
+        (tumMus||[]).filter(m=>(m.kullaniciId||"")===emirId).forEach(m=>{ const t=(m.telefon||"").trim(); if(t&&!seen.has(t)){ seen.add(t); out.push({ad:m.ad||t,tel:t}); } });
         return out; })(),
       fotolar:(urunFoto||[]).filter(f=>f.urunId===urunSec.id).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),
       onFiyat:v=>urunEkKaydet(urunSec.id,{satisFiyat:v},"💰 Satış fiyatı güncellendi: "+tl(v)),
