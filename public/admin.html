@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A74";   // komuta (admin) deneme sürümü
+const SURUM="A75";   // komuta (admin) deneme sürümü
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
@@ -1146,12 +1146,13 @@ function Us({d,ac,hareketler,go,talepler,onTalep,onMesaj,onTalepSil}){
   const [acikP,setAcikP]=useState(null);   // sahada — hangi pazarlamacının adımları açık
   const et={satis:"💰",tahsilat:"🧾",konsinye:"🏬",hediye:"🎁",iade:"↩️",stant:"🎪",diplomasi:"🤝"};
   const izle=["satis","tahsilat","konsinye","iade","stant","diplomasi","hediye"];
-  // her pazarlamacının SON hareketi (nerede/ne yaptı) + son adımları
-  const sonHar={}, harByK={};
-  har.forEach(x=>{ const id=x.kullaniciId; if(!id||!izle.includes(x.tip)) return;
-    const t=new Date(x.tarih).getTime()||0; if(!sonHar[id]||t>sonHar[id].t) sonHar[id]={t,x};
-    (harByK[id]||(harByK[id]=[])).push(x); });
-  Object.values(harByK).forEach(a=>a.sort((p,q)=>new Date(q.tarih)-new Date(p.tarih)));
+  // her pazarlamacının SON hareketi (nerede/ne yaptı) + son adımları — memo (her render'da tüm hareketleri taramasın)
+  const {sonHar,harByK}=useMemo(()=>{ const sonHar={}, harByK={};
+    har.forEach(x=>{ const id=x.kullaniciId; if(!id||!izle.includes(x.tip)) return;
+      const t=new Date(x.tarih).getTime()||0; if(!sonHar[id]||t>sonHar[id].t) sonHar[id]={t,x};
+      (harByK[id]||(harByK[id]=[])).push(x); });
+    Object.values(harByK).forEach(a=>a.sort((p,q)=>new Date(q.tarih)-new Date(p.tarih)));
+    return {sonHar,harByK}; },[har]);
   const harMetni=x=>x.tip==="satis"?((num(x.adet)||"")+"× "+(x.urunAd||"satış")+(x.gerilla?" ⚡":"")):x.tip==="tahsilat"?("tahsilat "+tl(x.tutar)):x.tip==="konsinye"?((num(x.adet)||"")+"× "+(x.urunAd||"?")+" konsinye"):x.tip==="iade"?((num(x.adet)||"")+"× "+(x.urunAd||"?")+" iade"):x.tip==="hediye"?((num(x.adet)||"")+"× "+(x.urunAd||"?")+" hediye"):x.tip==="stant"?"stant bırakıldı":x.tip==="diplomasi"?"ziyaret":x.tip;
   const harTutar=x=>x.tip==="tahsilat"?tl(x.tutar):x.tip==="satis"?tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)):(num(x.adet)?(num(x.adet)+" ad"):"");
   const acikTalep=(talepler||[]).filter(t=>t.durum!=="kapandi").sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
@@ -1289,15 +1290,16 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-1); const ms=t.getTime();
     el.scrollLeft=(ms>baslaMs&&ms<bitMs)?Math.max(0,(ms-baslaMs)*px):0; posRef.current=bas;
   },[bas,containerW,px]);
-  const gramMak={}; let gramTop=0;
-  (plan||[]).forEach(p=>{ const g=num(p.gram); if(g<=0) return; const s=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000, e=s+dur; let pay=0;
-    if(dur<=0){ if(s>=baslaMs&&s<bitMs) pay=g; } else { const ovS=Math.max(s,baslaMs), ovE=Math.min(e,bitMs); if(ovE>ovS) pay=g*(ovE-ovS)/dur; }
-    if(pay>0){ gramMak[p.makineId]=(gramMak[p.makineId]||0)+pay; gramTop+=pay; } });
-  const bosListe=[];
-  mlist.forEach(mk=>{ const eff=(timelines[mk.id]||{}).eff||[]; const uclar=eff.filter(x=>!x.geride&&x.e>baslaMs).map(x=>x.e); let start;
-    if(!uclar.length){ start=Math.max(baslaMs,now); } else { const son=Math.max.apply(null,uclar); if(son>=bitMs) return; start=Math.max(son,now); }
-    bosListe.push({makine:mk,start}); });
-  bosListe.sort((a,b)=>a.start-b.start);
+  const {gramMak,gramTop,bosListe}=useMemo(()=>{ const gramMak={}; let gramTop=0;
+    (plan||[]).forEach(p=>{ const g=num(p.gram); if(g<=0) return; const s=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000, e=s+dur; let pay=0;
+      if(dur<=0){ if(s>=baslaMs&&s<bitMs) pay=g; } else { const ovS=Math.max(s,baslaMs), ovE=Math.min(e,bitMs); if(ovE>ovS) pay=g*(ovE-ovS)/dur; }
+      if(pay>0){ gramMak[p.makineId]=(gramMak[p.makineId]||0)+pay; gramTop+=pay; } });
+    const bosListe=[];
+    mlist.forEach(mk=>{ const eff=(timelines[mk.id]||{}).eff||[]; const uclar=eff.filter(x=>!x.geride&&x.e>baslaMs).map(x=>x.e); let start;
+      if(!uclar.length){ start=Math.max(baslaMs,now); } else { const son=Math.max.apply(null,uclar); if(son>=bitMs) return; start=Math.max(son,now); }
+      bosListe.push({makine:mk,start}); });
+    bosListe.sort((a,b)=>a.start-b.start);
+    return {gramMak,gramTop,bosListe}; },[plan,makineler,baslaMs,bitMs,now]);
   const kapasiteMs=mlist.length*toplamMs;
   const toplamPrint=mlist.reduce((s,mk)=>s+((timelines[mk.id]||{}).printMs||0),0);
   const toplamBos=kapasiteMs-toplamPrint;
