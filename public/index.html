@@ -3870,42 +3870,77 @@ function GirisEkran({ kullanicilar, onGiris }){
   const [secId,setSecId]=useState(null);
   const [pin,setPin]=useState("");
   const [ad,setAd]=useState(""); const [yeniPin,setYeniPin]=useState("");
+  const [denemeAcik,setDenemeAcik]=useState(false);
+  const [hata,setHata]=useState(""); const [bekle,setBekle]=useState(false);
   const sec=kullanicilar.find(u=>u.id===secId)||null;
+  const sortF=(a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr");
+  const gercek=kullanicilar.filter(u=>!u.demo&&!u.minimal).sort(sortF);       // ana liste
+  const denemeler=kullanicilar.filter(u=>u.demo||u.minimal).sort(sortF);      // 🧪 demo + minimal
   async function ilkAdmin(){
     if(!ad.trim()) return alert("İsim gir.");
     if(yeniPin.length<4) return alert("4+ haneli bir PIN belirle.");
     const obj={ad:ad.trim(),rol:"admin",simge:"👑",renkH:adRenk(ad).H,...(await yeniKullaniciPin(yeniPin))};
     const id=await save("kullanici",obj); onGiris({id,...obj});
   }
-  async function girisYap(){ if(!sec) return; if(!(await pinDogru(sec,pin))){ setPin(""); return alert("PIN hatalı."); } onGiris(sec); }
-  return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:18,background:"linear-gradient(135deg,#0b1220,#1e293b)"}},
-    h("div",{style:{width:"100%",maxWidth:420,background:"#fff",borderRadius:18,padding:24,boxShadow:"0 20px 60px rgba(0,0,0,.45)"}},
-      h("div",{style:{textAlign:"center",marginBottom:18}},
-        h("div",{style:{fontSize:42}},"🧊"),
-        h("div",{style:{fontSize:23,fontWeight:800}},"Tikita"),
-        h("div",{style:{fontSize:13,color:C.mut,marginTop:2}}, yok?"İlk yönetici hesabını oluştur":"Hesabını seç ve giriş yap")),
+  function ac(u){ setSecId(u.id); setPin(""); setHata(""); }
+  function kapat(){ setSecId(null); setPin(""); setHata(""); }
+  const bas=n=>{ if(bekle) return; setHata(""); setPin(p=>p.length>=8?p:p+n); };
+  const geri=()=>{ if(bekle) return; setHata(""); setPin(p=>p.slice(0,-1)); };
+  async function girisYap(){ if(!sec||bekle||pin.length<1) return; setBekle(true);
+    const ok=await pinDogru(sec,pin); setBekle(false);
+    if(!ok){ setPin(""); setHata("Şifre hatalı — tekrar dene"); return; }
+    onGiris(sec); }
+  // hesap satırı
+  const satir=u=>h("button",{key:u.id,onClick:()=>ac(u),type:"button",
+    style:{display:"flex",alignItems:"center",gap:12,padding:"13px 14px",border:"1px solid "+C.line,borderRadius:14,background:"#fff",cursor:"pointer",textAlign:"left",width:"100%"}},
+    h("div",{style:{width:40,height:40,borderRadius:"50%",background:"#f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}},u.simge||"🙂"),
+    h("div",{style:{flex:1,minWidth:0}},
+      h("div",{style:{fontWeight:800,fontSize:15}},u.ad),
+      h("div",{style:{fontSize:12,color:C.mut}}, u.rol==="admin"?"Yönetici":"Pazarlamacı")),
+    h("div",{style:{fontSize:18,color:C.mut}},"›"));
+  // tuş takımı tuşu
+  const tus=(lbl,fn,tip)=>{ const st=tip==="ok"?{background:"#16a34a",color:"#fff",border:"1px solid #16a34a"}
+    : tip==="del"?{background:"transparent",color:C.mut,border:"1px solid transparent"}
+    : {background:"#f8fafc",color:"#1e293b",border:"1px solid #e2e8f0"};
+    return h("button",{key:lbl,type:"button",onClick:fn,disabled:bekle,
+      style:{padding:"15px 0",borderRadius:14,fontSize:tip?20:23,fontWeight:800,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",...st}},lbl); };
+  return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:18,
+      background:"linear-gradient(160deg,#eef4ff 0%,#fdf2f8 55%,#fff7ed 100%)"}},
+    h("div",{style:{width:"100%",maxWidth:400,background:"#fff",borderRadius:22,padding:"26px 22px",boxShadow:"0 20px 50px rgba(30,41,80,.16)"}},
+      h("div",{style:{textAlign:"center",marginBottom:20}},
+        h("img",{src:"tikita-logo.png",alt:"Tikita",style:{width:"80%",maxWidth:250,height:"auto",display:"block",margin:"0 auto"}}),
+        yok?h("div",{style:{fontSize:13,color:C.mut,marginTop:8}},"İlk yönetici hesabını oluştur"):null),
       yok ? h("div",null,
           h(Field,{label:"Yönetici adı"}, h("input",{style:S.input,value:ad,onChange:e=>setAd(e.target.value)})),
           h(Field,{label:"PIN (4+ hane)"}, h("input",{type:"password",inputMode:"numeric",style:S.input,value:yeniPin,onChange:e=>setYeniPin(e.target.value.replace(/\D/g,"")),onKeyDown:e=>{if(e.key==="Enter")ilkAdmin();}})),
           h("button",{style:{...S.btn("p"),width:"100%",marginTop:8},onClick:ilkAdmin},"👑 Yönetici oluştur ve gir"))
-      : !sec ? h("div",{style:{display:"grid",gap:10}},
-          kullanicilar.slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr")).map(u=>
-            h("button",{key:u.id,onClick:()=>{setSecId(u.id);setPin("");},
-              style:{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",border:"1px solid "+C.line,borderRadius:12,background:"#fff",cursor:"pointer",textAlign:"left"}},
-              h("div",{style:{fontSize:26}},u.simge||"🙂"),
-              h("div",{style:{flex:1}},
-                h("div",{style:{fontWeight:800,fontSize:15}},u.ad),
-                h("div",{style:{fontSize:12,color:C.mut}}, u.rol==="admin"?"Yönetici":"Pazarlamacı")),
-              h("div",{style:{fontSize:18,color:C.mut}},"›")))
-        )
-      : h("div",null,
-          h("button",{onClick:()=>setSecId(null),style:{...S.ibtn,marginBottom:10}},"‹ Geri"),
-          h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:12}},
-            h("div",{style:{fontSize:30}},sec.simge||"🙂"),
-            h("div",null,h("div",{style:{fontWeight:800,fontSize:16}},sec.ad),h("div",{style:{fontSize:12,color:C.mut}}, sec.rol==="admin"?"Yönetici":"Pazarlamacı"))),
-          h(Field,{label:"PIN"}, h("input",{type:"password",inputMode:"numeric",autoFocus:true,style:S.input,value:pin,
-            onChange:e=>setPin(e.target.value.replace(/\D/g,"")),onKeyDown:e=>{if(e.key==="Enter")girisYap();}})),
-          h("button",{style:{...S.btn("p"),width:"100%",marginTop:8},onClick:girisYap},"Giriş yap"))
+      : h("div",{style:{display:"grid",gap:10}},
+          gercek.map(satir),
+          denemeler.length? h("div",null,
+            h("button",{onClick:()=>setDenemeAcik(v=>!v),type:"button",
+              style:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",marginTop:4,padding:"11px 12px",
+                border:"1px dashed "+C.line,borderRadius:12,background:"transparent",color:C.mut,fontWeight:800,fontSize:13,cursor:"pointer"}},
+              "🧪 Denemeler", h("span",{style:{fontSize:11}},denemeAcik?"▲":"▼")),
+            denemeAcik? h("div",{style:{display:"grid",gap:10,marginTop:10}}, denemeler.map(satir)) : null) : null),
+      // 🔢 ŞİFRE MODALI — sistem klavyesi yok, tuş takımı
+      sec? h("div",{style:{...S.overlay,zIndex:60},onClick:kapat},
+        h("div",{onClick:e=>e.stopPropagation(),style:{width:"100%",maxWidth:330,background:"#fff",borderRadius:22,padding:"20px 20px 18px",boxShadow:"0 24px 60px rgba(0,0,0,.32)"}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:11,marginBottom:14}},
+            h("div",{style:{width:44,height:44,borderRadius:"50%",background:"#f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}},sec.simge||"🙂"),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontWeight:800,fontSize:16}},sec.ad),
+              h("div",{style:{fontSize:12,color:C.mut}}, sec.rol==="admin"?"Yönetici":"Pazarlamacı")),
+            h("button",{onClick:kapat,type:"button",style:{fontSize:20,color:C.mut,background:"none",border:"none",cursor:"pointer",lineHeight:1}},"✕")),
+          h("div",{style:{display:"flex",justifyContent:"center",gap:10,margin:"4px 0 3px",minHeight:18}},
+            Array.from({length:Math.max(4,pin.length)}).map((_,i)=>h("span",{key:i,
+              style:{width:13,height:13,borderRadius:"50%",background:i<pin.length?(hata?"#dc2626":"#1e293b"):"#e2e8f0",transition:"background .15s"}}))),
+          h("div",{style:{textAlign:"center",height:18,fontSize:12,fontWeight:700,color:"#dc2626",marginBottom:8}},hata||""),
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}},
+            ["1","2","3","4","5","6","7","8","9"].map(n=>tus(n,()=>bas(n))),
+            tus("⌫",geri,"del"),
+            tus("0",()=>bas("0")),
+            tus("✓",girisYap,"ok"))
+        )) : null
     ));
 }
 function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, plan, onKapat }){
