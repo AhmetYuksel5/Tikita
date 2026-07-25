@@ -49,7 +49,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="A92";   // komuta (admin) deneme sürümü
+const SURUM="A93";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1292,7 +1292,11 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const step=tickStep(GUN_W);
   const ticks=[]; for(let hr=0;hr<=24;hr+=step) ticks.push(hr);
   const toplamW=gunSayisi*GUN_W, px=toplamW/toplamMs;
-  const mlist=(makineler||[]).filter(mk=>(mk.ad||"").trim()).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  // makineleri numaraya göre sırala (numarasızlar sona, kendi içinde ada göre)
+  const mlist=(makineler||[]).filter(mk=>(mk.ad||"").trim()).slice().sort((a,b)=>{
+    const na=parseInt(mkParca(a).no,10), nb=parseInt(mkParca(b).no,10);
+    const va=isNaN(na)?Infinity:na, vb=isNaN(nb)?Infinity:nb;
+    return va-vb || (mkParca(a).ad||"").localeCompare(mkParca(b).ad||"","tr"); });
   const timelines=useMemo(()=>{ const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id,plan,baslaMs,bitMs,now); }); return m; },[plan,makineler,baslaMs,bitMs,now]);
   const gunler=Array.from({length:gunSayisi},(_,i)=>new Date(baslaMs+i*24*3600*1000));
   const tarihAralik=gTarih(baslaMs)+" – "+gTarih(bitMs-1)+" "+new Date(baslaMs).getFullYear();
@@ -1440,7 +1444,10 @@ function Uretim({d,plan,makineler,ac,onTabla}){
 }
 // ⚙️ MAKİNE YÖNETİMİ — makine ekle/düzenle/sil
 function MakineYonetimSheet({makineler,onClose,onAc}){
-  const makList=(makineler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const makList=(makineler||[]).slice().sort((a,b)=>{
+    const na=parseInt(mkParca(a).no,10), nb=parseInt(mkParca(b).no,10);
+    const va=isNaN(na)?Infinity:na, vb=isNaN(nb)?Infinity:nb;
+    return va-vb || (mkParca(a).ad||"").localeCompare(mkParca(b).ad||"","tr"); });
   return h(Sheet,{ik:h(Icn,{n:"printer",c:"#0e8fce",s:22}),hex:"#0e8fce",baslik:"Makineler",alt:makList.length+" makine",onClose,cta:"Kapat",onCta:onClose},
     h("button",{onClick:()=>onAc({tip:"makineDuzen",mk:null}),style:{width:"100%",padding:12,borderRadius:13,marginBottom:12,background:"var(--surf)",border:"1.5px dashed var(--cyan)",color:"var(--cyan)",fontSize:14,fontWeight:800}},"Yeni makine"),
     makList.length?makList.map((mk,i)=>h("button",{key:mk.id||i,onClick:()=>onAc({tip:"makineDuzen",mk}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 12px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",marginBottom:8,textAlign:"left"}},
