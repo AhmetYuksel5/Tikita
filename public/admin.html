@@ -43,7 +43,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="A77";   // komuta (admin) deneme sürümü
+const SURUM="A78";   // komuta (admin) deneme sürümü
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
@@ -1483,12 +1483,13 @@ function HakedisDuzenSheet({sales,onClose,onKaydet}){
           degisti?h("span",{style:{fontSize:11.5,fontWeight:800,color:"var(--gold)"}},tl(num(x.alisFiyat))+" → "+tl(alis)):null)); })
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde kale satışı yok."));
 }
-function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil}){
+function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil,talepler,onTablaEmri,onTablaIptal}){
   const [alt,setAlt]=useState(odak?"hedef":"ozet");   // ozet/paz/kons/alacak/mus/hareket/hedef
   const [kod,setKod]=useState("hafta");
   const [hkisi,setHkisi]=useState("");
   const [det,setDet]=useState(null);
   const [hakDuzen,setHakDuzen]=useState(false);   // hakediş satış düzenleme sheet'i
+  const [odemeAcik,setOdemeAcik]=useState(false);   // 🧹 tabla hakedişi ödeme sheet'i
   const [ozelBas,setOzelBas]=useState(""); const [ozelBit,setOzelBit]=useState("");   // özel tarih aralığı
   const [konsGrup,setKonsGrup]=useState("mekan");   // konsinye gruplama: mekan/urun/tarih
   // pazarlamacı konum paylaşınca → doğrudan hedef (alan tara) sekmesine geç
@@ -1517,6 +1518,13 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   const T={}; ["satA","satT","konsA","konsT","tah","gerA","gerC","gerU","gerM","hakedis","uBorc","tabla","tablaKaz","nakit"].forEach(k=>T[k]=perf.reduce((s,p)=>s+p[k],0));
   // hakediş (satış marjı bazlı, canlı) = Σ kale-satış (satış−veriliş)×adet + gerilla marjı — fiyat düzenlemesi anında yansır
   const hakMarj=R.reduce((s,x)=>(x.tip==="satis"&&!x.gerilla)?s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)):s,0)+num(T.gerM);
+  // 🧹 tabla hakedişi bakiyesi (TÜM ZAMAN, döneme bağlı değil) — kazanılan − ödenen; ödeme emri açık talepler + son ödemeler
+  const tablaBak={}; (hareketler||[]).forEach(x=>{ const uid=x.kullaniciId||"?";
+    if(x.tip==="tabla") tablaBak[uid]=(tablaBak[uid]||0)+num(x.tutar);
+    else if(x.tip==="tablaOde") tablaBak[uid]=(tablaBak[uid]||0)-num(x.tutar); });
+  const tablaKalanTopA=Object.values(tablaBak).reduce((s,v)=>s+Math.max(0,v),0);
+  const acikOdeme=(talepler||[]).filter(t=>t.tip==="tabla-ödeme"&&t.durum!=="kapandi");
+  const tablaOdemeList=(hareketler||[]).filter(x=>x.tip==="tablaOde").sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
   // açık konsinye (tüm zaman) — mekana ve ürüne göre (canlı snapshot)
   const konsByYer={}, acikByUrun={};
   (hareketler||[]).forEach(x=>{ if(x.tip==="konsinye"&&num(x.kalan)>0){ const y=x.yer||"?", u=x.urunAd||"?";
@@ -1623,6 +1631,7 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         h(Stat,{ik:"🫰",v:tl(hakMarj),l:"toplam hakediş · satışlar ›",renk:"var(--gold)",onClick:()=>setHakDuzen(true)}),
         h(Stat,{ik:"🏭",v:tl(T.uBorc),l:"üreticiye kalan ›",renk:"var(--txt)",onClick:()=>setDet(detB.uretici())}),
         h(Stat,{ik:"🧹",v:tl(T.tablaKaz),l:T.tabla+" tabla değişimi ›",renk:"var(--violet)",onClick:()=>setDet(detB.tabla())}),
+        h(Stat,{ik:"✅",v:tl(tablaKalanTopA),l:(acikOdeme.length?(acikOdeme.length+" emir açık · "):"")+"tabla hakedişi öde ›",renk:tablaKalanTopA>0.5?"var(--gold)":"var(--green)",onClick:()=>setOdemeAcik(true)}),
         h(Stat,{ik:"🏬",v:konsTopAd+" ad",l:"açık konsinye ("+tl(konsTopTut)+") ›",renk:"var(--violet)",onClick:()=>setAlt("kons")}),
         h(Stat,{ik:"💰",v:tl(alacakTop),l:"net açık alacak ›",renk:alacakTop>0.5?"var(--red)":"var(--green)",onClick:()=>setAlt("alacak")}),
         h(Stat,{ik:"🎖️",v:perf.length+" / "+(ekip||[]).length,l:"aktif pazarlamacı ›",renk:"var(--txt)",onClick:()=>setDet(detB.aktif())}),
@@ -1733,7 +1742,34 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         :null; })()):null,
     det?h(DetayListSheet,{...det,onClose:()=>setDet(null)}):null,
     hakDuzen?h(HakedisDuzenSheet,{sales:R.filter(x=>x.tip==="satis"&&!x.gerilla&&x.id).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),onClose:()=>setHakDuzen(false),
-      onKaydet:async(ch)=>{ if(onHakedisKaydet) await onHakedisKaydet(ch); setHakDuzen(false); }}):null);
+      onKaydet:async(ch)=>{ if(onHakedisKaydet) await onHakedisKaydet(ch); setHakDuzen(false); }}):null,
+    odemeAcik?h(TablaOdemeSheet,{ekip,tablaBak,acikOdeme,odemeList:tablaOdemeList,onEmir:(u,k)=>onTablaEmri&&onTablaEmri(u,k),onIptal:t=>onTablaIptal&&onTablaIptal(t),onClose:()=>setOdemeAcik(false)}):null);
+}
+// 🧹 TABLA HAKEDİŞİ ÖDEMELERİ — admin ödeme emri verir, pazarlamacı raporunda teslim alır
+function TablaOdemeSheet({ekip,tablaBak,acikOdeme,odemeList,onEmir,onIptal,onClose}){
+  const rows=(ekip||[]).map(e=>({u:e.u,kalan:Math.max(0,tablaBak[e.u.id]||0),acik:(acikOdeme||[]).find(t=>t.kullaniciId===e.u.id)}))
+    .filter(r=>r.kalan>0.5||r.acik).sort((a,b)=>b.kalan-a.kalan);
+  return h(Sheet,{ik:"✅",hex:"#d97b12",baslik:"Tabla hakedişi ödemeleri",alt:"ödeme emri ver — pazarlamacı raporunda teslim alır",onClose,cta:"Kapat",onCta:onClose},
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:12}},"ℹ️ Ödeme emri verdiğinde pazarlamacının bir sonraki komuta raporunda “ödemeyi aldım” seçeneği çıkar. Onayladığında biriken tabla hakedişinden düşülür — ayrı ödeme kaydı olarak tutulur, tahsilatla karışmaz."),
+    rows.length?rows.map((r,i)=>h("div",{key:r.u.id||i,style:{padding:"12px 0",borderTop:i?"1px solid var(--line)":"none"}},
+      h("div",{style:{display:"flex",alignItems:"center",gap:10}},
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(r.u.simge||"")+" "+r.u.ad),
+          h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},"ödenmemiş tabla hakedişi")),
+        h("div",{style:{fontSize:15,fontWeight:800,color:"var(--violet)",flexShrink:0}},tl(r.kalan))),
+      r.acik
+        ?h("div",{style:{display:"flex",alignItems:"center",gap:8,marginTop:8}},
+          h("div",{style:{flex:1,minWidth:0,fontSize:12,fontWeight:700,color:"#b45309"}},"⏳ "+tl(r.acik.odemeTutar)+" ödeme emri açık — teslim bekliyor"),
+          h("button",{onClick:()=>onIptal(r.acik),style:{flexShrink:0,padding:"7px 11px",borderRadius:9,fontSize:12,fontWeight:800,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)"}},"İptal"))
+        :h("button",{onClick:()=>onEmir(r.u,r.kalan),disabled:r.kalan<0.5,style:{width:"100%",marginTop:8,padding:10,borderRadius:11,background:"var(--gold)",color:"#fff",fontSize:13,fontWeight:800,opacity:r.kalan<0.5?.5:1}},"🧹 Ödeme emri ver")))
+      :h("div",{style:{padding:"18px 0",textAlign:"center",color:"var(--mut)"}},"Ödenecek tabla hakedişi yok."),
+    (odemeList&&odemeList.length)?h(React.Fragment,null,
+      h("div",{className:"lbl",style:{margin:"16px 0 8px"}},"✅ Son ödemeler"),
+      odemeList.slice(0,15).map((x,i)=>h("div",{key:x.id||i,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:i?"1px solid var(--line)":"none"}},
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},x.kullaniciAd||"?"),
+          h("div",{style:{fontSize:11,color:"var(--mut)"}},new Date(x.tarih).toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"}))),
+        h("span",{style:{fontWeight:800,color:"var(--green)",flexShrink:0}},"−"+tl(x.tutar))))):null);
 }
 
 /* ————— NAV + APP ————— */
@@ -1904,6 +1940,14 @@ function App(){
     const kad=(kullanicilar||[]).find(u=>u.id===p.kullaniciId);
     try{ await save("talep",{kaynak:"komuta",kullaniciId:p.kullaniciId,kullaniciAd:kad?kad.ad:"",simge:kad?(kad.simge||"👑"):"👑",mesaj:p.mesaj,konumIste:!!p.konumIste,durum:"acik",tarih:new Date().toISOString()}); setModal(null); say("📨 Mesaj gönderildi"); }
     catch(e){ console.error(e); say("⚠ Gönderilemedi"); } finally{ setIsBekle(false); } }
+  // 🧹 tabla hakedişi ödeme emri — pazarlamacının sonraki raporunda "ödemeyi aldım" olarak çıkar
+  async function tablaOdemeEmri(u,kalan){ if(!u||!u.id) return;
+    const t=prompt("🧹 "+(u.ad||"pazarlamacı")+" için tabla hakedişi ödeme tutarı (₺):\nKalan: "+tl(kalan),String(Math.round(num(kalan))));
+    if(t==null) return; const v=num(t); if(v<=0){ say("⚠ Geçersiz tutar"); return; }
+    try{ await save("talep",{kaynak:"komuta",kullaniciId:u.id,kullaniciAd:u.ad||"",simge:u.simge||"👑",tip:"tabla-ödeme",odemeTutar:v,mesaj:"🧹 "+tl(v)+" tabla hakedişi ödemen onaylandı — sonraki raporunda teslim al.",konumIste:false,durum:"acik",tarih:new Date().toISOString()}); say("📨 Ödeme emri gönderildi · "+tl(v)); }
+    catch(e){ console.error(e); say("⚠ Gönderilemedi"); } }
+  async function tablaOdemeIptal(t){ if(!t||!t.id) return; if(!confirm("🧹 Bu ödeme emri iptal edilsin mi?\n(Pazarlamacı henüz teslim almadı.)")) return;
+    try{ await remove("talep",t.id); say("🗑 Ödeme emri iptal edildi"); }catch(e){ console.error(e); say("⚠ İptal edilemedi"); } }
   async function hakedisKaydet(changes){ if(!changes||!changes.length) return;
     try{
       for(const c of changes){ await save("pazarlama_hareket",{id:c.id,alisFiyat:c.yeniAlis}); }
@@ -1965,7 +2009,7 @@ function App(){
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
-  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil});
+  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
   return h("div",null,
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "⚠️ Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
