@@ -20,6 +20,9 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased}
   #root{max-width:520px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:92px;transition:max-width .2s}
+  .tk-bar{position:fixed;top:0;left:0;right:0;z-index:45;max-width:520px;margin:0 auto}
+  body.tk-pc .tk-bar{max-width:960px}
+  .tk-barbosluk{height:calc(env(safe-area-inset-top,0px) + 65px)}
   body.tk-pc #root{max-width:960px}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
   .card{background:var(--surf);border:1px solid var(--line);border-radius:20px;box-shadow:0 6px 22px rgba(28,30,45,.05)}
@@ -49,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="A95";   // komuta (admin) deneme sürümü
+const SURUM="A96";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -545,7 +548,6 @@ function Hud({d,onBaski,onTabla,onCiro}){
     boxShadow:"0 10px 30px rgba(16,24,40,.35)",position:"relative",overflow:"hidden"}},
     (TEMALAR[TEMA]||{}).geo?null:h("div",{style:{position:"absolute",top:-38,right:-28,fontSize:150,opacity:.08,transform:"rotate(-12deg)"}},"🏭"),
     h("div",{style:{display:"flex",alignItems:"center",gap:13,position:"relative"}},
-      h("div",{style:{width:54,height:54,borderRadius:"50%",background:"rgba(255,255,255,.16)",border:"2px solid rgba(255,255,255,.35)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:29,flexShrink:0}},IK("panel","#fff",26)),
       h("div",{style:{flex:1,minWidth:0}},
         h("div",{style:{fontSize:22,fontWeight:800,color:"#fff",lineHeight:1.15}},TT().panelAd))),
     h("div",{style:{display:"flex",gap:9,marginTop:16}},
@@ -1259,11 +1261,11 @@ function KomutaMesajSheet({ekip,onKaydet,bekle}){
 function Uretim({d,plan,makineler,ac,onTabla}){
   const [bas,setBas]=useState(()=>{ const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-((t.getDay()-6+7)%7)); return t.getTime(); });   // o haftanın Cumartesi'si
   const [gunSayisi,setGunSayisi]=useState(7);
+  const [aralikAcik,setAralikAcik]=useState(false);
   const [zoom,setZoom]=useState(1);
   const [now,setNow]=useState(Date.now());
   const [containerW,setContainerW]=useState(360);
   const scrollRef=useRef(null);
-  const [yardim,setYardim]=useState(false);      // ? renk açıklaması modalı
   const [ekle,setEkle]=useState(false);          // ＋ ekle (makine/filament) seçici
   const [mkBilgi,setMkBilgi]=useState(null);     // makine bilgi kartı
   const zoomRef=useRef(1); useEffect(()=>{ zoomRef.current=zoom; },[zoom]);
@@ -1294,7 +1296,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     return va-vb || (mkParca(a).ad||"").localeCompare(mkParca(b).ad||"","tr"); });
   const timelines=useMemo(()=>{ const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id,plan,baslaMs,bitMs,now); }); return m; },[plan,makineler,baslaMs,bitMs,now]);
   const gunler=Array.from({length:gunSayisi},(_,i)=>new Date(baslaMs+i*24*3600*1000));
-  const tarihAralik=gTarih(baslaMs)+" – "+gTarih(bitMs-1)+" "+new Date(baslaMs).getFullYear();
+  const tarihAralik=gTarih(baslaMs)+" – "+gTarih(bitMs-1);
   // açılışta yatay görünüm dünden başlasın (hafta Cumartesi'den başlar, geri kaydırınca ulaşılır)
   useEffect(()=>{ const el=scrollRef.current; if(!el||!containerW) return; if(posRef.current===bas) return;
     const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-1); const ms=t.getTime();
@@ -1325,16 +1327,9 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     ac({tip:"is",x:{p,es:x.s,ee:x.e,durum,mkAd:mk.ad||"?"}}); };
   const Lej=(renk,ad)=>h("div",{style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#fff"}},h("span",{style:{width:12,height:12,borderRadius:4,background:renk,display:"inline-block"}}),ad);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
-    h("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:8,padding:"0 4px"}},
-      h("button",{style:GS.ibtn,onClick:()=>haftaKaydir(-1)},"‹"),
-      h("button",{style:{...GS.ibtn,flex:1,minWidth:110}},tarihAralik),
-      h("button",{style:GS.ibtn,onClick:()=>haftaKaydir(1)},"›"),
-      h("button",{style:GS.ibtn,onClick:buHafta},"Bu hafta")),
-    h("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:12,padding:"0 4px"}},
-      h("select",{style:GS.input,value:gunSayisi,onChange:e=>setGunSayisi(num(e.target.value))},[3,4,7,14].map(g=>h("option",{key:g,value:g},g+" gün"))),
-      h("button",{style:{...GS.ibtn,fontWeight:800,minWidth:38},onClick:()=>setYardim(true),title:"Renkler ne demek?"},"?"),
-      h("div",{style:{flex:1}}),
-      h("button",{style:{...GS.ibtn,fontWeight:800},onClick:()=>setEkle(true)},"＋ Ekle")),
+    h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"0 4px"}},
+      h("button",{style:{...GS.ibtn,flex:1,minWidth:0,fontWeight:800},onClick:()=>setAralikAcik(true)},tarihAralik),
+      h("button",{style:{...GS.ibtn,width:38,padding:0,display:"flex",alignItems:"center",justifyContent:"center"},onClick:()=>setEkle(true),title:"Ayarlar"},h(Icn,{n:"ayar",c:"var(--txt)",s:18}))),
     h("div",{style:{...GS.card,overflow:"hidden",marginBottom:16}},
       h("div",{ref:scrollRef,style:{overflowX:"auto",touchAction:"pan-x pan-y"}},
         h("div",{style:{minWidth:LABEL_W+toplamW}},
@@ -1407,24 +1402,25 @@ function Uretim({d,plan,makineler,ac,onTabla}){
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center",borderColor:GC.kirmiziB}},h("div",{style:{fontSize:11,color:GC.kirmiziB,fontWeight:700}},"KAYIP"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamKayip/60000)),h("div",{style:{fontWeight:800,color:GC.kirmiziB}},"%"+yuzde(toplamKayip))),
           h("div",{style:{...GS.card,padding:"12px 8px",textAlign:"center",borderColor:"#c2410c"}},h("div",{style:{fontSize:11,color:"#c2410c",fontWeight:700}},"⏱ GECİKME"),h("div",{style:{fontSize:15,fontWeight:800,marginTop:4,color:GC.txt}},dkYaz(toplamGecikme/60000)),h("div",{style:{fontWeight:800,color:"#c2410c"}},toplamGecikmeSayi+" baskı"))))),
     h("div",{style:{textAlign:"right",fontSize:11,color:"var(--mut2)",margin:"12px 4px 0"}},"Güncelleme: "+fmtS(now)),
-    yardim?h(Sheet,{ik:"🎨",hex:GC.navyHdr,baslik:"Renkler ne anlama geliyor?",alt:"Gantt takvimi göstergesi",onClose:()=>setYardim(false),cta:"Anladım",onCta:()=>setYardim(false)},
-      [[GC.yesil,"Çalışıyor","Baskı şu an sürüyor (başlatılmış, henüz bitmemiş)."],
-       [GC.planBg,"Planlı","İleri tarihli plan — başlama zamanı henüz gelmedi."],
-       [GC.onayBg,"Onay bekliyor","Başlama saati geçti ama 'başlat' onayı verilmedi."],
-       [GC.bitBg,"Bitti","Süresi dolmuş, tamamlanmış baskı."],
-       [GC.kirmizi,"Boşta","Makine boş — iş yok. Boş raya dokun, iş planla."],
-       ["#e3aba4","Kayıp","Geçmişte boş geçen (kaçırılmış) zaman."]].map((r,i)=>h("div",{key:i,style:{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
-         h("span",{style:{width:16,height:16,borderRadius:5,background:r[0],flexShrink:0,marginTop:1}}),
-         h("div",{style:{minWidth:0}},h("div",{style:{fontSize:13.5,fontWeight:800}},r[1]),h("div",{style:{fontSize:11.5,color:"var(--mut)"}},r[2])))).concat([
-       h("div",{key:"ams",style:{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:"1px solid var(--line)"}},
-         h("span",{style:{width:16,height:16,borderRadius:9,background:GC.mavi,flexShrink:0,marginTop:1}}),
-         h("div",null,h("div",{style:{fontSize:13.5,fontWeight:800}},"AMS (mavi nokta)"),h("div",{style:{fontSize:11.5,color:"var(--mut)"}},"AMS'li — çok renkli baskı."))),
-       h("div",{key:"amssiz",style:{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:"1px solid var(--line)"}},
-         h("span",{style:{width:16,height:16,borderRadius:9,background:GC.sari,flexShrink:0,marginTop:1}}),
-         h("div",null,h("div",{style:{fontSize:13.5,fontWeight:800}},"AMS'siz (sarı nokta)"),h("div",{style:{fontSize:11.5,color:"var(--mut)"}},"Tek renkli baskı.")))])):null,
-    ekle?h(Sheet,{ik:"＋",hex:GC.navyHdr,baslik:"Ekle",alt:"",onClose:()=>setEkle(false),cta:"Kapat",onCta:()=>setEkle(false)},
-      h("button",{onClick:()=>{ setEkle(false); ac({tip:"makineYonet"}); },style:{width:"100%",padding:15,borderRadius:14,marginBottom:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,textAlign:"left"}},"Makine ekle / yönet"),
-      h("button",{onClick:()=>{ setEkle(false); ac({tip:"filamentYonet"}); },style:{width:"100%",padding:15,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,textAlign:"left"}},"Filament ekle / yönet")):null,
+    ekle?h(Sheet,{ik:h(Icn,{n:"ayar",c:"#fff",s:22}),hex:GC.navyHdr,baslik:"Üretim ayarları",alt:"",onClose:()=>setEkle(false),cta:"Kapat",onCta:()=>setEkle(false)},
+      h("div",{className:"lbl",style:{marginBottom:8}},"Renk yönergeleri"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px 12px",marginBottom:16}},
+        [[GC.yesil,"Çalışıyor"],[GC.planBg,"Planlı"],[GC.onayBg,"Onay bekliyor"],[GC.bitBg,"Bitti"],
+         [GC.kirmizi,"Boşta"],["#e3aba4","Kayıp"],[GC.mavi,"AMS'li"],[GC.sari,"Tek renk"]].map((r,i2)=>
+          h("div",{key:i2,style:{display:"flex",alignItems:"center",gap:7,minWidth:0}},
+            h("span",{style:{width:13,height:13,borderRadius:4,background:r[0],flexShrink:0}}),
+            h("span",{style:{fontSize:12,fontWeight:700,overflow:"hidden",whiteSpace:"nowrap"}},r[1])))),
+      h("button",{onClick:()=>{ setEkle(false); ac({tip:"makineYonet"}); },style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:15,borderRadius:14,marginBottom:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,color:"var(--txt)",textAlign:"left"}},h(Icn,{n:"printer",c:"var(--cyan)",s:19}),"Makineler"),
+      h("button",{onClick:()=>{ setEkle(false); ac({tip:"filamentYonet"}); },style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:15,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,color:"var(--txt)",textAlign:"left"}},h(Icn,{n:"box",c:"var(--violet)",s:19}),"Filamentler")):null,
+    aralikAcik?h(Sheet,{ik:h(Icn,{n:"cal",c:"#fff",s:22}),hex:GC.navyHdr,baslik:"Zaman aralığı",alt:"",onClose:()=>setAralikAcik(false),cta:"Kapat",onCta:()=>setAralikAcik(false)},
+      h("div",{style:{display:"grid",gap:9,marginBottom:14}},
+        [[1,"1 gün"],[3,"3 gün"],[7,"7 gün"]].map(g=>h("button",{key:g[0],onClick:()=>{ setGunSayisi(g[0]); setAralikAcik(false); },
+          style:{width:"100%",padding:14,borderRadius:14,fontSize:14.5,fontWeight:800,textAlign:"left",
+            border:"1px solid "+(gunSayisi===g[0]?"var(--cyan)":"var(--line)"),background:gunSayisi===g[0]?"#eaf6fd":"var(--surf2)",color:"var(--txt)"}},g[1]))),
+      h("div",{style:{display:"flex",gap:8}},
+        h("button",{onClick:()=>haftaKaydir(-1),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800}},"‹ Önceki"),
+        h("button",{onClick:buHafta,style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800}},"Bugün"),
+        h("button",{onClick:()=>haftaKaydir(1),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800}},"Sonraki ›"))):null,
     mkBilgi?(()=>{ const tl=timelines[mkBilgi.id]||{}; const dol=toplamMs?Math.round((tl.printMs||0)/toplamMs*100):0; const gr=Math.round(gramMak[mkBilgi.id]||0);
       const satir=(l,v,c)=>h("div",{style:{display:"flex",justifyContent:"space-between",gap:10,padding:"11px 0",borderTop:"1px solid var(--line)",fontSize:13.5}},h("span",{style:{color:"var(--mut)"}},l),h("span",{style:{fontWeight:800,color:c||"var(--txt)"}},v));
       return h(Sheet,{ik:h(Icn,{n:"printer",c:"#fff",s:22}),hex:GC.navyHdr,baslik:mkBilgi.ad,alt:"",onClose:()=>setMkBilgi(null),
@@ -2019,10 +2015,10 @@ function KomutaBar({gorunum,onGorunum,onAyar,onTema,onCikis}){
   const btn=(ik,lbl,fn,renk)=>h("button",{onClick:fn,title:lbl,type:"button",
     style:{width:38,height:38,borderRadius:11,border:"1px solid "+(renk?renk:"var(--line)"),background:"var(--surf)",
       display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,color:renk||"var(--txt)",flexShrink:0}},ik);
-  return h("div",{style:{display:"flex",alignItems:"center",gap:7,padding:"calc(env(safe-area-inset-top,0px) + 9px) 13px 9px",
-      background:"var(--surf)",borderBottom:"1px solid var(--line)",position:"sticky",top:0,zIndex:35}},
-    h("div",{style:{flex:1,minWidth:0,height:34,display:"flex",alignItems:"center"}},
-      h("img",{src:"tikita-logo.png",alt:"Tikita",style:{height:34,width:"auto"}})),
+  return h("div",{className:"tk-bar",style:{display:"flex",alignItems:"center",gap:7,padding:"calc(env(safe-area-inset-top,0px) + 8px) 13px 8px",
+      background:"var(--surf)",borderBottom:"1px solid var(--line)"}},
+    h("div",{style:{flex:1,minWidth:0,height:48,display:"flex",alignItems:"center"}},
+      h("img",{src:"tikita-logo.png",alt:"Tikita",style:{height:48,width:"auto"}})),
     btn(IK(gorunum==="pc"?"telefon":"ekran","var(--txt)",18),gorunum==="pc"?"Mobil görünüm":"Masaüstü görünüm",onGorunum),
     btn(IK("ayarlar","var(--txt)",18),"Ayarlar",onAyar),
     btn(IK("tema","var(--txt)",18),"Tema",onTema),
@@ -2306,6 +2302,7 @@ function App(){
   else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
   return h("div",null,
     h(KomutaBar,{gorunum,onGorunum:gorunumTog,onAyar:()=>setModal({tip:"komutaAyar"}),onTema:()=>setModal({tip:"tema"}),onCikis:cikisYap}),
+    h("div",{className:"tk-barbosluk"}),
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
     ekran,
