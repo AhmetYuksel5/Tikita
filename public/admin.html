@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="A96";   // komuta (admin) deneme sürümü
+const SURUM="A97";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -497,7 +497,7 @@ function Icn({n,c,s,c2}){ const sz=s||18; const col=c||"currentColor";
     case "iade": return svg(pa("M4.5 8.5h9.5a5 5 0 0 1 0 10H8.5"),pa("M7.8 5.2L4.5 8.5l3.3 3.3"),pf("M4.5 8.5h9.5a5 5 0 0 1 0 10H8.5z"));
     case "stant": return svg(pf("M3 9.5h18L19 4.5H5z"),pa("M3 9.5h18L19 4.5H5z"),pa("M5.5 9.5v10"),pa("M18.5 9.5v10"),pa("M5.5 19.5h13"));
     case "anlasma": return svg(cf(9,12,5.2),ci(9,12,5.2),ci(15,12,5.2));
-    case "ayar": return svg(cf(12,12,3.3),ci(12,12,3.3),pa("M12 3v2.4"),pa("M12 18.6V21"),pa("M21 12h-2.4"),pa("M5.4 12H3"),pa("M18.4 5.6l-1.7 1.7"),pa("M7.3 16.7l-1.7 1.7"),pa("M18.4 18.4l-1.7-1.7"),pa("M7.3 7.3L5.6 5.6"));
+    case "ayar": return svg(pf("M13.6 2.4l.35 2.2c.55.2 1.06.5 1.5.86l2.07-.86 1.98 1.98-.86 2.07c.36.44.66.95.86 1.5l2.2.35v2.8l-2.2.35c-.2.55-.5 1.06-.86 1.5l.86 2.07-1.98 1.98-2.07-.86c-.44.36-.95.66-1.5.86l-.35 2.2h-2.8l-.35-2.2a5.9 5.9 0 0 1-1.5-.86l-2.07.86-1.98-1.98.86-2.07a5.9 5.9 0 0 1-.86-1.5l-2.2-.35v-2.8l2.2-.35c.2-.55.5-1.06.86-1.5L3.86 7.34 5.84 5.36l2.07.86c.44-.36.95-.66 1.5-.86l.35-2.2z"),pa("M13.6 2.4l.35 2.2c.55.2 1.06.5 1.5.86l2.07-.86 1.98 1.98-.86 2.07c.36.44.66.95.86 1.5l2.2.35v2.8l-2.2.35c-.2.55-.5 1.06-.86 1.5l.86 2.07-1.98 1.98-2.07-.86c-.44.36-.95.66-1.5.86l-.35 2.2h-2.8l-.35-2.2a5.9 5.9 0 0 1-1.5-.86l-2.07.86-1.98-1.98.86-2.07a5.9 5.9 0 0 1-.86-1.5l-2.2-.35v-2.8l2.2-.35c.2-.55.5-1.06.86-1.5L3.86 7.34 5.84 5.36l2.07.86c.44-.36.95-.66 1.5-.86l.35-2.2z"),ci(12,12,3.1));
     case "tema": return svg(cf(12,12,8.6),ci(12,12,8.6),pf("M12 3.4a8.6 8.6 0 0 1 0 17.2z"));
     case "cikis": return svg(pa("M12 3v8.2"),pa("M6.8 6.6a7.6 7.6 0 1 0 10.4 0"));
     case "ekran": return svg(pf("M3 5h18v11H3z"),pa("M3 5h18v11H3z"),pa("M12 16v4"),pa("M9 20h6"));
@@ -1259,7 +1259,9 @@ function KomutaMesajSheet({ekip,onKaydet,bekle}){
     h("button",{onClick:()=>setKonum(v=>!v),style:{width:"100%",padding:12,borderRadius:12,fontSize:13.5,fontWeight:800,background:konum?"#0e8fce":"var(--surf2)",color:konum?"#fff":"var(--cyan)",border:"1px solid "+(konum?"#0e8fce":"var(--line)")}},(konum?"✅ ":"📍 ")+"Anlık konum iste"));
 }
 function Uretim({d,plan,makineler,ac,onTabla}){
-  const [bas,setBas]=useState(()=>{ const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-((t.getDay()-6+7)%7)); return t.getTime(); });   // o haftanın Cumartesi'si
+  const GERI_MS=4*3600*1000;   // üretim hattı her zaman 4 saat geriden başlar
+  const [bas,setBas]=useState(()=>Date.now()-GERI_MS);
+  const elleRef=useRef(false);   // kullanıcı ileri/geri kaydırdıysa otomatik sabitleme durur
   const [gunSayisi,setGunSayisi]=useState(7);
   const [aralikAcik,setAralikAcik]=useState(false);
   const [zoom,setZoom]=useState(1);
@@ -1295,12 +1297,13 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     const va=isNaN(na)?Infinity:na, vb=isNaN(nb)?Infinity:nb;
     return va-vb || (mkParca(a).ad||"").localeCompare(mkParca(b).ad||"","tr"); });
   const timelines=useMemo(()=>{ const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id,plan,baslaMs,bitMs,now); }); return m; },[plan,makineler,baslaMs,bitMs,now]);
+  // zaman ilerledikçe pencereyi 4 saat geride tut — kaydırma konumu korunur (posRef eşitlenir)
+  useEffect(()=>{ if(elleRef.current) return; const nb=now-GERI_MS; posRef.current=nb; setBas(nb); },[now]);
   const gunler=Array.from({length:gunSayisi},(_,i)=>new Date(baslaMs+i*24*3600*1000));
   const tarihAralik=gTarih(baslaMs)+" – "+gTarih(bitMs-1);
-  // açılışta yatay görünüm dünden başlasın (hafta Cumartesi'den başlar, geri kaydırınca ulaşılır)
+  // görünüm 4 saat geriden başlar → sola hizala
   useEffect(()=>{ const el=scrollRef.current; if(!el||!containerW) return; if(posRef.current===bas) return;
-    const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-1); const ms=t.getTime();
-    el.scrollLeft=(ms>baslaMs&&ms<bitMs)?Math.max(0,(ms-baslaMs)*px):0; posRef.current=bas;
+    el.scrollLeft=0; posRef.current=bas;
   },[bas,containerW,px]);
   const {gramMak,gramTop,bosListe}=useMemo(()=>{ const gramMak={}; let gramTop=0;
     (plan||[]).forEach(p=>{ const g=num(p.gram); if(g<=0) return; const s=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000, e=s+dur; let pay=0;
@@ -1320,8 +1323,8 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const toplamGecikme=mlist.reduce((s,mk)=>s+((timelines[mk.id]||{}).gecikmeMs||0),0);
   const toplamGecikmeSayi=mlist.reduce((s,mk)=>s+((timelines[mk.id]||{}).gecikmeSayi||0),0);
   const yuzde=t=>kapasiteMs?(Math.round(t/kapasiteMs*1000)/10):0;
-  const haftaKaydir=yon=>setBas(b=>b+yon*gunSayisi*24*3600*1000);
-  const buHafta=()=>{ const t=new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate()-((t.getDay()-6+7)%7)); setBas(t.getTime()); };
+  const haftaKaydir=yon=>{ elleRef.current=true; setBas(b=>b+yon*gunSayisi*24*3600*1000); };
+  const buHafta=()=>{ elleRef.current=false; setBas(Date.now()-GERI_MS); };
   const acJob=(x,mk)=>{ const p=x.p; const basladi=!!p.basladi; let durum;
     if(basladi) durum=x.e<=now?"bitti":"basiyor"; else if(x.s>now) durum="sirada"; else if(x.e>now) durum="gecikti"; else durum="geride";
     ac({tip:"is",x:{p,es:x.s,ee:x.e,durum,mkAd:mk.ad||"?"}}); };
