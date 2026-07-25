@@ -49,7 +49,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="A82";   // komuta (admin) deneme sürümü
+const SURUM="A83";   // komuta (admin) deneme sürümü
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
@@ -497,17 +497,35 @@ function Hud({d,onBaski,onTabla,onCiro}){
 
 
 /* ————— EKİP ————— */
-function EkipSatir({e,onClick}){
-  return h("button",{onClick,className:"card",style:{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",textAlign:"left",width:"100%",boxShadow:"none"}},
-    h("span",{style:{fontSize:24,flexShrink:0}},e.u.simge||"🎖️"),
+// bir kullanıcıyı ekip kaydına çevir — istatistiği yoksa (yönetici/deneme/arşiv) sıfırlarla
+function kulKaydi(u,hareketler,ekipList){
+  const bul=(ekipList||[]).find(x=>x.u&&x.u.id===u.id);
+  const mine=(hareketler||[]).filter(x=>(x.kullaniciId||"")===u.id);
+  if(bul) return {...bul,u,mine};
+  return {u,bugunC:0,hafC:0,hafPay:0,alacak:0,guc:0,rutbe:KOMUTAN[0],kaleSay:0,kaleler:[],sonT:0,mine};
+}
+const kulTip=u=>u.arsiv?["📦","Arşiv","var(--mut)"]
+  :(u.demo||u.minimal)?["🧪","Deneme","var(--violet)"]
+  :(u.rol==="admin")?["👑","Yönetici","var(--gold)"]:null;
+function EkipSatir({e,onClick}){ const u=e.u; const tip=kulTip(u);
+  return h("button",{onClick,className:"card",style:{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",textAlign:"left",width:"100%",boxShadow:"none",opacity:u.arsiv?.6:1}},
+    h("span",{style:{fontSize:24,flexShrink:0}},u.simge||"🎖️"),
     h("div",{style:{flex:1,minWidth:0}},
-      h("div",{style:{fontSize:14,fontWeight:800}},e.u.ad,
-        h("span",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginLeft:6}},e.rutbe[2]+" "+e.rutbe[1])),
+      h("div",{style:{fontSize:14,fontWeight:800,display:"flex",alignItems:"center",gap:6}},
+        h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+        tip?h("span",{style:{flexShrink:0,fontSize:10,fontWeight:800,color:tip[2],background:"var(--surf2)",border:"1px solid var(--line)",borderRadius:6,padding:"1px 6px"}},tip[0]+" "+tip[1])
+          :h("span",{style:{flexShrink:0,fontSize:11,fontWeight:700,color:"var(--mut)"}},e.rutbe[2]+" "+e.rutbe[1])),
       h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},
         "hafta "+tl(e.hafC)+" · bugün "+tl(e.bugunC)+(e.alacak>0.5?(" · 🧾 "+tl(e.alacak)):""))),
     h("span",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",flexShrink:0}},"💪 "+e.guc.toLocaleString("tr-TR")));
 }
-function EkipSheet({e,onClose,onDuzen,onSil,onArsiv}){
+function EkipSheet({e,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,onView,bekle}){
+  const u=e.u; const tip=kulTip(u);
+  const cur=(u.pin!=null&&u.pin!=="")?String(u.pin):""; const gizliPin=!cur&&!!u.pinHash;
+  const [pinVal,setPinVal]=useState(cur); const [gor,setGor]=useState(false);
+  useEffect(()=>{ setPinVal(cur); setGor(false); },[u.id,cur]);
+  const pinTemiz=String(pinVal||"").trim();
+  const kaydedilir=pinTemiz.length>=4&&pinTemiz!==cur;
   const islemli=(e.mine||[]).length>0;   // herhangi bir hareket varsa → sadece arşiv (kayıtlar saklı); yoksa → silinebilir
   const son=e.mine.filter(x=>["satis","tahsilat","konsinye","iade","stant","tabla"].includes(x.tip))
     .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,10);
@@ -517,8 +535,25 @@ function EkipSheet({e,onClose,onDuzen,onSil,onArsiv}){
     if(x.tip==="iade") return {t:num(x.adet)+" × "+(x.urunAd||"?")+" iade",v:num(x.adet)+" ad.",renk:"var(--mut)"};
     if(x.tip==="tabla") return {t:"🧹 Tabla",v:"+"+tl(x.tutar),renk:"var(--violet)"};
     return {t:x.tip,v:"",renk:"var(--mut)"}; };
-  return h(Sheet,{ik:e.u.simge||"🎖️",hex:"#1e3a5f",baslik:e.u.ad,alt:e.rutbe[2]+" "+e.rutbe[1]+" · 💪 "+e.guc.toLocaleString("tr-TR")+" · "+e.kaleSay+" kale",
+  return h(Sheet,{ik:u.simge||"🎖️",hex:"#1e3a5f",baslik:u.ad,
+    alt:tip?(tip[0]+" "+tip[1]):(e.rutbe[2]+" "+e.rutbe[1]+" · 💪 "+e.guc.toLocaleString("tr-TR")+" · "+e.kaleSay+" kale"),
     onClose,cta:"Kapat",onCta:onClose},
+    // 🔑 ŞİFRE — burada gör / değiştir (ayrı ekran yok)
+    h("div",{className:"card",style:{padding:"12px 13px",marginBottom:12,boxShadow:"none"}},
+      h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:9}},
+        h("span",{style:{fontSize:16}},"🔑"),
+        h("div",{style:{flex:1,minWidth:0,fontSize:13,fontWeight:800}},"Şifre",
+          h("span",{style:{fontWeight:700,color:"var(--mut)",marginLeft:6,fontSize:12}},
+            cur?(gor?cur:"••••"):(gizliPin?"gizli (eski tip)":"yok"))),
+        onView&&u.rol!=="admin"?h("button",{onClick:()=>onView(u),style:{flexShrink:0,padding:"6px 10px",borderRadius:9,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:11.5,fontWeight:800,color:"var(--cyan)"}},"👁 Ekranı gör"):null),
+      h("div",{style:{display:"flex",gap:8}},
+        h("input",{value:gor?pinVal:(pinVal?"••••":""),onFocus:()=>setGor(true),
+          onChange:ev=>{ setGor(true); setPinVal(ev.target.value); },inputMode:"numeric",
+          placeholder:gizliPin?"eski şifre gizli — yeni gir":"en az 4 hane",
+          style:{...inp,flex:1,fontSize:15,letterSpacing:gor?3:6}}),
+        h("button",{onClick:()=>setGor(g=>!g),style:{flexShrink:0,width:44,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:15}},gor?"🙈":"👁"),
+        h("button",{disabled:bekle||!kaydedilir,onClick:()=>onSifre&&onSifre(u.id,pinTemiz),
+          style:{flexShrink:0,padding:"0 16px",borderRadius:12,background:kaydedilir?"var(--cyan)":"var(--line)",color:"#fff",fontSize:13,fontWeight:800}},"💾"))),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}},
       h(Stat,{ik:"💰",v:tl(e.hafC),l:"bu hafta ciro",renk:"var(--green)"}),
       h(Stat,{ik:"📅",v:tl(e.bugunC),l:"bugün",renk:"var(--txt)"}),
@@ -538,13 +573,14 @@ function EkipSheet({e,onClose,onDuzen,onSil,onArsiv}){
           h("div",{style:{fontSize:10.5,color:"var(--mut)"}},(x.yer||"—")+" · "+fmtS(x.tarih))),
         h("span",{style:{fontWeight:800,color:o.renk,fontSize:12.5,flexShrink:0}},o.v));})
       :h("div",{style:{padding:"10px 0",color:"var(--mut)",fontSize:13}},"İşlem yok."),
-    (onSil||onArsiv)?h("div",{style:{marginTop:16,paddingTop:14,borderTop:"1px solid var(--line)"}},
-      islemli?h(React.Fragment,null,
-        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:8}},"ℹ️ Bu kullanıcının işlem geçmişi var — silinemez. Arşive kaldırınca listeden çıkar ama tüm satış/tahsilat/konsinye kayıtları saklı kalır."),
-        h("button",{onClick:()=>onArsiv&&onArsiv(e.u),style:{width:"100%",padding:13,borderRadius:14,background:"#fff7ed",border:"1px solid #fdba74",color:"#9a3412",fontSize:14,fontWeight:800}},"📦 Arşive kaldır"))
-      :h(React.Fragment,null,
-        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:8}},"ℹ️ Bu kullanıcının hiç işlemi yok — kalıcı olarak silinebilir."),
-        h("button",{onClick:()=>onSil&&onSil(e.u),style:{width:"100%",padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--red)",color:"var(--red)",fontSize:14,fontWeight:800}},"🗑 Kalıcı olarak sil"))):null);
+    h("div",{style:{marginTop:16,paddingTop:14,borderTop:"1px solid var(--line)",display:"grid",gap:8}},
+      u.arsiv&&onArsivGeri?h("button",{onClick:()=>onArsivGeri(u),style:{width:"100%",padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--cyan)",color:"var(--cyan)",fontSize:14,fontWeight:800}},"↩️ Arşivden çıkar"):null,
+      (!u.arsiv&&islemli&&onArsiv)?h(React.Fragment,null,
+        h("div",{style:{fontSize:11.5,color:"var(--mut)"}},"ℹ️ İşlem geçmişi var — silinemez. Arşive kaldırınca listeden çıkar, kayıtlar saklı kalır."),
+        h("button",{onClick:()=>onArsiv(u),style:{width:"100%",padding:13,borderRadius:14,background:"#fff7ed",border:"1px solid #fdba74",color:"#9a3412",fontSize:14,fontWeight:800}},"📦 Arşive kaldır")):null,
+      (!islemli&&onSil)?h(React.Fragment,null,
+        h("div",{style:{fontSize:11.5,color:"var(--mut)"}},"ℹ️ Bu hesabın hiç işlemi yok — kalıcı olarak silinebilir."),
+        h("button",{onClick:()=>onSil(u),style:{width:"100%",padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--red)",color:"var(--red)",fontSize:14,fontWeight:800}},"🗑 Kalıcı olarak sil")):null));
 }
 
 /* ————— STOK ————— */
@@ -973,27 +1009,6 @@ function KullaniciSheet({u,onKaydet,bekle}){
     h("div",{className:"lbl",style:{marginBottom:8}},duzen?"Yeni PIN (opsiyonel)":"PIN *"),
     h("input",{value:pin,onChange:e=>setPin(e.target.value),inputMode:"numeric",type:"password",placeholder:"••••",style:inp}));
 }
-// 🔑 ŞİFRELER — yönetici + tüm kullanıcıların şifresini gör/değiştir; 👁 ile şifresiz onların ekranına geç
-function SifreSheet({kullanicilar,onSet,onView,onClose,bekle}){
-  const list=(kullanicilar||[]).filter(u=>(u.ad||"").trim()&&!u.arsiv).slice().sort((a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr"));
-  const [draft,setDraft]=useState({}); const [ac,setAc]=useState({});   // ac: hangi satırın şifresi görünür
-  return h(Sheet,{ik:"🔑",hex:"#1e3a5f",baslik:"Şifreler",alt:"yönetici ve tüm kullanıcılar",onClose,cta:"Kapat",onCta:onClose},
-    h("div",{style:{fontSize:11.5,color:"var(--mut)",marginBottom:12}},"ℹ️ Her kullanıcının şifresini görüp değiştirebilirsin. Eski (hash'li) şifreler görünmez — yeni belirleyince görünür olur. 👁 ile şifresiz onun ekranına geçersin."),
-    h("div",{style:{display:"grid",gap:10}},
-      list.map(u=>{ const cur=(u.pin!=null&&u.pin!=="")?String(u.pin):""; const gizli=!cur&&!!u.pinHash;
-        const val=draft[u.id]!=null?draft[u.id]:cur; const gor=!!ac[u.id];
-        return h("div",{key:u.id,className:"card",style:{padding:"11px 13px",boxShadow:"none"}},
-          h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:8}},
-            h("span",{style:{fontSize:18}},u.simge||(u.rol==="admin"?"👑":"🎖️")),
-            h("div",{style:{flex:1,minWidth:0}},
-              h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
-              h("div",{style:{fontSize:11,color:"var(--mut)"}},(u.rol==="admin"?"👑 Yönetici":"🎖️ Pazarlamacı")+" · şifre: "+(cur?(gor?cur:"••••"):(gizli?"gizli":"yok")))),
-            u.rol!=="admin"?h("button",{onClick:()=>onView&&onView(u),style:{flexShrink:0,padding:"7px 10px",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:11.5,fontWeight:800,color:"var(--cyan)"}},"👁 Ekranı gör"):null),
-          h("div",{style:{display:"flex",gap:8}},
-            h("input",{value:gor?val:(val?"••••":""),onChange:e=>{ setAc(s=>({...s,[u.id]:true})); setDraft(s=>({...s,[u.id]:e.target.value})); },onFocus:()=>setAc(s=>({...s,[u.id]:true})),inputMode:"numeric",placeholder:gizli?"eski şifre gizli — yeni gir":"şifre (en az 4 hane)",style:{...inp,flex:1,fontSize:15,letterSpacing:gor?3:6}}),
-            h("button",{onClick:()=>setAc(s=>({...s,[u.id]:!gor})),style:{flexShrink:0,width:44,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:15}},gor?"🙈":"👁"),
-            h("button",{disabled:bekle||!(String(val).trim().length>=4)||String(val).trim()===cur,onClick:()=>onSet(u.id,String(val).trim()),style:{flexShrink:0,padding:"0 16px",borderRadius:12,background:(String(val).trim().length>=4&&String(val).trim()!==cur)?"var(--cyan)":"var(--line)",color:"#fff",fontSize:13,fontWeight:800}},"💾"))); })));
-}
 
 /* ————— EKRANLAR ————— */
 // sağa kaydır → 🗑 Sil çıkar
@@ -1371,17 +1386,32 @@ function Stok({d,ac}){
           h("span",{style:{color:"var(--green)",fontWeight:700}},tl(u.fiyat)),
           u.maliyet>0?h("span",{style:{color:"var(--mut2)"}}," · mal "+tl(u.maliyet)):null)))));
 }
-function Ekip({d,ac}){
+function Ekip({d,ac,kullanicilar,hareketler}){
+  const hepsi=(kullanicilar||[]).filter(u=>u&&u.id&&(u.ad||"").trim())
+    .slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const kayit=u=>kulKaydi(u,hareketler,d.ekip);
+  const aktif=hepsi.filter(u=>!u.arsiv);
+  const denemeMi=u=>!!(u.demo||u.minimal);
+  const yonetici=aktif.filter(u=>u.rol==="admin"&&!denemeMi(u));
+  const pazarlamaci=aktif.filter(u=>u.rol!=="admin"&&!denemeMi(u)).sort((a,b)=>kayit(b).guc-kayit(a).guc);
+  const deneme=aktif.filter(denemeMi);
+  const arsiv=hepsi.filter(u=>u.arsiv);
+  const grup=(baslik,list)=>list.length?h(React.Fragment,{key:baslik},
+    h("div",{className:"lbl",style:{margin:"16px 0 8px"}},baslik+" · "+list.length),
+    h("div",{style:{display:"grid",gap:8}},
+      list.map(u=>h(EkipSatir,{key:u.id,e:kayit(u),onClick:()=>ac({tip:"ekip",e:kayit(u)})})))):null;
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 84px"}},
     h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"🎖️ Ekip"),
-      h("div",{style:{display:"flex",gap:8}},
-        h("button",{onClick:()=>ac({tip:"sifre"}),style:{padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"🔑 Şifreler"),
-        h("button",{onClick:()=>ac({tip:"ayar"}),style:{padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"⚙️ Ayarlar"))),
-    h("button",{onClick:()=>ac({tip:"kullanici",u:null}),style:{width:"100%",padding:12,borderRadius:14,marginBottom:12,
+      h("button",{onClick:()=>ac({tip:"ayar"}),style:{padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"⚙️ Ayarlar")),
+    h("button",{onClick:()=>ac({tip:"kullanici",u:null}),style:{width:"100%",padding:12,borderRadius:14,
       background:"var(--surf)",border:"1.5px dashed var(--cyan)",color:"var(--cyan)",fontSize:14,fontWeight:800}},"➕ Yeni kullanıcı ekle"),
-    h("div",{style:{display:"grid",gap:8}},
-      d.ekip.map((e,i)=>h(EkipSatir,{key:i,e,onClick:()=>ac({tip:"ekip",e})}))));
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",margin:"10px 2px 0"}},"ℹ️ Hesaba dokun → şifresini gör/değiştir, adını düzenle, arşivle ya da sil."),
+    grup("👑 Yöneticiler",yonetici),
+    grup("🎖️ Pazarlamacılar",pazarlamaci),
+    grup("🧪 Denemeler",deneme),
+    grup("📦 Arşiv",arsiv),
+    hepsi.length?null:h("div",{style:{padding:"24px 0",textAlign:"center",color:"var(--mut)"}},"Kayıtlı hesap yok."));
 }
 // ⚙️ OYUN AYARLARI — ayar/genel (tabla ücreti, eşikler, görev hedefleri, Google key)
 function AyarSheet({ayar,onKaydet,bekle}){
@@ -1962,7 +1992,12 @@ function App(){
   async function kullaniciArsivle(u){ if(!u||!u.id||isBekle) return; if(!confirm("📦 "+(u.ad||"kullanıcı")+" arşive kaldırılsın mı?\nListeden çıkar; tüm işlem kayıtları saklı kalır.")) return; setIsBekle(true);
     try{ await save("kullanici",{id:u.id,arsiv:true}); setModal(null); say("📦 Arşive kaldırıldı · "+(u.ad||"")); }
     catch(e){ console.error(e); say("⚠ İşlem başarısız"); } finally{ setIsBekle(false); } }
+  async function kullaniciArsivGeri(u){ if(!u||!u.id||isBekle) return; setIsBekle(true);
+    try{ await save("kullanici",{id:u.id,arsiv:false}); setModal(null); say("↩️ Arşivden çıkarıldı · "+(u.ad||"")); }
+    catch(e){ console.error(e); say("⚠ İşlem başarısız"); } finally{ setIsBekle(false); } }
   async function kullaniciSil(u){ if(!u||!u.id||isBekle) return;
+    if(u.id===BEN_ID){ say("⚠ Kendi hesabını silemezsin"); return; }
+    if(u.rol==="admin"&&(kullanicilar||[]).filter(x=>x.rol==="admin"&&!x.arsiv).length<=1){ say("⚠ Son yönetici hesabı silinemez"); return; }
     const islemVar=(hareketler||[]).some(x=>(x.kullaniciId||"")===u.id);
     if(islemVar){ say("⚠ İşlemi olan kullanıcı silinemez — arşive kaldır"); return; }
     if(!confirm("🗑 "+(u.ad||"kullanıcı")+" kalıcı olarak silinsin mi?\nHiç işlemi olmadığı için güvenle silinebilir.")) return; setIsBekle(true);
@@ -2109,7 +2144,7 @@ function App(){
   if(view==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"}),onTalepSil:talepSil});
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
-  else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal});
+  else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler});
   else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
   return h("div",null,
     h(KomutaBar,{gorunum,onGorunum:gorunumTog,onAyar:()=>setModal({tip:"komutaAyar"}),onTema:()=>setModal({tip:"tema"}),onCikis:cikisYap}),
@@ -2135,8 +2170,9 @@ function App(){
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
     modal&&modal.tip==="urunDuzen"&&h(UrunDuzenSheet,{u:modal.u,bekle:isBekle,onKaydet:urunKaydet}),
     modal&&modal.tip==="kullanici"&&h(KullaniciSheet,{u:modal.u,bekle:isBekle,onKaydet:kullaniciKaydet}),
-    modal&&modal.tip==="sifre"&&h(SifreSheet,{kullanicilar,bekle:isBekle,onSet:sifreSet,onView:sifreGor,onClose:()=>setModal(null)}),
-    modal&&modal.tip==="ekip"&&h(EkipSheet,{e:modal.e,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:modal.e.u}),onSil:kullaniciSil,onArsiv:kullaniciArsivle}),
+    modal&&modal.tip==="ekip"&&(()=>{ const cu=(kullanicilar||[]).find(x=>x.id===modal.e.u.id)||modal.e.u;   // canlı kayıt (şifre kaydedince tazelensin)
+      return h(EkipSheet,{e:{...modal.e,u:cu},bekle:isBekle,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:cu}),
+        onSil:kullaniciSil,onArsiv:kullaniciArsivle,onArsivGeri:kullaniciArsivGeri,onSifre:sifreSet,onView:sifreGor}); })(),
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
       return h(StokSheet,{u:s,kullanicilar,hareketler,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
         onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v),onMaliyet:(uu)=>setModal({tip:"maliyetGec",u:uu,uid:s.id})}); })(),
