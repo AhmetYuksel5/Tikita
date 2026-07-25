@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="B2";   // komuta (admin) deneme sürümü
+const SURUM="B3";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1260,7 +1260,8 @@ function KomutaMesajSheet({ekip,onKaydet,bekle}){
 }
 function Uretim({d,plan,makineler,ac,onTabla}){
   const GERI_MS=4*3600*1000;   // üretim hattı her zaman 4 saat geriden başlar
-  const [bas,setBas]=useState(()=>Date.now()-GERI_MS);
+  const saatYuvarla=t=>Math.floor(t/3600000)*3600000;
+  const [bas,setBas]=useState(()=>saatYuvarla(Date.now()-GERI_MS));
   const elleRef=useRef(false);   // kullanıcı ileri/geri kaydırdıysa otomatik sabitleme durur
   const [gunSayisi,setGunSayisi]=useState(1);   // varsayılan: en dar aralık (1 gün) — her girişte standart
   const [aralikAcik,setAralikAcik]=useState(false);
@@ -1291,6 +1292,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const GUN_W=Math.round(fitGunW*zoom);
   const step=tickStep(GUN_W);
   const ticks=[]; for(let hr=0;hr<=24;hr+=step) ticks.push(hr);
+  const basSaat=new Date(baslaMs).getHours();   // sütunlar gece yarısında değil, bu saatte başlar
   const toplamW=gunSayisi*GUN_W, px=toplamW/toplamMs;
   // makineleri numaraya göre sırala (numarasızlar sona, kendi içinde ada göre)
   const mlist=(makineler||[]).filter(mk=>(mk.ad||"").trim()).slice().sort((a,b)=>{
@@ -1299,7 +1301,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     return va-vb || (mkParca(a).ad||"").localeCompare(mkParca(b).ad||"","tr"); });
   const timelines=useMemo(()=>{ const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id,plan,baslaMs,bitMs,now); }); return m; },[plan,makineler,baslaMs,bitMs,now]);
   // zaman ilerledikçe pencereyi 4 saat geride tut — kaydırma konumu korunur (posRef eşitlenir)
-  useEffect(()=>{ if(elleRef.current) return; const nb=now-GERI_MS;
+  useEffect(()=>{ if(elleRef.current) return; const nb=saatYuvarla(now-GERI_MS);
     if(Math.abs(nb-bas)<10*60*1000) return;   // 10 dakikadan az sapmada oynatma
     posRef.current=nb; setBas(nb); },[now]);
   const gunler=Array.from({length:gunSayisi},(_,i)=>new Date(baslaMs+i*24*3600*1000));
@@ -1327,7 +1329,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const toplamGecikmeSayi=mlist.reduce((s,mk)=>s+((timelines[mk.id]||{}).gecikmeSayi||0),0);
   const yuzde=t=>kapasiteMs?(Math.round(t/kapasiteMs*1000)/10):0;
   const haftaKaydir=yon=>{ elleRef.current=true; setBas(b=>b+yon*gunSayisi*24*3600*1000); };
-  const buHafta=()=>{ elleRef.current=false; setBas(Date.now()-GERI_MS); };
+  const buHafta=()=>{ elleRef.current=false; setBas(saatYuvarla(Date.now()-GERI_MS)); };
   const acJob=(x,mk)=>{ const p=x.p; const basladi=!!p.basladi; let durum;
     if(basladi) durum=x.e<=now?"bitti":"basiyor"; else if(x.s>now) durum="sirada"; else if(x.e>now) durum="gecikti"; else durum="geride";
     ac({tip:"is",x:{p,es:x.s,ee:x.e,durum,mkAd:mk.ad||"?"}}); };
@@ -1347,7 +1349,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
               h("div",{style:{fontWeight:800,fontSize:12,color:g.toDateString()===new Date(now).toDateString()?GC.kirmiziB:GC.txt}},gPad2(g.getDate())+" "+AYK[g.getMonth()]),
               h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:700}},GUNK[g.getDay()]),
               h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:9,color:GC.mut,marginTop:3,padding:"0 2px"}},
-                ticks.map(hr=>h("span",{key:hr},gPad2(hr))))))),
+                ticks.map(hr=>h("span",{key:hr},gPad2((basSaat+hr)%24))))))),
           mlist.length===0?h("div",{style:{padding:20,color:GC.mut,textAlign:"center"}},"Makine yok. Makineler'den ekle.")
           :mlist.map(mk=>{ const tl=timelines[mk.id]||{js:[],bos:[]};
             const mjobs=(plan||[]).filter(p=>p.makineId===mk.id&&p.basladi);
