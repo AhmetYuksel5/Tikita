@@ -49,7 +49,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="A89";   // komuta (admin) deneme sürümü
+const SURUM="A90";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -103,6 +103,11 @@ async function planKaydir(makineId,plan,edited){
     prevEnd=s2+j.dk*60000; } }
 async function stokLogla(u,delta,sebep,ekstra){ delta=Math.round(num(delta)); if(!delta||!u||!u.id) return;
   return save("stok_hareket",{urunId:u.id,urunAd:u.ad||"",delta,sebep,tarih:new Date().toISOString(),kullaniciAd:"Komuta",...(ekstra||{})}); }
+// makine etiketini no + ad olarak ayır (eski kayıtlarda "01-Praga" biçiminden no türetilir)
+const mkParca=mk=>{ const ad=((mk&&mk.ad)||"").trim(); const no=String((mk&&mk.no)||"").trim();
+  if(no) return {no,ad};
+  const m=ad.match(/^(\d{1,3})\s*[-–—.\s]\s*(.+)$/);
+  return m?{no:m[1],ad:m[2].trim()}:{no:"",ad}; };
 const SIMGELER=["🦅","🐺","🦁","🐉","🦊","🐯","🦈","🦂","🐻","🦉","🐗","🦏","⚔️","🛡️","👑","🔱"];
 function adRenk(s2){ let hsh=0; const t=s2||"?"; for(let i=0;i<t.length;i++) hsh=(hsh*31+t.charCodeAt(i))>>>0; return {H:hsh%360}; }
 
@@ -934,7 +939,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
     disabled:!gecerli||bekle,onCta},
     h("div",{className:"lbl",style:{marginBottom:8}},"Makine"),
     h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:14}},
-      makList.map(mk=>h(Chip,{key:mk.id,on:makineId===mk.id,onClick:()=>makSec(mk.id)},"🖨️ "+mk.ad))),
+      makList.map(mk=>h(Chip,{key:mk.id,on:makineId===mk.id,onClick:()=>makSec(mk.id)},(mkParca(mk).no?mkParca(mk).no+" · ":"")+mkParca(mk).ad))),
     (!duzen&&!urunId&&oncekiler.length)?h("div",{style:{marginBottom:14}},
       h("div",{className:"lbl",style:{marginBottom:8}},"Önceki baskıdan seç"),
       h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
@@ -1182,10 +1187,10 @@ function HudOzetSheet({tip,d,onClose,onGit}){
   const sat=(bas,alt,sag,renk)=>({bas,alt,sag,renk});
   let ik,baslik,rows=[],bos,gitAd;
   if(tip==="baski"){ ik=IK("baski","#0e8fce",22); baslik="Baskıda"; gitAd="Üretime git";
-    rows=d.makDurum.filter(m=>m.durum==="basiyor").map(m=>sat(m.mk.ad||"Makine",(m.son&&m.son.ad)||"iş",dk(m.kalanDk)+" kaldı","var(--cyan)"));
+    rows=d.makDurum.filter(m=>m.durum==="basiyor").map(m=>sat((mkParca(m.mk).no?mkParca(m.mk).no+" · ":"")+(mkParca(m.mk).ad||"Makine"),(m.son&&m.son.ad)||"iş",dk(m.kalanDk)+" kaldı","var(--cyan)"));
     bos="Şu an basan makine yok."; }
   else if(tip==="tabla"){ ik=IK("tabla","#7c46e6",22); baslik="Bekleyen tabla"; gitAd="Üretime git";
-    rows=d.makDurum.filter(m=>m.durum==="tabla").map(m=>sat(m.mk.ad||"Makine",(m.son&&m.son.ad)||"baskı bitti","toplanacak","var(--violet)"));
+    rows=d.makDurum.filter(m=>m.durum==="tabla").map(m=>sat((mkParca(m.mk).no?mkParca(m.mk).no+" · ":"")+(mkParca(m.mk).ad||"Makine"),(m.son&&m.son.ad)||"baskı bitti","toplanacak","var(--violet)"));
     bos="Bekleyen tabla yok."; }
   else { ik=IK("ciro","#16a34a",22); baslik="Bugün ciro"; gitAd="Rapora git";
     rows=[sat("Kale satışı",d.bugun.adet+" adet",tl(d.bugun.ciro),"var(--green)"),
@@ -1276,7 +1281,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     const te=e=>{ if(e.touches.length<2) d0=0; };
     el.addEventListener("touchstart",ts,{passive:false}); el.addEventListener("touchmove",tm,{passive:false}); el.addEventListener("touchend",te);
     return ()=>{ el.removeEventListener("touchstart",ts); el.removeEventListener("touchmove",tm); el.removeEventListener("touchend",te); }; },[]);
-  const LABEL_W=96, ROW_H=74;
+  const LABEL_W=52, ROW_H=74;
   const baslaMs=bas, bitMs=bas+gunSayisi*24*3600*1000, toplamMs=bitMs-baslaMs;
   const fitGunW=Math.max(150,(containerW-LABEL_W)/gunSayisi);
   const GUN_W=Math.round(fitGunW*zoom);
@@ -1331,9 +1336,9 @@ function Uretim({d,plan,makineler,ac,onTabla}){
       h("div",{ref:scrollRef,style:{overflowX:"auto",touchAction:"pan-x pan-y"}},
         h("div",{style:{minWidth:LABEL_W+toplamW}},
           h("div",{style:{display:"flex",borderBottom:"1px solid "+GC.line,background:"#f3f6fb"}},
-            h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 8px",position:"sticky",left:0,background:"#f3f6fb",zIndex:3,borderRight:"1px solid "+GC.line}},
-              h("div",{style:{fontWeight:800,fontSize:12,color:GC.txt}},"MAKİNE"),
-              gramTop>0?h("div",{style:{fontSize:10,fontWeight:700,color:GC.mut,marginTop:2}},Math.round(gramTop).toLocaleString("tr")+" gr"):null),
+            h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 5px",position:"sticky",left:0,background:"#f3f6fb",zIndex:3,borderRight:"1px solid "+GC.line,overflow:"hidden"}},
+              h("div",{style:{fontWeight:800,fontSize:10,color:GC.txt,letterSpacing:.3}},"MAK."),
+              gramTop>0?h("div",{style:{fontSize:9,fontWeight:700,color:GC.mut,marginTop:2}},Math.round(gramTop).toLocaleString("tr")+" gr"):null),
             gunler.map((g,i)=>h("div",{key:i,style:{width:GUN_W,flexShrink:0,borderLeft:i?"1px solid "+GC.line:"none",padding:"6px 4px",textAlign:"center"}},
               h("div",{style:{fontWeight:800,fontSize:12,color:g.toDateString()===new Date(now).toDateString()?GC.kirmiziB:GC.txt}},gPad2(g.getDate())+" "+AYK[g.getMonth()]),
               h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:700}},GUNK[g.getDay()]),
@@ -1345,10 +1350,12 @@ function Uretim({d,plan,makineler,ac,onTabla}){
             const sonBaski=mjobs.slice().sort((a,b)=>new Date(b.gercekBaslangic||b.baslangic).getTime()-new Date(a.gercekBaslangic||a.baslangic).getTime())[0]||null;
             const tablaIs=(sonBaski&&!sonBaski.tablaAlindi&&new Date(sonBaski.baslangic).getTime()+num(sonBaski.sureDk)*60000<=now)?sonBaski:null;
             return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+GC.line,minHeight:ROW_H}},
-              h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 8px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+GC.line,display:"flex",flexDirection:"column",justifyContent:"center"}},
-                h("div",{onClick:()=>setMkBilgi(mk),style:{fontWeight:800,fontSize:13,color:GC.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer",textDecoration:"underline dotted",textDecorationColor:GC.line,textUnderlineOffset:3}},mk.ad),
-                gramMak[mk.id]>0?h("div",{style:{fontSize:10,fontWeight:700,color:GC.mut}},Math.round(gramMak[mk.id]).toLocaleString("tr")+" gr"):null,
-                tablaIs?h("button",{onClick:()=>onTabla&&onTabla(tablaIs),style:{marginTop:5,fontSize:10,fontWeight:800,color:"#7a3e00",background:"#ffe2b8",border:"1px solid #fb8c00",borderRadius:6,padding:"2px 5px",lineHeight:1.2,alignSelf:"flex-start"}},"Tabla topla"):null),
+              h("div",{style:{width:LABEL_W,flexShrink:0,padding:"8px 5px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+GC.line,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden"}},
+                (()=>{ const pr=mkParca(mk); return h("div",{onClick:()=>setMkBilgi(mk),style:{cursor:"pointer",minWidth:0}},
+                  pr.no?h("div",{style:{fontWeight:800,fontSize:18,lineHeight:1.05,color:GC.txt}},pr.no):null,
+                  h("div",{style:{fontSize:9.5,fontWeight:700,color:GC.mut,lineHeight:1.15,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},pr.ad||mk.ad)); })(),
+                gramMak[mk.id]>0?h("div",{style:{fontSize:9,fontWeight:700,color:GC.mut,marginTop:2}},Math.round(gramMak[mk.id]).toLocaleString("tr")+" gr"):null,
+                tablaIs?h("button",{onClick:()=>onTabla&&onTabla(tablaIs),style:{marginTop:5,fontSize:10,fontWeight:800,color:"#7a3e00",background:"#ffe2b8",border:"1px solid #fb8c00",borderRadius:6,padding:"2px 4px",lineHeight:1.2,alignSelf:"stretch",textAlign:"center"}},"Tabla"):null),
               h("div",{style:{position:"relative",width:toplamW,flexShrink:0,backgroundImage:"repeating-linear-gradient(90deg,#c8d3e0 0 1px,transparent 1px "+GUN_W+"px),repeating-linear-gradient(90deg,#eef2f7 0 1px,transparent 1px "+(GUN_W*step/24)+"px)"}},
                 tl.bos.flatMap((b,i)=>{ const parts=[]; const pe=Math.min(b.end,now); if(pe>b.start) parts.push({k:"k"+i,s:b.start,e:pe,kayip:true});
                   const fs=Math.max(b.start,now); if(b.end>fs) parts.push({k:"f"+i,s:fs,e:b.end,kayip:false});
@@ -1432,19 +1439,28 @@ function MakineYonetimSheet({makineler,onClose,onAc}){
     h("button",{onClick:()=>onAc({tip:"makineDuzen",mk:null}),style:{width:"100%",padding:12,borderRadius:13,marginBottom:12,background:"var(--surf)",border:"1.5px dashed var(--cyan)",color:"var(--cyan)",fontSize:14,fontWeight:800}},"Yeni makine"),
     makList.length?makList.map((mk,i)=>h("button",{key:mk.id||i,onClick:()=>onAc({tip:"makineDuzen",mk}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 12px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",marginBottom:8,textAlign:"left"}},
       h("span",{style:{fontSize:20}},"🖨️"),
-      h("div",{style:{flex:1,minWidth:0}},
-        h("div",{style:{fontSize:14,fontWeight:800}},mk.ad||"?"),
-        mk.tur?h("div",{style:{fontSize:11,color:"var(--mut)"}},mk.tur):null),
+      h("div",{style:{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:9}},
+        mkParca(mk).no?h("span",{style:{flexShrink:0,minWidth:30,textAlign:"center",fontSize:15,fontWeight:800,color:"var(--cyan)",background:"var(--surf)",border:"1px solid var(--line)",borderRadius:8,padding:"2px 5px"}},mkParca(mk).no):null,
+        h("div",{style:{minWidth:0}},
+          h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},mkParca(mk).ad||"?"),
+          mk.tur?h("div",{style:{fontSize:11,color:"var(--mut)"}},mk.tur):null)),
       h("span",{style:{fontSize:13,color:"var(--cyan)",fontWeight:800}},"✏️"))):h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Makine yok."));
 }
 function MakineDuzenSheet({mk,onKaydet,onSil,bekle}){
   const duzen=!!(mk&&mk.id);
-  const [ad,setAd]=useState(duzen?(mk.ad||""):"");
+  const par=duzen?mkParca(mk):{no:"",ad:""};
+  const [no,setNo]=useState(par.no);
+  const [ad,setAd]=useState(par.ad);
   const [tur,setTur]=useState(duzen?(mk.tur||""):"");
   return h(Sheet,{ik:duzen?"✏️":"➕",hex:"#0e8fce",baslik:duzen?("Düzenle · "+(mk.ad||"")):"Yeni makine",onClose:()=>onKaydet(null),
-    cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!ad.trim()||bekle,onCta:()=>onKaydet({id:duzen?mk.id:null,ad:ad.trim(),tur:tur.trim()})},
-    h("div",{className:"lbl",style:{marginBottom:8}},"Makine adı *"),
-    h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. 01-Praga",style:{...inp,marginBottom:14}}),
+    cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!ad.trim()||bekle,onCta:()=>onKaydet({id:duzen?mk.id:null,no:no.trim(),ad:ad.trim(),tur:tur.trim()})},
+    h("div",{style:{display:"grid",gridTemplateColumns:"84px 1fr",gap:10,marginBottom:14}},
+      h("div",null,
+        h("div",{className:"lbl",style:{marginBottom:8}},"No"),
+        h("input",{value:no,onChange:e=>setNo(e.target.value),inputMode:"numeric",placeholder:"01",style:{...inp,textAlign:"center"}})),
+      h("div",null,
+        h("div",{className:"lbl",style:{marginBottom:8}},"Makine adı *"),
+        h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Praga",style:inp}))),
     h("div",{className:"lbl",style:{marginBottom:8}},"Tür / model (ops.)"),
     h("input",{value:tur,onChange:e=>setTur(e.target.value),placeholder:"örn. Bambu P1S",style:{...inp,marginBottom:duzen?14:0}}),
     duzen?h("button",{onClick:()=>onSil(mk),style:{width:"100%",padding:"12px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"Makineyi sil"):null);
@@ -2137,7 +2153,7 @@ function App(){
     try{ await remove("kullanici",u.id); setModal(null); say("Silindi · "+(u.ad||"")); }
     catch(e){ console.error(e); say("Silinemedi"); } finally{ setIsBekle(false); } }
   async function makineKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
-    try{ await save("makineler",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,tur:p2.tur}); setModal(null); say((p2.id?"Güncellendi":"Makine eklendi")+" · "+p2.ad); }
+    try{ await save("makineler",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",ad:p2.ad,tur:p2.tur}); setModal(null); say((p2.id?"Güncellendi":"Makine eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function makineSil(mk){ if(!mk||!mk.id||isBekle) return; if(!confirm("🗑 "+(mk.ad||"makine")+" silinsin mi?")) return; setIsBekle(true);
     try{ await remove("makineler",mk.id); setModal(null); say("Makine silindi"); }
