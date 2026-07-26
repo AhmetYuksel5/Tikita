@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="E3";   // komuta (admin) deneme sürümü
+const SURUM="E4";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1321,6 +1321,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const [aralikAcik,setAralikAcik]=useState(false);
   const GORUNUR_SAAT=7;   // en yakın zoomda ekranda görünen saat dilimi
   const [zoom,setZoom]=useState(99);   // her açılışta en yakın görünüm (zoomMax'a kırpılır); parmakla uzaklaştırılabilir
+  const [rowH,setRowH]=useState(42);   // satır yüksekliği — tek parmak basılı tutup yukarı/aşağı sürüklenerek değişir
   const [now,setNow]=useState(Date.now());
   const [containerW,setContainerW]=useState(360);
   const scrollRef=useRef(null);
@@ -1341,7 +1342,27 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     const te=e=>{ if(e.touches.length<2) d0=0; };
     el.addEventListener("touchstart",ts,{passive:false}); el.addEventListener("touchmove",tm,{passive:false}); el.addEventListener("touchend",te);
     return ()=>{ el.removeEventListener("touchstart",ts); el.removeEventListener("touchmove",tm); el.removeEventListener("touchend",te); }; },[]);
-  const LABEL_W=46, ROW_H=42;   // 12 makine tek ekranda görünsün
+  const LABEL_W=46;
+  const rowHRef=useRef(42); useEffect(()=>{ rowHRef.current=rowH; },[rowH]);
+  // 👆 tek parmak BASILI TUT → sürükle: yukarı/aşağı satır yüksekliği, sağa/sola saat kaydırma
+  useEffect(()=>{ const el=scrollRef.current; if(!el) return;
+    let t=null,mod=false,sx=0,sy=0,sRow=42,sScroll=0;
+    const bitir=()=>{ if(t){ clearTimeout(t); t=null; } mod=false; };
+    const ts=e=>{ if(e.touches.length!==1){ bitir(); return; }
+      const p=e.touches[0]; sx=p.clientX; sy=p.clientY; sRow=rowHRef.current; sScroll=el.scrollLeft;
+      t=setTimeout(()=>{ mod=true; try{ navigator.vibrate&&navigator.vibrate(12); }catch(_){} },320); };
+    const tm=e=>{ if(e.touches.length!==1) return; const p=e.touches[0];
+      const dx=p.clientX-sx, dy=p.clientY-sy;
+      if(!mod){ if(Math.abs(dx)>8||Math.abs(dy)>8) bitir(); return; }
+      e.preventDefault();
+      el.scrollLeft=sScroll-dx;
+      const yeni=Math.max(26,Math.min(96,Math.round(sRow+dy/5)));
+      if(yeni!==rowHRef.current){ rowHRef.current=yeni; setRowH(yeni); } };
+    el.addEventListener("touchstart",ts,{passive:false});
+    el.addEventListener("touchmove",tm,{passive:false});
+    el.addEventListener("touchend",bitir); el.addEventListener("touchcancel",bitir);
+    return ()=>{ el.removeEventListener("touchstart",ts); el.removeEventListener("touchmove",tm);
+      el.removeEventListener("touchend",bitir); el.removeEventListener("touchcancel",bitir); bitir(); }; },[]);
   const gunEt=(now>=bas+gunSayisi*24*3600*1000)?gunSayisi+1:gunSayisi;   // "şu an" pencerede kalsın
   const baslaMs=bas, bitMs=bas+gunEt*24*3600*1000, toplamMs=bitMs-baslaMs;
   const fitGunW=Math.max(150,(containerW-LABEL_W)/gunSayisi);
@@ -1392,7 +1413,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const Lej=(renk,ad)=>h("div",{style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#fff"}},h("span",{style:{width:12,height:12,borderRadius:4,background:renk,display:"inline-block"}}),ad);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
     h("div",{style:{...GS.card,overflow:"hidden",marginBottom:16}},
-      h("div",{ref:scrollRef,style:{overflowX:"auto",touchAction:"pan-x pan-y"}},
+      h("div",{ref:scrollRef,style:{overflowX:"auto",touchAction:"pan-x pan-y",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}},
         h("div",{style:{minWidth:LABEL_W+toplamW}},
           h("div",{style:{display:"flex",borderBottom:"1px solid "+GC.line,background:"#f3f6fb"}},
             h("div",{style:{width:LABEL_W,flexShrink:0,padding:"4px",position:"sticky",left:0,background:"#f3f6fb",zIndex:3,borderRight:"1px solid "+GC.line,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}},
@@ -1416,7 +1437,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
             const mjobs=(plan||[]).filter(p=>p.makineId===mk.id&&p.basladi);
             const sonBaski=mjobs.slice().sort((a,b)=>new Date(b.gercekBaslangic||b.baslangic).getTime()-new Date(a.gercekBaslangic||a.baslangic).getTime())[0]||null;
             const tablaIs=(sonBaski&&!sonBaski.tablaAlindi&&new Date(sonBaski.baslangic).getTime()+num(sonBaski.sureDk)*60000<=now)?sonBaski:null;
-            return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+GC.line,minHeight:ROW_H}},
+            return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+GC.line,minHeight:rowH}},
               h("div",{style:{width:LABEL_W,flexShrink:0,padding:"1px 4px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+GC.line,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden"}},
                 (()=>{ const pr=mkParca(mk); return h("div",{onClick:()=>setMkBilgi(mk),style:{cursor:"pointer",minWidth:0}},
                   h("div",{style:{display:"flex",alignItems:"baseline",gap:4,minWidth:0}},
@@ -1428,15 +1449,15 @@ function Uretim({d,plan,makineler,ac,onTabla}){
                 tl.bos.flatMap((b,i)=>{ const parts=[]; const pe=Math.min(b.end,now); if(pe>b.start) parts.push({k:"k"+i,s:b.start,e:pe,kayip:true});
                   const fs=Math.max(b.start,now); if(b.end>fs) parts.push({k:"f"+i,s:fs,e:b.end,kayip:false});
                   return parts.map(pt=>{ const left=(pt.s-baslaMs)*px, width=(pt.e-pt.s)*px; if(width<3) return null;
-                    if(pt.kayip) return h("div",{key:pt.k,title:"Kayıp zaman",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-6,background:"repeating-linear-gradient(-45deg,#efc3bd 0 6px,#e3aba4 6px 12px)",border:"1px solid "+GC.kirmiziB,borderRadius:7,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:"#7f1d1d",fontSize:9.5,fontWeight:800,lineHeight:1.2}},width>50?h(React.Fragment,null,h("div",null,"KAYIP"),h("div",{style:{fontWeight:600}},dkYaz((pt.e-pt.s)/60000))):null);
-                    return h("div",{key:pt.k,onClick:()=>ac({tip:"isEkle",pre:{makineId:mk.id,baslangic:new Date(pt.s).toISOString()}}),title:"Boş — dokun, iş planla",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-6,background:GC.kirmizi,border:"1px solid "+GC.kirmiziB,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:GC.kirmiziT,fontSize:10.5,fontWeight:700,lineHeight:1.25}},width>54?h(React.Fragment,null,h("div",null,gSaat(pt.s)),h("div",null,gSaat(pt.e))):null); }); }),
+                    if(pt.kayip) return h("div",{key:pt.k,title:"Kayıp zaman",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:rowH-6,background:"repeating-linear-gradient(-45deg,#efc3bd 0 6px,#e3aba4 6px 12px)",border:"1px solid "+GC.kirmiziB,borderRadius:7,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:"#7f1d1d",fontSize:9.5,fontWeight:800,lineHeight:1.2}},width>50?h(React.Fragment,null,h("div",null,"KAYIP"),h("div",{style:{fontWeight:600}},dkYaz((pt.e-pt.s)/60000))):null);
+                    return h("div",{key:pt.k,onClick:()=>ac({tip:"isEkle",pre:{makineId:mk.id,baslangic:new Date(pt.s).toISOString()}}),title:"Boş — dokun, iş planla",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:rowH-6,background:GC.kirmizi,border:"1px solid "+GC.kirmiziB,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:GC.kirmiziT,fontSize:10.5,fontWeight:700,lineHeight:1.25}},width>54?h(React.Fragment,null,h("div",null,gSaat(pt.s)),h("div",null,gSaat(pt.e))):null); }); }),
                 tl.js.map((x,i)=>{ const left=(Math.max(baslaMs,x.s)-baslaMs)*px, width=(Math.min(bitMs,x.e)-Math.max(baslaMs,x.s))*px; if(width<3) return null;
                   const basladi=!!x.p.basladi; let dr,durStr;
                   if(basladi){ if(x.e<=now){ dr={bg:GC.yesil,bd:GC.yesilB,tc:GC.yesilT,duman:true}; durStr="bitti"; } else { dr={bg:GC.yesil,bd:GC.yesilB,tc:GC.yesilT}; durStr="çalışıyor"; } }
                   else if(x.s>now){ dr={bg:GC.planBg,bd:GC.planB,tc:GC.planT,dash:true}; durStr="planlandı"; }
                   else if(x.e>now){ dr={bg:GC.onayBg,bd:GC.onayB,tc:GC.onayT,onay:true}; durStr="onay bekliyor"; }
                   else { dr={bg:GC.bitBg,bd:GC.bitB,tc:GC.bitT,dash:true}; durStr="başlamadı"; }
-                  return h("div",{key:"j"+i,onClick:()=>acJob(x,mk),title:x.p.ad+" · "+durStr,style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-6,background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",
+                  return h("div",{key:"j"+i,onClick:()=>acJob(x,mk),title:x.p.ad+" · "+durStr,style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:rowH-6,background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",
 color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
                     width>52?h(React.Fragment,null,h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"100%"}},num(x.p.adet)+" × "+(x.p.ad||"iş")),h("div",null,dr.onay?"▶ Başlat":gSaat(x.e))):null,
                     dr.duman?h("span",{style:{position:"absolute",inset:0,borderRadius:6,pointerEvents:"none",
