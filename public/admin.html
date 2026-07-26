@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="C9";   // komuta (admin) deneme sürümü
+const SURUM="D1";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1336,7 +1336,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     const te=e=>{ if(e.touches.length<2) d0=0; };
     el.addEventListener("touchstart",ts,{passive:false}); el.addEventListener("touchmove",tm,{passive:false}); el.addEventListener("touchend",te);
     return ()=>{ el.removeEventListener("touchstart",ts); el.removeEventListener("touchmove",tm); el.removeEventListener("touchend",te); }; },[]);
-  const LABEL_W=52, ROW_H=39;   // 12 makine tek ekranda görünsün
+  const LABEL_W=46, ROW_H=39;   // 12 makine tek ekranda görünsün
   const gunEt=(now>=bas+gunSayisi*24*3600*1000)?gunSayisi+1:gunSayisi;   // "şu an" pencerede kalsın
   const baslaMs=bas, bitMs=bas+gunEt*24*3600*1000, toplamMs=bitMs-baslaMs;
   const fitGunW=Math.max(150,(containerW-LABEL_W)/gunSayisi);
@@ -1355,6 +1355,11 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const timelines=useMemo(()=>{ const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id,plan,baslaMs,bitMs,now); }); return m; },[plan,makineler,baslaMs,bitMs,now]);
   // zaman ilerledikçe pencereyi 4 saat geride tut — kaydırma konumu korunur (posRef eşitlenir)
   useEffect(()=>{ if(elleRef.current) return; const nb=gunBasi(now-GERI_MS); if(nb!==bas) setBas(nb); },[now]);
+  // 🎨 DENEME: biten baskılar için 12 aday yeşil/teal — makine numarasına göre dağıtılır
+  const BITTI_ADAY=["#2f9e8f","#34a853","#0f9d8a","#4caf50","#14b8a6","#22c55e","#059669","#16a34a","#0d9488","#10b981","#15803d","#047857"];
+  const bittiRenk=mk=>{ const n=parseInt(mkParca(mk).no,10);
+    const i=(isNaN(n)?Math.max(0,mlist.findIndex(m=>m.id===mk.id)):(n-1));
+    return BITTI_ADAY[((i%BITTI_ADAY.length)+BITTI_ADAY.length)%BITTI_ADAY.length]; };
   const donemAd=gunSayisi===1?"Günlük":gunSayisi===7?"Haftalık":(gunSayisi+" günlük");
   const gunler=Array.from({length:gunEt},(_,i)=>new Date(baslaMs+i*24*3600*1000));
   const tarihAralik=gTarih(baslaMs)+" – "+gTarih(bitMs-1);
@@ -1405,7 +1410,10 @@ function Uretim({d,plan,makineler,ac,onTabla}){
                 return h("div",{style:{fontWeight:500,fontSize:fs,letterSpacing:ls,lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",
                   color:g.toDateString()===new Date(now).toDateString()?GC.kirmiziB:GC.txt}},txt); })(),
               h("div",{style:{position:"relative",display:"flex",justifyContent:"space-between",fontSize:9,color:GC.mut,marginTop:3,padding:"0 2px"}},
-                ticks.map(hr=>h("span",{key:hr,style:{position:"relative"}},gPad2(hr))))))),
+                ticks.map(hr=>h("span",{key:hr,style:{position:"relative"}},gPad2(hr)))),
+              h("div",{style:{height:4,marginTop:1,
+                backgroundImage:"linear-gradient(90deg,transparent calc(50% - .5px),#c3ceda calc(50% - .5px),#c3ceda calc(50% + .5px),transparent calc(50% + .5px))",
+                backgroundSize:(GUN_W*step/24)+"px 4px",backgroundRepeat:"repeat-x"}})))),
           mlist.length===0?h("div",{style:{padding:20,color:GC.mut,textAlign:"center"}},"Makine yok. Makineler'den ekle.")
           :mlist.map(mk=>{ const tl=timelines[mk.id]||{js:[],bos:[]};
             const mjobs=(plan||[]).filter(p=>p.makineId===mk.id&&p.basladi);
@@ -1423,15 +1431,15 @@ function Uretim({d,plan,makineler,ac,onTabla}){
                 tl.bos.flatMap((b,i)=>{ const parts=[]; const pe=Math.min(b.end,now); if(pe>b.start) parts.push({k:"k"+i,s:b.start,e:pe,kayip:true});
                   const fs=Math.max(b.start,now); if(b.end>fs) parts.push({k:"f"+i,s:fs,e:b.end,kayip:false});
                   return parts.map(pt=>{ const left=(pt.s-baslaMs)*px, width=(pt.e-pt.s)*px; if(width<3) return null;
-                    if(pt.kayip) return h("div",{key:pt.k,title:"Kayıp zaman",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-4,background:"repeating-linear-gradient(45deg,#efc3bd 0 6px,#e3aba4 6px 12px)",border:"1px solid "+GC.kirmiziB,borderRadius:7,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:"#7f1d1d",fontSize:9.5,fontWeight:800,lineHeight:1.2}},width>50?h(React.Fragment,null,h("div",null,"KAYIP"),h("div",{style:{fontWeight:600}},dkYaz((pt.e-pt.s)/60000))):null);
-                    return h("div",{key:pt.k,onClick:()=>ac({tip:"isEkle",pre:{makineId:mk.id,baslangic:new Date(pt.s).toISOString()}}),title:"Boş — dokun, iş planla",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-4,background:GC.kirmizi,border:"1px solid "+GC.kirmiziB,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:GC.kirmiziT,fontSize:10.5,fontWeight:700,lineHeight:1.25}},width>54?h(React.Fragment,null,h("div",null,gSaat(pt.s)),h("div",null,gSaat(pt.e))):null); }); }),
+                    if(pt.kayip) return h("div",{key:pt.k,title:"Kayıp zaman",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-2,background:"repeating-linear-gradient(45deg,#efc3bd 0 6px,#e3aba4 6px 12px)",border:"1px solid "+GC.kirmiziB,borderRadius:7,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:"#7f1d1d",fontSize:9.5,fontWeight:800,lineHeight:1.2}},width>50?h(React.Fragment,null,h("div",null,"KAYIP"),h("div",{style:{fontWeight:600}},dkYaz((pt.e-pt.s)/60000))):null);
+                    return h("div",{key:pt.k,onClick:()=>ac({tip:"isEkle",pre:{makineId:mk.id,baslangic:new Date(pt.s).toISOString()}}),title:"Boş — dokun, iş planla",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-2,background:GC.kirmizi,border:"1px solid "+GC.kirmiziB,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:GC.kirmiziT,fontSize:10.5,fontWeight:700,lineHeight:1.25}},width>54?h(React.Fragment,null,h("div",null,gSaat(pt.s)),h("div",null,gSaat(pt.e))):null); }); }),
                 tl.js.map((x,i)=>{ const left=(Math.max(baslaMs,x.s)-baslaMs)*px, width=(Math.min(bitMs,x.e)-Math.max(baslaMs,x.s))*px; if(width<3) return null;
                   const basladi=!!x.p.basladi; let dr,durStr;
-                  if(basladi){ if(x.e<=now){ dr={bg:GC.bitBg,bd:GC.bitB,tc:GC.bitT}; durStr="bitti"; } else { dr={bg:GC.yesil,bd:GC.yesilB,tc:GC.yesilT}; durStr="çalışıyor"; } }
+                  if(basladi){ if(x.e<=now){ const c=bittiRenk(mk); dr={bg:c+"26",bd:c,tc:c}; durStr="bitti"; } else { dr={bg:GC.yesil,bd:GC.yesilB,tc:GC.yesilT}; durStr="çalışıyor"; } }
                   else if(x.s>now){ dr={bg:GC.planBg,bd:GC.planB,tc:GC.planT,dash:true}; durStr="planlandı"; }
                   else if(x.e>now){ dr={bg:GC.onayBg,bd:GC.onayB,tc:GC.onayT,onay:true}; durStr="onay bekliyor"; }
                   else { dr={bg:GC.bitBg,bd:GC.bitB,tc:GC.bitT,dash:true}; durStr="başlamadı"; }
-                  return h("div",{key:"j"+i,onClick:()=>acJob(x,mk),title:x.p.ad+" · "+durStr,style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-4,background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
+                  return h("div",{key:"j"+i,onClick:()=>acJob(x,mk),title:x.p.ad+" · "+durStr,style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-2,background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
                     h("span",{style:{position:"absolute",top:4,right:5,width:8,height:8,borderRadius:8,background:x.p.ams?GC.mavi:GC.sari}}),
                     width>52?h(React.Fragment,null,h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"100%"}},num(x.p.adet)+" × "+(x.p.ad||"iş")),h("div",null,dr.onay?"▶ Başlasın mı?":gSaat(x.e))):null); }),
                 (now>=baslaMs&&now<=bitMs)?h("div",{style:{position:"absolute",left:(now-baslaMs)*px,top:0,bottom:0,width:2,background:GC.navyHdr,opacity:.55}}):null)); })))),
