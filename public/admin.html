@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="E6";   // komuta (admin) deneme sürümü
+const SURUM="E7";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1344,6 +1344,7 @@ function Uretim({d,plan,makineler,ac,onTabla}){
     return ()=>{ el.removeEventListener("touchstart",ts); el.removeEventListener("touchmove",tm); el.removeEventListener("touchend",te); }; },[]);
   const LABEL_W=46;
   const rowHRef=useRef(42); useEffect(()=>{ rowHRef.current=rowH; },[rowH]);
+  const satirRef=useRef(null);   // gerçek satır yüksekliğini ölçmek için (taban tespiti)
   // 👆 tek parmak BASILI TUT → sürükle: yukarı/aşağı satır yüksekliği, sağa/sola saat kaydırma
   useEffect(()=>{ const el=scrollRef.current; if(!el) return;
     let t=null,mod=false,sx=0,sy=0,sRow=42,sZoom=1,sOran=0,eksen=null;
@@ -1359,7 +1360,10 @@ function Uretim({d,plan,makineler,ac,onTabla}){
       // eksen kilidi — aynı anda yalnızca biri: ↕ satır yüksekliği ya da ↔ saat zoom'u
       if(!eksen){ if(Math.abs(dx)<6&&Math.abs(dy)<6) return; eksen=Math.abs(dx)>Math.abs(dy)?"x":"y"; }
       if(eksen==="y"){
-        const yeni=Math.max(26,Math.min(96,Math.round(sRow+dy/5)));
+        let yeni=Math.max(26,Math.min(96,Math.round(sRow+dy/5)));
+        // satır etiket içeriği yüzünden artık kısalmıyorsa daha fazla küçültme (yoksa sadece kutular incelir)
+        const sr=satirRef.current;
+        if(yeni<rowHRef.current && sr && sr.offsetHeight>rowHRef.current+1) yeni=rowHRef.current;
         if(yeni!==rowHRef.current){ rowHRef.current=yeni; setRowH(yeni); }
       } else {
         const zy=Math.max(1,Math.min(zoomMaxRef.current,Math.round((sZoom+dx/140)*100)/100));
@@ -1441,11 +1445,11 @@ function Uretim({d,plan,makineler,ac,onTabla}){
                   gPad2(hr),
                   h("span",{style:{width:1,height:4,background:"#b9c4d1",borderRadius:1}}))))))),
           mlist.length===0?h("div",{style:{padding:20,color:GC.mut,textAlign:"center"}},"Makine yok. Makineler'den ekle.")
-          :mlist.map(mk=>{ const tl=timelines[mk.id]||{js:[],bos:[]};
+          :mlist.map((mk,mi)=>{ const tl=timelines[mk.id]||{js:[],bos:[]};
             const mjobs=(plan||[]).filter(p=>p.makineId===mk.id&&p.basladi);
             const sonBaski=mjobs.slice().sort((a,b)=>new Date(b.gercekBaslangic||b.baslangic).getTime()-new Date(a.gercekBaslangic||a.baslangic).getTime())[0]||null;
             const tablaIs=(sonBaski&&!sonBaski.tablaAlindi&&new Date(sonBaski.baslangic).getTime()+num(sonBaski.sureDk)*60000<=now)?sonBaski:null;
-            return h("div",{key:mk.id,style:{display:"flex",borderBottom:"1px solid "+GC.line,minHeight:rowH}},
+            return h("div",{key:mk.id,ref:mi===0?satirRef:undefined,style:{display:"flex",borderBottom:"1px solid "+GC.line,minHeight:rowH}},
               h("div",{style:{width:LABEL_W,flexShrink:0,padding:"1px 4px",position:"sticky",left:0,background:"#fff",zIndex:2,borderRight:"1px solid "+GC.line,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden"}},
                 (()=>{ const pr=mkParca(mk); return h("div",{onClick:()=>setMkBilgi(mk),style:{cursor:"pointer",minWidth:0}},
                   h("div",{style:{display:"flex",alignItems:"baseline",gap:4,minWidth:0}},
