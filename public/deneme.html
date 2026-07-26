@@ -59,7 +59,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v67";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v68";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -919,33 +919,36 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
   const zararli=R.filter(x=>x.tip==="satis"&&x.id&&(num(x.adet)*num(x.satisFiyat))<(num(x.adet)*num(x.alisFiyat)));
   const [hediyeSec,setHediyeSec]=useState({});
   const hediyeIds=zararli.filter(x=>hediyeSec[x.id]).map(x=>x.id);
+  // hediye işaretlenenler onaylanınca "hediye"ye dönüşecek → özet rakamlar anında ona göre hesaplansın
+  const RG=hediyeIds.length?R.filter(x=>!(x.id&&hediyeSec[x.id])):R;
+  const vv=hediyeIds.length?donemRapor(RG):v;
   const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
-  const satRows=R.filter(x=>x.tip==="satis"&&!x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}));
-  const tahRows=R.filter(x=>x.tip==="tahsilat").map(x=>({t:"Tahsilat"+(num(x.pazPay)>0?(" · 🫰 "+tl(x.pazPay)+" payın"):""),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}));
+  const satRows=RG.filter(x=>x.tip==="satis"&&!x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}));
+  const tahRows=RG.filter(x=>x.tip==="tahsilat").map(x=>({t:"Tahsilat"+(num(x.pazPay)>0?(" · 🫰 "+tl(x.pazPay)+" payın"):""),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}));
   const hakRows=[
-    ...R.filter(x=>x.tip==="tahsilat"&&num(x.pazPay)>0).map(x=>({t:"Tahsilat payı",
+    ...RG.filter(x=>x.tip==="tahsilat"&&num(x.pazPay)>0).map(x=>({t:"Tahsilat payı",
       alt:tl(x.tutar)+" tahsilat − "+tl(num(x.tutar)-num(x.pazPay))+" üretici · "+(x.yer||"—")+" · "+fmtS(x.tarih),v:"+"+tl(x.pazPay),renk:"var(--gold)"})),
-    ...R.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat); const m2=th-K;
+    ...RG.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat); const m2=th-K;
       return {t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad. sattın",
         alt:tl(th)+" satış − "+tl(K)+" üretici (alış "+tl(x.alisFiyat)+") · "+fmtS(x.tarih),v:(m2<0?"":"+")+tl(m2),renk:m2<0?"var(--red)":"var(--cyan)"}; }),
-    ...R.filter(x=>x.tip==="tabla").map(x=>({t:"🧹 Tabla ücreti",alt:(x.yer||"Atölye")+" · "+fmtS(x.tarih),v:"+"+tl(x.tutar),renk:"var(--violet)"}))];
-  const konsRows=R.filter(x=>x.tip==="konsinye").map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:num(x.adet)+" ad.",renk:"var(--violet)"}));
-  const gerRows=R.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad."+(x.toptan?" · 📦 toptan":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmtS(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
+    ...RG.filter(x=>x.tip==="tabla").map(x=>({t:"🧹 Tabla ücreti",alt:(x.yer||"Atölye")+" · "+fmtS(x.tarih),v:"+"+tl(x.tutar),renk:"var(--violet)"}))];
+  const konsRows=RG.filter(x=>x.tip==="konsinye").map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:num(x.adet)+" ad.",renk:"var(--violet)"}));
+  const gerRows=RG.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad."+(x.toptan?" · 📦 toptan":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmtS(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
   const iadeRows=R.filter(x=>x.tip==="iade").map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:num(x.adet)+" ad.",renk:"var(--mut)"}));
   const ac=(ik,hex,baslik,rows)=>setDet({ik,hex,baslik,rows});
   return h(React.Fragment,null,
     h(Sheet,{ik:bitir?"🏭":"📡",hex:bitir?"#b45309":"#0e8fce",
       baslik:bitir?"Seferi bitir":"Komuta'ya rapor",alt:"",
       onClose,cta:bekle?"⏳…":(bitir?"🏭 Seferi bitir":"📡 Raporu onayla"),disabled:bekle,onCta:()=>onOnay(hediyeIds)},
-      v.bos&&h("div",{style:{padding:"10px 14px",marginBottom:14,borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)",textAlign:"center"}},"Bu dönemde kayıtlı işlem yok."),
+      vv.bos&&h("div",{style:{padding:"10px 14px",marginBottom:14,borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)",textAlign:"center"}},"Bu dönemde kayıtlı işlem yok."),
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-        h(Stat,{ik:"💰",v:v.satAd+" satış",l:tl(v.ciro)+" ciro ›",renk:"var(--green)",onClick:()=>ac("💰","#16a34a","Kale satışları",satRows)}),
-        h(Stat,{ik:"🧾",v:tl(v.tah),l:"kale tahsilatı ›",renk:"var(--gold)",onClick:()=>ac("🧾","#d97b12","Tahsilatlar",tahRows)}),
-        h(Stat,{ik:"💵",v:tl(v.nakit),l:"teslim edilecek (tahsilat + gerilla)",renk:"var(--green)"}),
-        h(Stat,{ik:"🫰",v:tl(v.hak),l:"hakedişin (satış − alış) ›",renk:"var(--gold)",onClick:()=>ac("🫰","#d97b12","Hakediş dökümü",hakRows)}),
-        h(Stat,{ik:"🏬",v:v.konsAd+" adet",l:"konsinye bırakılan ›",renk:"var(--violet)",onClick:()=>ac("🏬","#7c46e6","Bırakılan konsinyeler",konsRows)}),
-        v.ganimet>0&&h(Stat,{ik:"⚡",v:tl(v.ganimet),l:"gerilla ganimet ›",renk:"var(--cyan)",onClick:()=>ac("⚡","#0e8fce","Gerilla satışları",gerRows)}),
-        v.iade>0&&h(Stat,{ik:"↩️",v:v.iade+" adet",l:"iade alınan ›",renk:"var(--mut)",onClick:()=>ac("↩️","#64748b","İadeler",iadeRows)})),
+        h(Stat,{ik:"💰",v:vv.satAd+" satış",l:tl(vv.ciro)+" ciro ›",renk:"var(--green)",onClick:()=>ac("💰","#16a34a","Kale satışları",satRows)}),
+        h(Stat,{ik:"🧾",v:tl(vv.tah),l:"kale tahsilatı ›",renk:"var(--gold)",onClick:()=>ac("🧾","#d97b12","Tahsilatlar",tahRows)}),
+        h(Stat,{ik:"💵",v:tl(vv.nakit),l:"teslim edilecek (tahsilat + gerilla)",renk:"var(--green)"}),
+        h(Stat,{ik:"🫰",v:tl(vv.hak),l:"hakedişin (satış − alış) ›",renk:"var(--gold)",onClick:()=>ac("🫰","#d97b12","Hakediş dökümü",hakRows)}),
+        h(Stat,{ik:"🏬",v:vv.konsAd+" adet",l:"konsinye bırakılan ›",renk:"var(--violet)",onClick:()=>ac("🏬","#7c46e6","Bırakılan konsinyeler",konsRows)}),
+        vv.ganimet>0&&h(Stat,{ik:"⚡",v:tl(vv.ganimet),l:"gerilla ganimet ›",renk:"var(--cyan)",onClick:()=>ac("⚡","#0e8fce","Gerilla satışları",gerRows)}),
+        vv.iade>0&&h(Stat,{ik:"↩️",v:vv.iade+" adet",l:"iade alınan ›",renk:"var(--mut)",onClick:()=>ac("↩️","#64748b","İadeler",iadeRows)})),
       zararli.length?h("div",{style:{marginTop:14,padding:"12px 13px",borderRadius:14,background:"#fff7ed",border:"1px solid #fdba74"}},
         h("div",{style:{fontSize:13,fontWeight:800,color:"#9a3412",marginBottom:4}},"Maliyetin altında verilen ürünler"),
         h("div",{style:{fontSize:11.5,color:"#9a3412",marginBottom:10,lineHeight:1.5}},
@@ -2010,7 +2013,9 @@ function App(){
     try{ if(seferSheet&&seferSheet.mod==="bitir"){ await save("sefer",{id:sid,durum:"kapali",bitis:new Date().toISOString()}); say("🏭 Sefer kapandı"); }
       else {
         // onayla → WhatsApp'ta rapor metni (pencereyi kayıttan ÖNCE aç ki engellenmesin)
-        const txt=raporMetni(seferSheet&&seferSheet.veri,seferSheet&&seferSheet.recs);
+        const hset=new Set(hediyeIds||[]);
+        const rg=((seferSheet&&seferSheet.recs)||[]).filter(r=>!(r.id&&hset.has(r.id)));
+        const txt=raporMetni(hset.size?donemRapor(rg):(seferSheet&&seferSheet.veri),rg);
         try{ window.open("https://wa.me/?text="+encodeURIComponent(txt),"_blank"); }catch(e){}
         await save("sefer",{id:sid,sonRapor:new Date().toISOString()});
         say("📡 Rapor verildi — WhatsApp'tan gönder"); }
