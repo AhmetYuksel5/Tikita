@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="D1";   // komuta (admin) deneme sürümü
+const SURUM="D2";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1355,11 +1355,6 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const timelines=useMemo(()=>{ const m={}; mlist.forEach(mk=>{ m[mk.id]=makineTimeline(mk.id,plan,baslaMs,bitMs,now); }); return m; },[plan,makineler,baslaMs,bitMs,now]);
   // zaman ilerledikçe pencereyi 4 saat geride tut — kaydırma konumu korunur (posRef eşitlenir)
   useEffect(()=>{ if(elleRef.current) return; const nb=gunBasi(now-GERI_MS); if(nb!==bas) setBas(nb); },[now]);
-  // 🎨 DENEME: biten baskılar için 12 aday yeşil/teal — makine numarasına göre dağıtılır
-  const BITTI_ADAY=["#2f9e8f","#34a853","#0f9d8a","#4caf50","#14b8a6","#22c55e","#059669","#16a34a","#0d9488","#10b981","#15803d","#047857"];
-  const bittiRenk=mk=>{ const n=parseInt(mkParca(mk).no,10);
-    const i=(isNaN(n)?Math.max(0,mlist.findIndex(m=>m.id===mk.id)):(n-1));
-    return BITTI_ADAY[((i%BITTI_ADAY.length)+BITTI_ADAY.length)%BITTI_ADAY.length]; };
   const donemAd=gunSayisi===1?"Günlük":gunSayisi===7?"Haftalık":(gunSayisi+" günlük");
   const gunler=Array.from({length:gunEt},(_,i)=>new Date(baslaMs+i*24*3600*1000));
   const tarihAralik=gTarih(baslaMs)+" – "+gTarih(bitMs-1);
@@ -1435,11 +1430,12 @@ function Uretim({d,plan,makineler,ac,onTabla}){
                     return h("div",{key:pt.k,onClick:()=>ac({tip:"isEkle",pre:{makineId:mk.id,baslangic:new Date(pt.s).toISOString()}}),title:"Boş — dokun, iş planla",style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-2,background:GC.kirmizi,border:"1px solid "+GC.kirmiziB,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:GC.kirmiziT,fontSize:10.5,fontWeight:700,lineHeight:1.25}},width>54?h(React.Fragment,null,h("div",null,gSaat(pt.s)),h("div",null,gSaat(pt.e))):null); }); }),
                 tl.js.map((x,i)=>{ const left=(Math.max(baslaMs,x.s)-baslaMs)*px, width=(Math.min(bitMs,x.e)-Math.max(baslaMs,x.s))*px; if(width<3) return null;
                   const basladi=!!x.p.basladi; let dr,durStr;
-                  if(basladi){ if(x.e<=now){ const c=bittiRenk(mk); dr={bg:c+"26",bd:c,tc:c}; durStr="bitti"; } else { dr={bg:GC.yesil,bd:GC.yesilB,tc:GC.yesilT}; durStr="çalışıyor"; } }
+                  if(basladi){ if(x.e<=now){ dr={bg:GC.yesil,bd:GC.yesilB,tc:GC.yesilT,duman:true}; durStr="bitti"; } else { dr={bg:GC.yesil,bd:GC.yesilB,tc:GC.yesilT}; durStr="çalışıyor"; } }
                   else if(x.s>now){ dr={bg:GC.planBg,bd:GC.planB,tc:GC.planT,dash:true}; durStr="planlandı"; }
                   else if(x.e>now){ dr={bg:GC.onayBg,bd:GC.onayB,tc:GC.onayT,onay:true}; durStr="onay bekliyor"; }
                   else { dr={bg:GC.bitBg,bd:GC.bitB,tc:GC.bitT,dash:true}; durStr="başlamadı"; }
-                  return h("div",{key:"j"+i,onClick:()=>acJob(x,mk),title:x.p.ad+" · "+durStr,style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-2,background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
+                  return h("div",{key:"j"+i,onClick:()=>acJob(x,mk),title:x.p.ad+" · "+durStr,style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:ROW_H-2,background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",
+                    ...(dr.duman?{backgroundImage:"linear-gradient(155deg,rgba(255,255,255,.72) 0%,rgba(214,222,232,.58) 48%,rgba(160,174,192,.5) 100%)",filter:"grayscale(.4) saturate(.75)",opacity:.72}:{}),color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
                     h("span",{style:{position:"absolute",top:4,right:5,width:8,height:8,borderRadius:8,background:x.p.ams?GC.mavi:GC.sari}}),
                     width>52?h(React.Fragment,null,h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"100%"}},num(x.p.adet)+" × "+(x.p.ad||"iş")),h("div",null,dr.onay?"▶ Başlasın mı?":gSaat(x.e))):null); }),
                 (now>=baslaMs&&now<=bitMs)?h("div",{style:{position:"absolute",left:(now-baslaMs)*px,top:0,bottom:0,width:2,background:GC.navyHdr,opacity:.55}}):null)); })))),
