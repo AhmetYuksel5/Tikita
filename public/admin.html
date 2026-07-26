@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="F3";   // komuta (admin) deneme sürümü
+const SURUM="F4";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -117,6 +117,14 @@ const flKod=fl=>{ const n=String((fl&&fl.no)||"").trim();
   const m=String((fl&&fl.ad)||"").match(/^[Ff]?(\d{1,3})\s*[-–—._]?\s*/);
   return m?("F"+m[1].padStart(2,"0")):""; };
 const flAd=fl=>String((fl&&fl.ad)||"").replace(/^[Ff]?\d{1,3}\s*[-–—._]?\s*/,"").trim()||String((fl&&fl.ad)||"");
+// 🖼️ seçilen dosyayı küçültüp data-URL'e çevir (Firestore'a sığsın)
+function dosyaOku(file,maxW){ return new Promise((res,rej)=>{ const r=new FileReader();
+  r.onload=()=>{ const img=new Image(); img.onload=()=>{ const sc=Math.min(1,maxW/Math.max(img.width,img.height));
+      const c=document.createElement("canvas"); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height); res(c.toDataURL("image/jpeg",.72)); };
+    img.onerror=rej; img.src=r.result; }; r.onerror=rej; r.readAsDataURL(file); }); }
+// ürün fotoğrafı — yuvarlak köşeli küçük görsel
+function Foto({src,s,r}){ return src?h("img",{src,alt:"",style:{width:s||34,height:s||34,borderRadius:r||8,objectFit:"cover",flexShrink:0,display:"block",background:"var(--surf2)"}}):null; }
 const SIMGELER=["🦅","🐺","🦁","🐉","🦊","🐯","🦈","🦂","🐻","🦉","🐗","🦏","⚔️","🛡️","👑","🔱"];
 function adRenk(s2){ let hsh=0; const t=s2||"?"; for(let i=0;i<t.length;i++) hsh=(hsh*31+t.charCodeAt(i))>>>0; return {H:hsh%360}; }
 
@@ -662,7 +670,7 @@ function EkipSheet({e,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,onView,b
 }
 
 /* ————— STOK ————— */
-function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onGecmis,onKomut,onParca,onMaliyet}){
+function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onGecmis,onKomut,onParca,onMaliyet,foto,onFoto,onFotoSil}){
   const kad={}; (kullanicilar||[]).forEach(k=>kad[k.id]=k.ad||"?");
   const cantalar=Object.entries(u.pazStokK||{}).map(([id,v])=>({ad:kad[id]||id,adet:num(v)})).filter(x=>x.adet>0).sort((a,b)=>b.adet-a.adet);
   const parcali=(u.parcalar||[]).length>0;
@@ -728,7 +736,7 @@ function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onGecmis,onKomut,o
   // aşama pipeline — dokun: komut
   const asama=[["","basımda",u.basimda,"var(--cyan)",null],["","montaj",u.montajda,"#c2410c",()=>onKomut("montajda")],["","stok",u.stokta,"var(--txt)",()=>onKomut("stokta")],["","konsinye",sahadaTop,"var(--violet)",()=>setNav("konsAcik")],["","satıldı",satTop,"var(--green)",()=>setNav("satis")]];
   const ekBilgi=[["çanta",u.canta],["hediye",u.hediye],num(u.zayiat)>0?["zayiat",u.zayiat]:null].filter(Boolean);
-  return h(React.Fragment,null,h(Sheet,{ik:"📦",hex:"#d97b12",baslik:u.ad,alt:"📥 "+u.stokta+" stok · "+u.montajda+" montaj · "+sahadaTop+" konsinye",onClose,cta:"Kapat",onCta:onClose},
+  return h(React.Fragment,null,h(Sheet,{ik:foto?h(Foto,{src:foto,s:46,r:12}):IK("stok","#d97b12",24),hex:"#d97b12",baslik:u.ad,alt:"📥 "+u.stokta+" stok · "+u.montajda+" montaj · "+sahadaTop+" konsinye",onClose,cta:"Kapat",onCta:onClose},
     h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:8}},
       asama.map((s2,i)=>h(s2[4]?"button":"div",{key:i,onClick:s2[4]||undefined,style:{textAlign:"center",padding:"9px 2px",borderRadius:10,background:s2[4]?"var(--surf2)":"transparent",border:"1px solid "+(s2[4]?"var(--line)":"transparent")}},
         h("div",{style:{fontSize:16,fontWeight:800,color:s2[3],lineHeight:1}},num(s2[2])),
@@ -740,6 +748,11 @@ function StokSheet({u,kullanicilar,hareketler,onClose,onDuzen,onGecmis,onKomut,o
       h(Stat,{ik:"🏭",v:tl(u.alis),l:"alış",renk:"var(--txt)"}),
       (()=>{ const md=u.maliyetDetay, varDetay=!!(md&&((md.rows&&md.rows.length)||(md.parcalar&&md.parcalar.length))); const eksik=u.maliyetKaynak==="eksik";
         return h(Stat,{ik:"🧮",v:eksik?"—":tl(u.maliyet),l:(eksik?"parça eksik — hesaplanmadı":("maliyet · "+(u.maliyetKaynak||"oto")))+(varDetay?" ›":""),renk:eksik?"var(--mut2)":"var(--violet)",onClick:(varDetay&&onMaliyet)?()=>onMaliyet(u):null}); })()),
+    h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+      onFoto?h("label",{style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--violet)",textAlign:"center",cursor:"pointer"}},
+        foto?"Fotoğrafı değiştir":"Fotoğraf ekle",
+        h("input",{type:"file",accept:"image/*",style:{display:"none"},onChange:e=>{const f=e.target.files&&e.target.files[0]; if(f) onFoto(f); e.target.value="";}})):null,
+      (foto&&onFotoSil)?h("button",{onClick:onFotoSil,style:{flexShrink:0,padding:"12px 14px",borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--red)"}},"Sil"):null),
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       onDuzen?h("button",{onClick:onDuzen,style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--cyan)"}},"Düzenle"):null,
       onGecmis?h("button",{onClick:()=>onGecmis(u),style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--txt)"}},"Geçmiş"):null),
@@ -871,7 +884,7 @@ function ganttRenk(durum){
   return {bg:"var(--surf2)",bd:"1px solid var(--line)",tx:"var(--txt)"};
 }
 // iş detayı — klasik modal
-function IsSheet({x,onClose,onBaslat,onSil,onDuzen}){
+function IsSheet({x,onClose,onBaslat,onSil,onDuzen,foto}){
   const p=x.p; const c=ganttRenk(x.durum);
   const etiket={bitti:"Bitti",basiyor:"Basıyor",sirada:"⏭ Sırada",gecikti:"⏰ Gecikti — şimdiye kaydı",geride:"Geride kaldı (üzerinden iş başlatıldı)"}[x.durum]||x.durum;
   const rows=[
@@ -888,7 +901,7 @@ function IsSheet({x,onClose,onBaslat,onSil,onDuzen}){
   ].filter(Boolean);
   const basla=!p.basladi;
   const silinebilir=basla||x.durum==="basiyor";   // bitmiş işler silinmez (üretim geçmişi/tabla bozulmasın)
-  return h(Sheet,{ik:null,hex:"#0e8fce",baslik:p.ad||"İş",alt:etiket,onClose,
+  return h(Sheet,{ik:foto?h(Foto,{src:foto,s:46,r:12}):null,hex:"#0e8fce",baslik:p.ad||"İş",alt:etiket,onClose,
     cta:basla?"İşi şimdi başlat":null,onCta:basla?onBaslat:null},
     rows.map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
       h("span",{style:{color:"var(--mut)",fontWeight:600,flexShrink:0}},r[0]),
@@ -1319,7 +1332,7 @@ function KomutaMesajSheet({ekip,onKaydet,bekle}){
     h("textarea",{value:mesaj,onChange:e=>setMesaj(e.target.value),rows:3,placeholder:"örn. Yarın sabah stant için Kadıköy'e geç · Şu kaleye mutlaka uğra",style:{...inp,minHeight:88,resize:"vertical",fontSize:15,fontWeight:600,marginBottom:10}}),
     h("button",{onClick:()=>setKonum(v=>!v),style:{width:"100%",padding:12,borderRadius:12,fontSize:13.5,fontWeight:800,background:konum?"#0e8fce":"var(--surf2)",color:konum?"#fff":"var(--cyan)",border:"1px solid "+(konum?"#0e8fce":"var(--line)")}},(konum?"✅ ":"📍 ")+"Anlık konum iste"));
 }
-function Uretim({d,plan,makineler,ac,onTabla}){
+function Uretim({d,plan,makineler,ac,onTabla,fotoMap}){
   const GERI_MS=4*3600*1000;   // üretim hattı her zaman 4 saat geriden başlar
   const gunBasi=t=>{ const d2=new Date(t); d2.setHours(0,0,0,0); return d2.getTime(); };
   const [bas,setBas]=useState(()=>gunBasi(Date.now()-GERI_MS));
@@ -1478,7 +1491,11 @@ function Uretim({d,plan,makineler,ac,onTabla}){
                   else { dr={bg:GC.bitBg,bd:GC.bitB,tc:GC.bitT,dash:true}; durStr="başlamadı"; }
                   return h("div",{key:"j"+i,onClick:()=>acJob(x,mk),title:x.p.ad+" · "+durStr,style:{position:"absolute",left:left+2,top:"50%",transform:"translateY(-50%)",width:width-4,height:rowH-6,background:dr.bg,border:(dr.dash?"1px dashed ":"1px solid ")+dr.bd,borderRadius:7,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",
 color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAlign:"center"}},
-                    width>52?h(React.Fragment,null,h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"100%"}},num(x.p.adet)+" × "+(x.p.ad||"iş")),h("div",null,dr.onay?"▶ Başlat":gSaat(x.e))):null,
+                    width>52?h(React.Fragment,null,
+                      h("div",{style:{display:"flex",alignItems:"center",gap:5,maxWidth:"100%",minWidth:0}},
+                        (width>92&&(fotoMap||{})[x.p.urunId])?h(Foto,{src:fotoMap[x.p.urunId].data,s:16,r:4}):null,
+                        h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},num(x.p.adet)+" × "+(x.p.ad||"iş"))),
+                      h("div",null,dr.onay?"▶ Başlat":gSaat(x.e))):null,
                     dr.duman?h("span",{style:{position:"absolute",inset:0,borderRadius:6,pointerEvents:"none",
                       background:"rgba(203,213,225,.66)"}}):null,
                     dr.duman?h("span",{style:{position:"absolute",top:3,left:4,width:14,height:14,borderRadius:4,background:"#16a34a",color:"#fff",
@@ -1614,7 +1631,7 @@ function FilamentDuzenSheet({fl,onKaydet,onSil,bekle}){
     h("input",{type:"number",inputMode:"numeric",value:kg,onChange:e=>setKg(e.target.value),placeholder:"örn. 700",style:{...inp,marginBottom:duzen?14:0}}),
     duzen?h("button",{onClick:()=>onSil(fl),style:{width:"100%",padding:"12px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"Filamenti sil"):null);
 }
-function Stok({d,ac}){
+function Stok({d,ac,fotoMap}){
   const uEks=d.stok.filter(u=>u.fiyat<=0).length;
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 84px"}},
     h("button",{onClick:()=>ac({tip:"urunDuzen",u:null}),style:{position:"fixed",left:"50%",transform:"translateX(-50%)",zIndex:35,
@@ -1631,7 +1648,7 @@ function Stok({d,ac}){
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       d.stok.map((u,i)=>h("button",{key:i,onClick:()=>ac({tip:"stok",u}),className:"card",style:{padding:"14px 13px",textAlign:"left",position:"relative",overflow:"hidden"}},
         u.stokta<=3?h("span",{style:{position:"absolute",top:10,right:10,fontSize:10,fontWeight:800,color:"var(--red)",background:"#e0483c14",padding:"2px 7px",borderRadius:7}},"az"):null,
-        h("div",{style:{marginBottom:6}},IK("stok","var(--mut)",24)),
+        ((fotoMap||{})[u.id]?h("div",{style:{marginBottom:6}},h(Foto,{src:fotoMap[u.id].data,s:38,r:10})):h("div",{style:{marginBottom:6}},IK("stok","var(--mut)",24))),
         h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
         h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 8px",marginTop:6,fontSize:10.5,color:"var(--mut)",fontWeight:700}},
           u.basimda>0?h("span",{style:{color:"var(--cyan)"}},"basım "+u.basimda):null,
@@ -2186,6 +2203,10 @@ function App(){
         hareketler=useColl("pazarlama_hareket"), kullanicilar=useColl("kullanici"), musteriler=useColl("musteri");
   const filamentler=useColl("filament");
   const stokHareket=useColl("stok_hareket");
+  const urunFoto=useColl("urun_foto");   // 🖼️ ürün fotoğrafları (pazarlamacı uygulamasıyla ortak)
+  const fotoMap=useMemo(()=>{ const m={};
+    (urunFoto||[]).forEach(f=>{ if(f&&f.urunId&&f.data&&!m[f.urunId]) m[f.urunId]={id:f.id,data:f.data}; });
+    return m; },[urunFoto]);
   const hedefler=useColl("hedef");
   const talepler=useColl("talep");
   const ayarlar=useColl("ayar");
@@ -2248,6 +2269,14 @@ function App(){
       }
       setModal(null); say((eski?"Kaydedildi":"İş planlandı")+" · "+kayit.ad); }
     catch(e){ console.error(e); say("Planlanamadı — tekrar dene"); } finally{ setIsBekle(false); } }
+  async function urunFotoEkle(urunId,file){ if(!urunId||!file) return;
+    try{ const data=await dosyaOku(file,900); const eski=fotoMap[urunId];
+      if(eski) await remove("urun_foto",eski.id);   // ürün başına tek fotoğraf
+      await save("urun_foto",{urunId,data,tarih:new Date().toISOString()}); say("Fotoğraf eklendi"); }
+    catch(e){ console.error(e); say("⚠ Fotoğraf eklenemedi"); } }
+  async function urunFotoSil(urunId){ const f=fotoMap[urunId]; if(!f) return;
+    if(!confirm("Ürün fotoğrafı silinsin mi?")) return;
+    try{ await remove("urun_foto",f.id); say("Fotoğraf silindi"); }catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   async function urunKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{
       // 📈 fiyat geçmişi: fiyat değiştiyse ESKİ fiyatı "bu tarihe kadar geçerliydi" olarak logla (geçmiş işlemlerde o günkü fiyat gelsin)
@@ -2430,8 +2459,8 @@ function App(){
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Komuta merkezi hazırlanıyor…"));
   let ekran;
   if(view==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"}),onTalepSil:talepSil});
-  else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla});
-  else if(view==="stok") ekran=h(Stok,{d,ac:setModal});
+  else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla,fotoMap});
+  else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler});
   else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
   return h("div",null,
@@ -2447,7 +2476,7 @@ function App(){
       h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🗑 \""+(silinen.p.ad||"iş")+"\" silindi"),
       h("button",{onClick:silGeriAl,style:{flexShrink:0,padding:"7px 12px",borderRadius:10,background:"var(--cyan)",color:"#fff",fontSize:12.5,fontWeight:800}},"Geri al")):null,
     h(Toast,{msg:toastMsg}),
-    modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,onClose:()=>setModal(null),onBaslat:()=>isBaslat(modal.x),onSil:()=>isSil(modal.x),
+    modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,foto:(fotoMap[(modal.x.p||{}).urunId]||{}).data,onClose:()=>setModal(null),onBaslat:()=>isBaslat(modal.x),onSil:()=>isSil(modal.x),
       onDuzen:()=>setModal({tip:"isEkle",kayit:modal.x.p})}),
     modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,filamentler,bekle:isBekle,onKaydet:isKaydet,kayit:modal.kayit||null,pre:modal.pre||null}),
     modal&&modal.tip==="makineYonet"&&h(MakineYonetimSheet,{makineler,onClose:()=>setModal(null),onAc:setModal}),
@@ -2465,7 +2494,7 @@ function App(){
         onSil:kullaniciSil,onArsiv:kullaniciArsivle,onArsivGeri:kullaniciArsivGeri,onSifre:sifreSet,onView:sifreGor,
         kisiTalep:kt,onTalep:t=>setModal({tip:"talep",t})}); })(),
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
-      return h(StokSheet,{u:s,kullanicilar,hareketler,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
+      return h(StokSheet,{u:s,kullanicilar,hareketler,foto:(fotoMap[s.id]||{}).data,onFoto:f=>urunFotoEkle(s.id,f),onFotoSil:()=>urunFotoSil(s.id),onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
         onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v),onMaliyet:(uu)=>setModal({tip:"maliyetGec",u:uu,uid:s.id})}); })(),
     modal&&modal.tip==="maliyetGec"&&h(MaliyetGecmisSheet,{u:modal.u,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stokKomut"&&h(StokKomutSheet,{cfg:modal.cfg,onClose:()=>setModal(null)}),
