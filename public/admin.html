@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="F4";   // komuta (admin) deneme sürümü
+const SURUM="F5";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -123,6 +123,9 @@ function dosyaOku(file,maxW){ return new Promise((res,rej)=>{ const r=new FileRe
       const c=document.createElement("canvas"); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc);
       c.getContext("2d").drawImage(img,0,0,c.width,c.height); res(c.toDataURL("image/jpeg",.72)); };
     img.onerror=rej; img.src=r.result; }; r.onerror=rej; r.readAsDataURL(file); }); }
+// uygulamayla gelen hazır ürün görselleri (ürün adına göre eşleşir; Firestore fotoğrafı varsa o öncelikli)
+const YEREL_FOTO={yunus:"urun/yunus.jpg"};
+const adAnahtar=a=>String(a||"").toLocaleLowerCase("tr").replace(/[^a-z0-9çğıöşü]+/g,"");
 // ürün fotoğrafı — yuvarlak köşeli küçük görsel
 function Foto({src,s,r}){ return src?h("img",{src,alt:"",style:{width:s||34,height:s||34,borderRadius:r||8,objectFit:"cover",flexShrink:0,display:"block",background:"var(--surf2)"}}):null; }
 const SIMGELER=["🦅","🐺","🦁","🐉","🦊","🐯","🦈","🦂","🐻","🦉","🐗","🦏","⚔️","🛡️","👑","🔱"];
@@ -2206,7 +2209,11 @@ function App(){
   const urunFoto=useColl("urun_foto");   // 🖼️ ürün fotoğrafları (pazarlamacı uygulamasıyla ortak)
   const fotoMap=useMemo(()=>{ const m={};
     (urunFoto||[]).forEach(f=>{ if(f&&f.urunId&&f.data&&!m[f.urunId]) m[f.urunId]={id:f.id,data:f.data}; });
-    return m; },[urunFoto]);
+    // yüklenmiş fotoğrafı olmayan ürünlerde hazır görsele düş
+    (urunler||[]).forEach(u=>{ if(m[u.id]) return; const k=adAnahtar(u.ad);
+      const bul=Object.keys(YEREL_FOTO).find(x=>k.indexOf(x)>=0);
+      if(bul) m[u.id]={id:null,data:YEREL_FOTO[bul],yerel:true}; });
+    return m; },[urunFoto,urunler]);
   const hedefler=useColl("hedef");
   const talepler=useColl("talep");
   const ayarlar=useColl("ayar");
@@ -2274,7 +2281,7 @@ function App(){
       if(eski) await remove("urun_foto",eski.id);   // ürün başına tek fotoğraf
       await save("urun_foto",{urunId,data,tarih:new Date().toISOString()}); say("Fotoğraf eklendi"); }
     catch(e){ console.error(e); say("⚠ Fotoğraf eklenemedi"); } }
-  async function urunFotoSil(urunId){ const f=fotoMap[urunId]; if(!f) return;
+  async function urunFotoSil(urunId){ const f=fotoMap[urunId]; if(!f||!f.id){ say("Bu hazır bir görsel — kendi fotoğrafını ekleyerek değiştirebilirsin"); return; }
     if(!confirm("Ürün fotoğrafı silinsin mi?")) return;
     try{ await remove("urun_foto",f.id); say("Fotoğraf silindi"); }catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   async function urunKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
