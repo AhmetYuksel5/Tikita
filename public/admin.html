@@ -52,7 +52,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="E4";   // komuta (admin) deneme sürümü
+const SURUM="E5";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1346,18 +1346,22 @@ function Uretim({d,plan,makineler,ac,onTabla}){
   const rowHRef=useRef(42); useEffect(()=>{ rowHRef.current=rowH; },[rowH]);
   // 👆 tek parmak BASILI TUT → sürükle: yukarı/aşağı satır yüksekliği, sağa/sola saat kaydırma
   useEffect(()=>{ const el=scrollRef.current; if(!el) return;
-    let t=null,mod=false,sx=0,sy=0,sRow=42,sScroll=0;
+    let t=null,mod=false,sx=0,sy=0,sRow=42,sZoom=1,sOran=0;
     const bitir=()=>{ if(t){ clearTimeout(t); t=null; } mod=false; };
     const ts=e=>{ if(e.touches.length!==1){ bitir(); return; }
-      const p=e.touches[0]; sx=p.clientX; sy=p.clientY; sRow=rowHRef.current; sScroll=el.scrollLeft;
+      const p=e.touches[0]; sx=p.clientX; sy=p.clientY; sRow=rowHRef.current; sZoom=zoomRef.current;
+      sOran=el.scrollWidth?((el.scrollLeft+el.clientWidth/2)/el.scrollWidth):0;
       t=setTimeout(()=>{ mod=true; try{ navigator.vibrate&&navigator.vibrate(12); }catch(_){} },320); };
     const tm=e=>{ if(e.touches.length!==1) return; const p=e.touches[0];
       const dx=p.clientX-sx, dy=p.clientY-sy;
       if(!mod){ if(Math.abs(dx)>8||Math.abs(dy)>8) bitir(); return; }
       e.preventDefault();
-      el.scrollLeft=sScroll-dx;
+      // ↕ satır yüksekliği · ↔ saat dilimi zoom'u (merkez sabit kalır)
       const yeni=Math.max(26,Math.min(96,Math.round(sRow+dy/5)));
-      if(yeni!==rowHRef.current){ rowHRef.current=yeni; setRowH(yeni); } };
+      if(yeni!==rowHRef.current){ rowHRef.current=yeni; setRowH(yeni); }
+      const zy=Math.max(1,Math.min(zoomMaxRef.current,Math.round((sZoom+dx/140)*100)/100));
+      if(Math.abs(zy-zoomRef.current)>=0.01){ zoomRef.current=zy; setZoom(zy);
+        requestAnimationFrame(()=>{ if(el.scrollWidth) el.scrollLeft=Math.max(0,sOran*el.scrollWidth-el.clientWidth/2); }); } };
     el.addEventListener("touchstart",ts,{passive:false});
     el.addEventListener("touchmove",tm,{passive:false});
     el.addEventListener("touchend",bitir); el.addEventListener("touchcancel",bitir);
