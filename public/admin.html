@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="G4";   // komuta (admin) deneme sürümü
+const SURUM="G5";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -938,8 +938,10 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
   const filSec=(filamentler||[]).find(f=>f.id===filamentId)||null;
   const maliyet=num(sure)/60*12+num(gram)/1000*(filSec?num(filSec.kgFiyat):0);   // 12 ₺/saat makine
   // önceki baskılar (tekrar için) — ad+adet+süreye göre tekilleştir
+  // gerçekten BASILMIŞ işler önce ve gerçek başlangıç saatine göre — ileri tarihli plan "önceki baskı" değildir
+  const baskiSira=(a,b)=>((b.basladi?1:0)-(a.basladi?1:0))||(new Date(b.gercekBaslangic||b.baslangic)-new Date(a.gercekBaslangic||a.baslangic));
   const oncekiler=(()=>{ const seen=new Set(), out=[];
-    (plan||[]).slice().sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)).forEach(p=>{ if(!p.ad) return;
+    (plan||[]).slice().sort(baskiSira).forEach(p=>{ if(!p.ad) return;
       const k=(p.ad||"")+"|"+num(p.adet)+"|"+num(p.sureDk); if(seen.has(k)) return; seen.add(k); if(out.length<10) out.push(p); }); return out; })();
   const toLoc=ms=>{const d2=new Date(ms); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset()); return d2.toISOString().slice(0,16);};
   // varsayılan başlangıç: seçili makinenin kuyruk sonu (efektif) — 5 dk'ya yuvarlanır
@@ -959,7 +961,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
   const seciliUrun=urunListe.find(u=>u.id===urunId);
   // seçili ürünün önceki baskıları — adet/süre/gram/filament/parçaya göre tekilleştir
   const urunBaskilari=(()=>{ if(serbest||!urunId) return []; const seen=new Set(),out=[];
-    (plan||[]).filter(p=>p.urunId===urunId).sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)).forEach(p=>{
+    (plan||[]).filter(p=>p.urunId===urunId).sort(baskiSira).forEach(p=>{
       const k=num(p.adet)+"|"+num(p.sureDk)+"|"+num(p.gram)+"|"+(p.filamentId||"")+"|"+((p.parcaAdlar||[]).slice().sort().join(","));
       if(seen.has(k))return; seen.add(k); if(out.length<8) out.push(p); }); return out; })();
   const baskiUygula=p=>{ setParcaSec((p.parcaAdlar||[]).slice()); setAdet(num(p.adet)||1); setSure(String(num(p.sureDk)||"")); setGram(p.gram?String(p.gram):""); setFilamentId(p.filamentId||""); setAms(p.ams!==false); setNott(p.not||""); };
@@ -1011,7 +1013,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
           const secili=num(adet)===num(p.adet)&&num(sure)===num(p.sureDk)&&num(gram)===num(p.gram)&&(filamentId||"")===(p.filamentId||"");
           return h("button",{key:i,onClick:()=>baskiUygula(p),style:{width:"100%",textAlign:"left",padding:"10px 12px",borderRadius:12,background:secili?"#eaf4fb":"var(--surf2)",border:"1px solid "+(secili?"#0e8fce":"var(--line)")}},
             h("div",{style:{fontWeight:800,fontSize:13.5,color:"var(--txt)"}},(num(p.adet)||1)+"× · "+dkYaz(num(p.sureDk))+(num(p.gram)>0?(" · "+num(p.gram)+" gr"):"")),
-            h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:2}},(fl?("🧵 "+fl.ad):"filament yok")+((p.parcaAdlar&&p.parcaAdlar.length)?(" · "+p.parcaAdlar.join("+")):"")+" · "+new Date(p.baslangic).toLocaleDateString("tr-TR",{day:"2-digit",month:"short"}))); }))):null,
+            h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:2}},(fl?("🧵 "+fl.ad):"filament yok")+((p.parcaAdlar&&p.parcaAdlar.length)?(" · "+p.parcaAdlar.join("+")):"")+" · "+new Date(p.gercekBaslangic||p.baslangic).toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+(p.basladi?"":" · planlı"))); }))):null,
     serbest?h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"iş adı — örn. Özel sipariş",
       style:{...inp,fontSize:15,fontWeight:600,marginBottom:14}}):null,
     (!serbest&&parcalar.length)?h("div",{style:{marginBottom:14}},
