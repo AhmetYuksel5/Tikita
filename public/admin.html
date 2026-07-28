@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="G3";   // komuta (admin) deneme sürümü
+const SURUM="G4";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -275,7 +275,7 @@ let VERI_HATA=false; const hataDinle=new Set();
 function hataBildir(){ if(!VERI_HATA){ VERI_HATA=true; hataDinle.forEach(f=>f()); } }
 function useVeriHata(){ const [,f]=useState(0); useEffect(()=>{ const g=()=>f(x=>x+1); hataDinle.add(g); return ()=>hataDinle.delete(g); },[]); return VERI_HATA; }
 function useColl(name){ const [rows,setRows]=useState(null);
-  useEffect(()=>{ const t=setTimeout(()=>setRows(r=>{ if(r===null){ hataBildir(); return []; } return r; }),9000);
+  useEffect(()=>{ const t=setTimeout(()=>setRows(r=>{ if(r===null){ hataBildir(); return []; } return r; }),18000);   // mobil bağlantıda erken pes etme
     const un=onSnapshot(collection(db,name),s=>{clearTimeout(t);setRows(s.docs.map(d=>({id:d.id,...d.data()})));},
       e=>{console.error(name,e);clearTimeout(t);hataBildir();setRows(r=>r===null?[]:r);});
     return ()=>{clearTimeout(t);un();}; },[]);
@@ -2550,8 +2550,9 @@ function App(){
     catch(e){ console.error(e); say("Geri alınamadı"); } }
   // (geri tuşu yönetimi yukarıda BACK_STACK ile — açık Sheet'ler otomatik kapanır)
   // 🔐 giriş kapısı — giriş yoksa PIN ekranına, yönetici değilse pazarlamacı sayfasına yönlen
+  // ⚠️ liste BOŞ gelirse (bağlantı hatası / zaman aşımı) kullanıcıyı ATMA — yalnız gerçekten yüklendiyse karar ver
   useEffect(()=>{ if(!BEN_ID){ location.replace("index.html?giris=1"); return; }
-    if(kullanicilar){ const me=kullanicilar.find(u=>u.id===BEN_ID);
+    if(kullanicilar&&kullanicilar.length){ const me=kullanicilar.find(u=>u.id===BEN_ID);
       if(!me){ location.replace("index.html?giris=1"); return; }
       if(me.rol!=="admin") location.replace("deneme.html"); } },[kullanicilar]);
   const benKul=kullanicilar?kullanicilar.find(u=>u.id===BEN_ID):undefined;
@@ -2560,7 +2561,12 @@ function App(){
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Giriş gerekli — yönlendiriliyor…"));
   if(!BEN_ID) return engelle;                                  // giriş yok
-  if(kullanicilar&&!yetkili) return engelle;                   // kullanıcı bulunamadı ya da yönetici değil
+  if(kullanicilar&&kullanicilar.length&&!yetkili) return engelle;   // kullanıcı bulunamadı ya da yönetici değil
+  if(kullanicilar&&!kullanicilar.length) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:24,textAlign:"center"}},
+    h("div",{style:{fontSize:15,fontWeight:800}},"Bağlantı kurulamadı"),
+    h("div",{style:{color:"var(--mut)",fontSize:13,fontWeight:600,maxWidth:300}},"Sunucudan veri alınamadı. İnternetini kontrol edip tekrar dene."),
+    h("button",{onClick:()=>location.reload(),style:{padding:"12px 22px",borderRadius:14,background:"var(--cyan)",color:"#fff",fontSize:14,fontWeight:800}},"Tekrar dene"),
+    h("button",{onClick:()=>location.href="index.html?giris=1",style:{padding:"8px 14px",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},"Hesap değiştir"));
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Komuta merkezi hazırlanıyor…"));
