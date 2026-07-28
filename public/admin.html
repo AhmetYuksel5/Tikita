@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="G1";   // komuta (admin) deneme sürümü
+const SURUM="G2";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -557,7 +557,7 @@ function Chip({on,onClick,children}){ return h("button",{onClick,style:{flexShri
   background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},children); }
 function DetayListSheet({ik,hex,baslik,alt,rows,onClose}){
   return h(Sheet,{ik,hex,baslik,alt:alt||((rows||[]).length+" kayıt"),onClose,cta:"Kapat",onCta:onClose},
-    (rows&&rows.length)?rows.map((r,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
+    (rows&&rows.length)?rows.map((r,i)=>h(r.git?"button":"div",{key:i,...(r.git?{onClick:r.git,type:"button"}:{}),style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",width:"100%",textAlign:"left",borderTop:i?"1px solid var(--line)":"none"}},
       h("div",{style:{flex:1,minWidth:0}},
         h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.t),
         r.alt?h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.alt):null),
@@ -1859,7 +1859,7 @@ function HakedisDuzenSheet({sales,onClose,onKaydet}){
           degisti?h("span",{style:{fontSize:11.5,fontWeight:800,color:"var(--gold)"}},tl(num(x.alisFiyat))+" → "+tl(alis)):null)); })
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde kale satışı yok."));
 }
-function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil,talepler,onTablaEmri,onTablaIptal}){
+function RaporA({d,ac,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil,talepler,onTablaEmri,onTablaIptal}){
   const [bol,setBol]=useState("paz");   // 🏢 üst bölüm: paz (pazarlama takip) / tikita (Tikita hesabı)
   const [alt,setAlt]=useState(odak?"hedef":"ozet");   // ozet/paz/kons/alacak/mus/hareket/hedef
   const [kod,setKod]=useState("hafta");
@@ -1990,13 +1990,15 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
   let tkCiro=0,tkTah=0,tkAdet=0,tkMal=0,tkMalsiz=0; const tkU={};
   tkSat.forEach(x=>{ const ad=num(x.adet), K=tkK(x), m=malOf(x), M=ad*m;
     tkCiro+=K; tkTah+=tkT(x); tkAdet+=ad; tkMal+=M; if(m<=0) tkMalsiz+=ad;
-    const key2=x.urunAd||"?"; const o=tkU[key2]||(tkU[key2]={u:key2,adet:0,ciro:0,tah:0,mal:0,malsiz:0});
+    const key2=x.urunAd||"?"; const o=tkU[key2]||(tkU[key2]={u:key2,id:"",adet:0,ciro:0,tah:0,mal:0,malsiz:0});
+    if(!o.id&&x.urunId) o.id=x.urunId;
     o.adet+=ad; o.ciro+=K; o.tah+=tkT(x); o.mal+=M; if(m<=0) o.malsiz+=ad; });
   const tkAlacak=Math.max(0,tkCiro-tkTah);
   const tkKar=tkCiro-tkMal;
   const tkOran=tkCiro>0?tkKar/tkCiro:0;
   const tkUList=Object.values(tkU).map(o=>({...o,kar:o.ciro-o.mal,oran:o.ciro>0?(o.ciro-o.mal)/o.ciro:0}));
   const tkSatir=x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.kullaniciAd||"?")+" · "+(x.yer||"—")+" · "+fmtS(x.tarih)});
+  const stokBul=o=>(d.stok||[]).find(u=>(o.id&&u.id===o.id)||(u.ad||"").toLocaleLowerCase("tr")===(o.u||"").toLocaleLowerCase("tr"))||null;
   const tkDet={
     ciro:()=>({ik:"💰",hex:"#16a34a",baslik:"Tikita cirosu — pazarlamacıya satılan",
       rows:srt(tkSat).map(x=>({...tkSatir(x),v:tl(tkK(x)),renk:"var(--green)"}))}),
@@ -2014,7 +2016,8 @@ function RaporA({d,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorev
         v:"%"+Math.round(o.oran*100),renk:o.oran<0?"var(--red)":"var(--cyan)"}))}),
     malsiz:()=>({ik:"⚠️",hex:"#c2410c",baslik:"Üretim maliyeti tanımsız ürünler",
       rows:tkUList.filter(o=>o.malsiz>0).sort((a2,b2)=>b2.malsiz-a2.malsiz).map(o=>({t:o.u,
-        alt:o.malsiz+" adette maliyet yok · ciro "+tl(o.ciro),v:tl(o.ciro),renk:"#c2410c"}))}),
+        alt:o.malsiz+" adette maliyet yok · ciro "+tl(o.ciro),v:"maliyet gir ›",renk:"#c2410c",
+        git:()=>{ const su=stokBul(o); setDet(null); if(su&&ac) ac({tip:"urunDuzen",u:su}); }}))}),
     urunAd:()=>({ik:"📦",hex:"#334155",baslik:"Ürün bazında adet",
       rows:tkUList.slice().sort((a,b)=>b.adet-a.adet).map(o=>({t:o.u,alt:"ciro "+tl(o.ciro),v:o.adet+" adet",renk:"var(--txt)"}))}),
   };
@@ -2558,7 +2561,7 @@ function App(){
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla,fotoMap});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler});
-  else ekran=h(RaporA,{d,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
+  else ekran=h(RaporA,{d,ac:setModal,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
   return h("div",null,
     h(KomutaBar,{gorunum,yan:yanMenu,onGorunum:gorunumTog,onAyar:()=>setModal({tip:"komutaAyar"}),onTema:()=>setModal({tip:"tema"}),onCikis:cikisYap}),
     h("div",{className:"tk-barbosluk"}),
