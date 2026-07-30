@@ -61,7 +61,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v76";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v77";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -997,17 +997,44 @@ function CantaSheet({d,onClose,onConfirm,bekle}){
   const liste=bosalt?d.cephane.filter(u=>num(u.canta)>0):d.cephane;
   const secili=liste.filter(u=>num(lines[u.id])>0);
   const toplam=secili.reduce((s,u)=>s+num(lines[u.id]),0);
+  const [toplu,setToplu]=useState("");        // 📦 hepsine uygulanacak adet
+  const [uyari,setUyari]=useState("");        // geçici uyarı — kalıcı değil
+  useEffect(()=>{ if(!uyari) return; const t=setTimeout(()=>setUyari(""),4500); return ()=>clearTimeout(t); },[uyari]);
+  const kisaLst=(arr)=>arr.slice(0,3).map(x=>x.ad+" "+x.n).join(" · ")+(arr.length>3?(" +"+(arr.length-3)+" ürün"):"");
   const setLn=(u,val)=>{ if(val===""){ setLines(s=>({...s,[u.id]:""})); return; }
-    let n=num(val); if(bosalt&&n>num(u.canta)) n=num(u.canta); if(n<0) n=0;
+    let n=num(val); if(n<0) n=0;
+    if(bosalt){ if(n>num(u.canta)) n=num(u.canta); }
+    else if(n>num(u.stokta)){ n=num(u.stokta); setUyari(u.ad+" için atölyede "+num(u.stokta)+" adet var — o kadarı eklendi."); }
     setLines(s=>({...s,[u.id]:n})); };
-  const tog=m=>{ setMod(m); setLines({}); };
+  // 📦 toplu doldur — her üründen istenen kadar, stok yetmiyorsa olduğu kadar
+  const topluUygula=()=>{ const n=Math.max(0,Math.round(num(toplu))); if(n<=0) return;
+    const yeni={}, eksik=[], yok=[];
+    liste.forEach(u=>{ const tavan=bosalt?num(u.canta):num(u.stokta); const v=Math.min(n,tavan);
+      if(v>0) yeni[u.id]=v;
+      if(tavan<=0) yok.push(u.ad); else if(tavan<n) eksik.push({ad:u.ad,n:tavan}); });
+    setLines(yeni);
+    const par=[];
+    if(eksik.length) par.push(eksik.length+" üründe stok yetmedi, olduğu kadarı eklendi: "+kisaLst(eksik));
+    if(yok.length) par.push(yok.length+" ürün stokta yok, eklenmedi");
+    setUyari(par.join(" · "));
+  };
+  const tog=m=>{ setMod(m); setLines({}); setToplu(""); setUyari(""); };
   const tb=(m,ik,txt)=>h("button",{onClick:()=>tog(m),style:{flex:1,padding:"10px 8px",borderRadius:12,fontSize:13.5,fontWeight:800,
     background:mod===m?"#1b1e25":"var(--surf2)",color:mod===m?"#fff":"var(--mut)",border:"1px solid "+(mod===m?"#1b1e25":"var(--line)")}},ik+" "+txt);
   return h(Sheet,{ik:bosalt?"📤":"🎒",hex:"#d97b12",baslik:bosalt?"Çantayı boşalt":"Çantayı doldur",
     alt:bosalt?"sahadan atölyeye ürün iade et":"atölyeden sahaya ürün al",onClose,
     cta:bekle?"⏳…":(bosalt?("📤 "+toplam+" ürünü atölyeye bırak"):("🎒 "+toplam+" ürünü çantaya al")),disabled:!secili.length||bekle,
     onCta:()=>onConfirm(secili.map(u=>({id:u.id,ad:u.ad,adet:num(lines[u.id])})),mod)},
-    h("div",{style:{display:"flex",gap:8,marginBottom:16}},tb("doldur","🎒","Doldur"),tb("bosalt","📤","Boşalt")),
+    h("div",{style:{display:"flex",gap:8,marginBottom:12}},tb("doldur","🎒","Doldur"),tb("bosalt","📤","Boşalt")),
+    liste.length?h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10}},
+      h("input",{type:"number",inputMode:"numeric",placeholder:"adet",value:toplu,onChange:e=>setToplu(e.target.value),
+        style:{...inp,width:88,textAlign:"center",padding:"11px 8px",fontSize:15}}),
+      h("button",{onClick:topluUygula,disabled:num(toplu)<=0,style:{flex:1,padding:"12px 10px",borderRadius:12,fontSize:13.5,fontWeight:800,
+        background:num(toplu)>0?"var(--gold)":"var(--surf2)",color:num(toplu)>0?"#2a1408":"var(--mut2)",border:"1px solid "+(num(toplu)>0?"var(--gold)":"var(--line)")}},"Hepsine uygula"),
+      Object.keys(lines).length?h("button",{onClick:()=>{ setLines({}); setToplu(""); setUyari(""); },
+        style:{flexShrink:0,padding:"12px 13px",borderRadius:12,fontSize:12.5,fontWeight:800,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--mut)"}},"Temizle"):null):null,
+    uyari?h("div",{className:"fade",style:{padding:"9px 12px",borderRadius:11,background:"#fff7ed",border:"1px solid #fdba74",
+      fontSize:11.5,fontWeight:700,color:"#9a3412",marginBottom:10,lineHeight:1.45}},uyari):null,
     liste.length?liste.map((u,i)=>h("div",{key:u.id||i,style:{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i?"1px solid var(--line)":"none"}},
       h("div",{style:{flex:1,minWidth:0}},
         h("div",{style:{fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
