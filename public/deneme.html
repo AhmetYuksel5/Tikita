@@ -61,7 +61,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v77";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v78";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -901,27 +901,40 @@ function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,hak=0,ganimet=0,iad
   const nakit=tah+ganimet;   // pazarlamacının elindeki toplam para
   const tikita=nakit-hak;    // hakediş kesildikten sonra Tikita'ya kalan
   return {satAd,ciro,tah,konsAd,hak,ganimet,iade,nakit,tikita,bos:!(satAd||tah||konsAd||ganimet||iade||hak)}; }
-// komuta raporunu WhatsApp metnine çevir
+// komuta raporunu WhatsApp metnine çevir — kurumsal, tablo düzeni, emojisiz
 function raporMetni(v,recs){ v=v||{};
-  const L=["📡 Komuta Raporu · "+new Date().toLocaleString("tr-TR",{day:"2-digit",month:"long",hour:"2-digit",minute:"2-digit"}),""];
-  L.push("💰 Kale satışı: "+(v.satAd||0)+" adet · "+tl(v.ciro));
-  L.push("🧾 Kale tahsilatı: "+tl(v.tah));
-  if(v.ganimet>0) L.push("⚡ Gerilla peşin: "+tl(v.ganimet));
-  L.push("🫰 Hakediş: "+tl(v.hak));
-  L.push("🏢 Tikita'nın payı: "+tl(v.tikita!=null?v.tikita:(num(v.nakit)-num(v.hak))));
-  L.push("🏬 Konsinye bırakılan: "+(v.konsAd||0)+" adet");
-  if(v.iade>0) L.push("↩️ İade: "+v.iade+" adet");
-  const det=[];
-  (recs||[]).forEach(x=>{
-    if(x.tip==="satis"&&!x.gerilla) det.push("• 💰 "+num(x.adet)+"× "+(x.urunAd||"?")+" — "+tl(num(x.adet)*num(x.satisFiyat))+(x.yer?(" ("+x.yer+")"):""));
-    else if(x.tip==="satis"&&x.gerilla) det.push("• ⚡ "+num(x.adet)+"× "+(x.urunAd||"?")+" — "+tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)));
-    else if(x.tip==="tahsilat") det.push("• 🧾 "+tl(x.tutar)+" tahsilat"+(x.yer?(" ("+x.yer+")"):""));
-    else if(x.tip==="konsinye") det.push("• 🏬 "+num(x.adet)+"× "+(x.urunAd||"?")+" konsinye"+(x.yer?(" ("+x.yer+")"):""));
-    else if(x.tip==="iade") det.push("• ↩️ "+num(x.adet)+"× "+(x.urunAd||"?")+" iade");
-    else if(x.tip==="tabla") det.push("• 🧹 Tabla +"+tl(x.tutar)); });
-  if(det.length){ L.push("","— İşlemler —"); L.push(...det.slice(0,25)); if(det.length>25) L.push("… +"+(det.length-25)+" işlem daha"); }
-  L.push("","⚔️ Tikita");
-  return L.join("\n"); }
+  const R=recs||[];
+  const kisi=((R.find(x=>x.kullaniciAd)||{}).kullaniciAd)||"";
+  const tarih=new Date().toLocaleString("tr-TR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const sol=(t,w)=>{ t=String(t); return t.length>=w?t.slice(0,w):t+" ".repeat(w-t.length); };
+  const sag=(t,w)=>{ t=String(t); return t.length>=w?t:" ".repeat(w-t.length)+t; };
+  const sat=(ad,orta,tut)=>sol(ad,13)+sag(orta||"",7)+sag(tut||"",12);
+  const T=[];
+  if(v.satAd) T.push(sat("Satış",v.satAd+" ad",tl(v.ciro)));
+  if(v.ganimet>0) T.push(sat("  gerilla","",tl(v.ganimet)));
+  if(v.tah) T.push(sat("Tahsilat","",tl(v.tah)));
+  if(v.konsAd) T.push(sat("Konsinye",v.konsAd+" ad",""));
+  if(v.iade>0) T.push(sat("İade",v.iade+" ad",""));
+  T.push("-".repeat(32));
+  T.push(sat("Hakediş","",tl(v.hak)));
+  T.push(sat("Tikita payı","",tl(v.tikita!=null?v.tikita:(num(v.nakit)-num(v.hak)))));
+  // işlem dökümü — türe göre gruplu, tekrarsız
+  const grup=[
+    ["SATIŞ",R.filter(x=>x.tip==="satis"&&!x.gerilla),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",tl(num(x.adet)*num(x.satisFiyat))]],
+    ["GERİLLA",R.filter(x=>x.tip==="satis"&&x.gerilla),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat))]],
+    ["TAHSİLAT",R.filter(x=>x.tip==="tahsilat"),x=>[(x.yer||"-"),"",tl(x.tutar)]],
+    ["KONSİNYE",R.filter(x=>x.tip==="konsinye"),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",""]],
+    ["İADE",R.filter(x=>x.tip==="iade"),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",""]],
+    ["TABLA",R.filter(x=>x.tip==="tabla"),x=>[(x.yer||"Atölye"),"",tl(x.tutar)]],
+  ];
+  let kalan=20; const D=[];
+  grup.forEach(([bas,arr,f])=>{ if(!arr.length||kalan<=0) return;
+    D.push("",bas);
+    arr.slice(0,kalan).forEach(x=>{ const c=f(x); D.push(sol(c[0],20)+sag(c[2],12)); kalan--; }); });
+  const toplamIslem=grup.reduce((s2,g)=>s2+g[1].length,0);
+  if(toplamIslem>20) D.push("","+"+(toplamIslem-20)+" işlem daha");
+  return ["TİKİTA - KOMUTA RAPORU",tarih+(kisi?(" - "+kisi):""),"","```",...T,...D,"```"]
+    .map(t=>String(t).replace(/[ ]+$/,"")).join("\n"); }
 // genel ayrıntı listesi modalı — {t, alt, v, renk} satırları
 function DetayListSheet({ik,hex,baslik,alt,rows,onClose}){
   return h(Sheet,{ik,hex,baslik,alt:alt||((rows||[]).length+" kayıt"),onClose,cta:"Kapat",onCta:onClose},
