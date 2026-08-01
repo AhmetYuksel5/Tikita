@@ -61,7 +61,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v78";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v79";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -901,39 +901,63 @@ function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,hak=0,ganimet=0,iad
   const nakit=tah+ganimet;   // pazarlamacının elindeki toplam para
   const tikita=nakit-hak;    // hakediş kesildikten sonra Tikita'ya kalan
   return {satAd,ciro,tah,konsAd,hak,ganimet,iade,nakit,tikita,bos:!(satAd||tah||konsAd||ganimet||iade||hak)}; }
-// komuta raporunu WhatsApp metnine çevir — kurumsal, tablo düzeni, emojisiz
+// komuta raporunu WhatsApp metnine çevir — satış · konsinye · tahsilat sırasıyla, emojisiz
 function raporMetni(v,recs){ v=v||{};
   const R=recs||[];
   const kisi=((R.find(x=>x.kullaniciAd)||{}).kullaniciAd)||"";
   const tarih=new Date().toLocaleString("tr-TR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
   const sol=(t,w)=>{ t=String(t); return t.length>=w?t.slice(0,w):t+" ".repeat(w-t.length); };
   const sag=(t,w)=>{ t=String(t); return t.length>=w?t:" ".repeat(w-t.length)+t; };
-  const sat=(ad,orta,tut)=>sol(ad,13)+sag(orta||"",7)+sag(tut||"",12);
-  const T=[];
-  if(v.satAd) T.push(sat("Satış",v.satAd+" ad",tl(v.ciro)));
-  if(v.ganimet>0) T.push(sat("  gerilla","",tl(v.ganimet)));
-  if(v.tah) T.push(sat("Tahsilat","",tl(v.tah)));
-  if(v.konsAd) T.push(sat("Konsinye",v.konsAd+" ad",""));
-  if(v.iade>0) T.push(sat("İade",v.iade+" ad",""));
-  T.push("-".repeat(32));
-  T.push(sat("Hakediş","",tl(v.hak)));
-  T.push(sat("Tikita payı","",tl(v.tikita!=null?v.tikita:(num(v.nakit)-num(v.hak)))));
-  // işlem dökümü — türe göre gruplu, tekrarsız
-  const grup=[
-    ["SATIŞ",R.filter(x=>x.tip==="satis"&&!x.gerilla),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",tl(num(x.adet)*num(x.satisFiyat))]],
-    ["GERİLLA",R.filter(x=>x.tip==="satis"&&x.gerilla),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat))]],
-    ["TAHSİLAT",R.filter(x=>x.tip==="tahsilat"),x=>[(x.yer||"-"),"",tl(x.tutar)]],
-    ["KONSİNYE",R.filter(x=>x.tip==="konsinye"),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",""]],
-    ["İADE",R.filter(x=>x.tip==="iade"),x=>[num(x.adet)+"x "+(x.urunAd||"?"),"",""]],
-    ["TABLA",R.filter(x=>x.tip==="tabla"),x=>[(x.yer||"Atölye"),"",tl(x.tutar)]],
-  ];
-  let kalan=20; const D=[];
-  grup.forEach(([bas,arr,f])=>{ if(!arr.length||kalan<=0) return;
-    D.push("",bas);
-    arr.slice(0,kalan).forEach(x=>{ const c=f(x); D.push(sol(c[0],20)+sag(c[2],12)); kalan--; }); });
-  const toplamIslem=grup.reduce((s2,g)=>s2+g[1].length,0);
-  if(toplamIslem>20) D.push("","+"+(toplamIslem-20)+" işlem daha");
-  return ["TİKİTA - KOMUTA RAPORU",tarih+(kisi?(" - "+kisi):""),"","```",...T,...D,"```"]
+  const sat=(a,b,c)=>sol(a,17)+sag(b||"",6)+sag(c||"",10);
+  const ciro=x=>num(x.adet)*num(x.satisFiyat);
+  const urunTop=arr=>{ const m={}; arr.forEach(x=>{ const k=x.urunAd||"?"; const o=m[k]||(m[k]={ad:k,adet:0,tut:0});
+      o.adet+=num(x.adet); o.tut+=ciro(x); }); return Object.values(m).sort((a,b)=>b.tut-a.tut); };
+  const adOf=arr=>arr.reduce((s2,x)=>s2+num(x.adet),0);
+  const tutOf=arr=>arr.reduce((s2,x)=>s2+ciro(x),0);
+  const L=[];
+  // 1) SATIŞ — gerilla · konsinyeden · toptan
+  const satis=R.filter(x=>x.tip==="satis");
+  const gruplar=[
+    ["Gerilla",satis.filter(x=>x.gerilla&&!x.toptan)],
+    ["Konsinyeden",satis.filter(x=>x.kaynak==="konsinye")],
+    ["Toptan",satis.filter(x=>x.toptan)],
+    ["Doğrudan",satis.filter(x=>!x.gerilla&&x.kaynak!=="konsinye")],
+  ].filter(g=>g[1].length);
+  if(gruplar.length){
+    L.push("SATIŞ");
+    gruplar.forEach(([ad,arr])=>{
+      L.push(sat(ad,adOf(arr)+" ad",tl(tutOf(arr))));
+      const uu=urunTop(arr);
+      if(uu.length===1) L.push(sat("  "+uu[0].ad,"",""));
+      else uu.slice(0,8).forEach(o=>L.push(sat("  "+o.ad,o.adet+"x",tl(o.tut)))); });
+    if(gruplar.length>1) L.push(sat("Toplam",adOf(satis)+" ad",tl(tutOf(satis))));
+  }
+  // 2) KONSİNYE — bırakılan · iade · satışa dönen
+  const birak=R.filter(x=>x.tip==="konsinye"), iade=R.filter(x=>x.tip==="iade");
+  const konsSat=satis.filter(x=>x.kaynak==="konsinye");
+  if(birak.length||iade.length||konsSat.length){
+    L.push("","KONSİNYE");
+    const kGrup=(etiket,arr,lim)=>{ if(!arr.length) return; L.push(sat(etiket,adOf(arr)+" ad",""));
+      const uu=urunTop(arr);
+      if(uu.length===1) L.push(sat("  "+uu[0].ad,"",""));
+      else uu.slice(0,lim).forEach(o=>L.push(sat("  "+o.ad,o.adet+"x",""))); };
+    kGrup("Bırakılan",birak,8);
+    kGrup("İade",iade,6);
+    if(konsSat.length) L.push(sat("Satışa dönen",adOf(konsSat)+" ad",""));
+  }
+  // 3) TAHSİLAT — pazarlamacı payı · Tikita payı
+  const nakit=num(v.nakit!=null?v.nakit:(num(v.tah)+num(v.ganimet)));
+  const hak=num(v.hak), tikita=num(v.tikita!=null?v.tikita:(nakit-hak));
+  const tabla=R.filter(x=>x.tip==="tabla").reduce((s2,x)=>s2+num(x.tutar),0);
+  if(nakit||hak||tikita){
+    L.push("","TAHSİLAT");
+    L.push(sat("Toplam","",tl(nakit)));
+    L.push(sat("Pazarlamacı payı","",tl(hak)));
+    if(tabla>0) L.push(sat("  tabla ücreti","",tl(tabla)));
+    L.push(sat("Tikita payı","",tl(tikita)));
+  }
+  if(!L.length) L.push("Bu dönemde işlem yok.");
+  return ["TİKİTA - KOMUTA RAPORU",tarih+(kisi?(" - "+kisi):""),"","```",...L,"```"]
     .map(t=>String(t).replace(/[ ]+$/,"")).join("\n"); }
 // genel ayrıntı listesi modalı — {t, alt, v, renk} satırları
 function DetayListSheet({ik,hex,baslik,alt,rows,onClose}){
