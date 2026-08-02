@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="H7";   // komuta (admin) deneme sürümü
+const SURUM="H8";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1145,6 +1145,66 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
       "Maliyet ~"+tl(maliyet)+(num(adet)>0?(" · birim ~"+tl(maliyet/num(adet))):"")+" (makine 12₺/sa"+(filSec?" + filament":"")+")"):null);
 }
 
+// 🔧 MONTAJ GÖREVLERİ — admin görev açar, montaj personeli teslim alır/verir, hakediş ödenir
+function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onClose,bekle}){
+  const [yeni,setYeni]=useState(null);   // {urunId,adet,birimUcret,kullaniciId,not}
+  const [sekme,setSekme]=useState("acik");
+  const personel=(kullanicilar||[]).filter(k=>k.rol==="montaj"&&!k.arsiv);
+  const kad={}; (kullanicilar||[]).forEach(k=>kad[k.id]=k.ad||"?");
+  const G=(gorevler||[]).slice().sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
+  const acik=G.filter(g=>g.durum!=="teslim"), biten=G.filter(g=>g.durum==="teslim");
+  const liste=sekme==="acik"?acik:biten;
+  const borc=biten.filter(g=>!g.odendi).reduce((s2,g)=>s2+num(g.teslimAdet)*num(g.birimUcret),0);
+  if(yeni){ const u=(stok||[]).find(x=>x.id===yeni.urunId);
+    return h(Sheet,{ik:"🔧",hex:"#0369a1",baslik:"Montaj görevi",alt:"",onClose:()=>setYeni(null),
+      cta:bekle?"⏳…":"Görevi ver",disabled:!yeni.urunId||!yeni.kullaniciId||num(yeni.adet)<1||bekle,
+      onCta:()=>{ onKaydet({urunId:yeni.urunId,urunAd:u?u.ad:"",adet:num(yeni.adet),birimUcret:num(yeni.birimUcret),
+        kullaniciId:yeni.kullaniciId,kullaniciAd:kad[yeni.kullaniciId]||"",not:(yeni.not||"").trim()}); setYeni(null); }},
+      h("button",{onClick:()=>setYeni(null),style:{marginBottom:12,fontSize:12.5,fontWeight:800,color:"var(--cyan)",background:"none",padding:0}},"‹ Geri"),
+      h("div",{className:"lbl",style:{marginBottom:8}},"Ürün"),
+      h("select",{value:yeni.urunId,onChange:e=>setYeni(o=>({...o,urunId:e.target.value})),style:{...inp,fontSize:15,marginBottom:14}},
+        h("option",{value:""},"— ürün seç —"),
+        (stok||[]).map(x=>h("option",{key:x.id,value:x.id},x.ad+" · montajda "+x.montajda))),
+      h("div",{className:"lbl",style:{marginBottom:8}},"Personel"),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
+        personel.length?personel.map(k=>h(Chip,{key:k.id,on:yeni.kullaniciId===k.id,onClick:()=>setYeni(o=>({...o,kullaniciId:k.id}))},(k.simge||"")+" "+k.ad))
+          :h("div",{style:{fontSize:12.5,color:"var(--mut)"}},"Montaj personeli yok — Ekip'ten ekle.")),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
+          h("input",{type:"number",inputMode:"numeric",value:yeni.adet,onChange:e=>setYeni(o=>({...o,adet:e.target.value})),style:inp})),
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Birim ücret ₺"),
+          h("input",{type:"number",inputMode:"decimal",step:"any",value:yeni.birimUcret,onChange:e=>setYeni(o=>({...o,birimUcret:e.target.value})),style:inp}))),
+      num(yeni.adet)>0&&num(yeni.birimUcret)>0?h("div",{style:{textAlign:"right",fontSize:13,fontWeight:800,color:"var(--gold)",marginBottom:14}},
+        "Toplam "+tlk(num(yeni.adet)*num(yeni.birimUcret))):null,
+      h("div",{className:"lbl",style:{marginBottom:8}},"Not"),
+      h("input",{value:yeni.not||"",onChange:e=>setYeni(o=>({...o,not:e.target.value})),style:inp})); }
+  return h(Sheet,{ik:"🔧",hex:"#0369a1",baslik:"Montaj görevleri",alt:borc>0?("ödenecek "+tlk(borc)):"",onClose,cta:"Kapat",onCta:onClose,
+    basEk:h("button",{onClick:()=>setYeni({urunId:"",adet:"",birimUcret:"",kullaniciId:(personel[0]&&personel[0].id)||"",not:""}),title:"Görev ver",
+      style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:19,fontWeight:800,color:"var(--cyan)"}},"+")},
+    h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+      [["acik","Açık",acik.length],["biten","Biten",biten.length]].map(([k,lbl,n])=>
+        h("button",{key:k,onClick:()=>setSekme(k),style:{flex:1,padding:"10px 8px",borderRadius:12,fontSize:13.5,fontWeight:800,
+          background:sekme===k?"#1b1e25":"var(--surf2)",color:sekme===k?"#fff":"var(--mut)",border:"1px solid "+(sekme===k?"#1b1e25":"var(--line)")}},lbl+" "+n))),
+    liste.length?liste.map((g,i)=>{
+      const dur=g.durum==="teslim"?["Teslim edildi","var(--green)"]:g.durum==="alindi"?["Montajda","var(--cyan)"]:["Bekliyor","var(--gold)"];
+      const tutar=(g.durum==="teslim"?num(g.teslimAdet):num(g.adet))*num(g.birimUcret);
+      return h("div",{key:g.id||i,style:{padding:"11px 0",borderTop:i?"1px solid var(--line)":"none"}},
+        h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}},
+          h("div",{style:{flex:1,minWidth:0,fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.urunAd||"?"),
+          h("span",{style:{fontSize:11,fontWeight:800,color:dur[1],flexShrink:0}},dur[0])),
+        h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 10px",fontSize:11.5,color:"var(--mut)",fontWeight:700}},
+          h("span",null,g.kullaniciAd||kad[g.kullaniciId]||"?"),
+          h("span",null,"istenen "+num(g.adet)),
+          num(g.alinanAdet)>0?h("span",null,"alınan "+num(g.alinanAdet)):null,
+          num(g.teslimAdet)>0?h("span",{style:{color:"var(--green)"}},"teslim "+num(g.teslimAdet)):null,
+          h("span",{style:{color:"var(--gold)"}},tlk(tutar)),
+          h("span",null,fmtS(g.tarih))),
+        h("div",{style:{display:"flex",gap:8,marginTop:8}},
+          (g.durum==="teslim"&&!g.odendi)?h("button",{onClick:()=>onOde(g),style:{flex:1,padding:"9px 10px",borderRadius:11,background:"var(--green)",color:"#fff",fontSize:12.5,fontWeight:800}},"Ödendi işaretle"):null,
+          (g.durum==="teslim"&&g.odendi)?h("span",{style:{flex:1,fontSize:12,fontWeight:800,color:"var(--green)"}},"Ödendi · "+fmtS(g.odemeTarih)):null,
+          g.durum!=="teslim"?h("button",{onClick:()=>onSil(g),style:{flexShrink:0,padding:"9px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:12.5,fontWeight:800}},"Görevi iptal et"):null)); })
+      :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},sekme==="acik"?"Açık görev yok.":"Tamamlanan görev yok."));
+}
 // 🧵 SARF MALZEMESİ — anahtarlık halkası, zincir, mıknatıs… stok elle düzenlenir, ürün maliyetine girer
 function SarfYonetimSheet({sarflar,stok,onKaydet,onSil,onClose,bekle}){
   const [duzen,setDuzen]=useState(null);   // {id?,ad,birim,stokta,birimFiyat}
@@ -1282,6 +1342,7 @@ function KullaniciSheet({u,onKaydet,bekle}){
     h("div",{className:"lbl",style:{marginBottom:8}},"Rol"),
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       h(Chip,{on:rol==="pazarlamaci",onClick:()=>setRol("pazarlamaci")},"Pazarlamacı"),
+      h(Chip,{on:rol==="montaj",onClick:()=>setRol("montaj")},"Montaj"),
       h(Chip,{on:rol==="admin",onClick:()=>setRol("admin")},"Yönetici")),
     h("div",{className:"lbl",style:{marginBottom:8}},"Simge"),
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
@@ -1859,7 +1920,8 @@ function Ekip({d,ac,kullanicilar,hareketler,talepler}){
   const aktif=hepsi.filter(u=>!u.arsiv);
   const denemeMi=u=>!!(u.demo||u.minimal);
   const yonetici=aktif.filter(u=>u.rol==="admin"&&!denemeMi(u));
-  const pazarlamaci=aktif.filter(u=>u.rol!=="admin"&&!denemeMi(u)).sort((a,b)=>kayit(b).guc-kayit(a).guc);
+  const pazarlamaci=aktif.filter(u=>u.rol!=="admin"&&u.rol!=="montaj"&&!denemeMi(u)).sort((a,b)=>kayit(b).guc-kayit(a).guc);
+  const montajci=aktif.filter(u=>u.rol==="montaj"&&!denemeMi(u));
   const deneme=aktif.filter(denemeMi);
   const arsiv=hepsi.filter(u=>u.arsiv);
   const grup=(baslik,list)=>list.length?h(React.Fragment,{key:baslik},
@@ -1876,6 +1938,11 @@ function Ekip({d,ac,kullanicilar,hareketler,talepler}){
       background:"var(--surf)",border:"1.5px dashed var(--cyan)",color:"var(--cyan)",fontSize:14,fontWeight:800}},"Yeni kullanıcı ekle"),
     grup("Yöneticiler",yonetici),
     grup("Pazarlamacılar",pazarlamaci),
+    grup("Montaj personeli",montajci),
+    h("button",{onClick:()=>ac({tip:"montajYonet"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:14,borderRadius:14,marginTop:16,
+      background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
+      h(Icn,{n:"box",c:"#0369a1",s:19}),h("span",{style:{flex:1,minWidth:0}},"Montaj görevleri"),
+      h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},"›")),
     grup("Denemeler",deneme),
     grup("Arşiv",arsiv),
     hepsi.length?null:h("div",{style:{padding:"24px 0",textAlign:"center",color:"var(--mut)"}},"Kayıtlı hesap yok."));
@@ -2482,6 +2549,7 @@ function App(){
         hareketler=useColl("pazarlama_hareket"), kullanicilar=useColl("kullanici"), musteriler=useColl("musteri");
   const filamentler=useColl("filament");
   const sarflar=useColl("sarf");   // 🧵 sarf malzemesi (anahtarlık halkası, zincir, mıknatıs…)
+  const montajGorev=useColl("montaj_gorev");   // 🔧 montaj personeli görevleri
   const stokHareket=useColl("stok_hareket");
   const urunFoto=useColl("urun_foto");   // 🖼️ ürün fotoğrafları (pazarlamacı uygulamasıyla ortak)
   const fotoMap=useMemo(()=>{ const m={};
@@ -2740,7 +2808,8 @@ function App(){
   useEffect(()=>{ if(!BEN_ID){ location.replace("index.html?giris=1"); return; }
     if(kullanicilar&&kullanicilar.length){ const me=kullanicilar.find(u=>u.id===BEN_ID);
       if(!me){ location.replace("index.html?giris=1"); return; }
-      if(me.rol!=="admin") location.replace("deneme.html"); } },[kullanicilar]);
+      if(me.rol==="montaj") location.replace("montaj.html");
+      else if(me.rol!=="admin") location.replace("deneme.html"); } },[kullanicilar]);
   const benKul=kullanicilar?kullanicilar.find(u=>u.id===BEN_ID):undefined;
   const yetkili=!!(BEN_ID&&benKul&&benKul.rol==="admin");
   const engelle=h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
@@ -2785,6 +2854,15 @@ function App(){
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
     modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap,onRota:talepRota,onSil:talepSil}),
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
+    modal&&modal.tip==="montajYonet"&&h(MontajYonetimSheet,{gorevler:montajGorev,stok:d.stok,kullanicilar,bekle:isBekle,onClose:()=>setModal(null),
+      onKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
+        try{ await save("montaj_gorev",{...g,durum:"acik",odendi:false,tarih:new Date().toISOString()}); say("Görev verildi · "+(g.urunAd||"")); }
+        catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
+      onSil:async(g)=>{ if(!g||!g.id) return; if(!confirm("Bu montaj görevi iptal edilsin mi?")) return;
+        try{ await remove("montaj_gorev",g.id); say("Görev iptal edildi"); }catch(e){ console.error(e); say("Silinemedi"); } },
+      onOde:async(g)=>{ if(!g||!g.id||isBekle) return; setIsBekle(true);
+        try{ await save("montaj_gorev",{id:g.id,odendi:true,odemeTarih:new Date().toISOString()}); say("Ödendi olarak işaretlendi"); }
+        catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }}),
     modal&&modal.tip==="sarfYonet"&&h(SarfYonetimSheet,{sarflar,stok:d.stok,bekle:isBekle,onClose:()=>setModal(null),
       onKaydet:async(x)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("sarf",{...(x.id?{id:x.id}:{}),ad:x.ad,birim:x.birim,stokta:num(x.stokta),birimFiyat:num(x.birimFiyat)}); say(x.id?"Güncellendi":"Malzeme eklendi"); }
