@@ -39,8 +39,10 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="M2";
-let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}
+const SURUM="M3";
+let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}
+let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // 👁 yönetici görünümü
+let BEN_ID=AS_ID||REAL_ID;
 
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
 const tl=n=>Math.round(num(n)).toLocaleString("tr-TR")+" ₺";
@@ -134,11 +136,12 @@ function App(){
   const [sekme,setSekme]=useState("acik");
   const say=m=>{ setToastMsg(m); setTimeout(()=>setToastMsg(""),2600); };
 
-  useEffect(()=>{ if(!BEN_ID){ location.replace("index.html?giris=1"); return; }
-    if(kullanicilar&&kullanicilar.length){ const me=kullanicilar.find(u=>u.id===BEN_ID);
-      if(!me){ location.replace("index.html?giris=1"); return; }
-      if(me.rol==="admin"){ location.replace("admin.html"); return; }
-      if(me.rol!=="montaj") location.replace("deneme.html"); } },[kullanicilar]);
+  useEffect(()=>{ if(!REAL_ID){ location.replace("index.html?giris=1"); return; }
+    if(kullanicilar&&kullanicilar.length){ const real=kullanicilar.find(u=>u.id===REAL_ID);
+      if(!real){ location.replace("index.html?giris=1"); return; }
+      if(AS_ID){ if(real.rol!=="admin") location.replace("index.html?giris=1"); return; }   // 👁 yalnız yönetici
+      if(real.rol==="admin"){ location.replace("admin.html"); return; }
+      if(real.rol!=="montaj") location.replace("deneme.html"); } },[kullanicilar]);
 
   const ben=(kullanicilar||[]).find(u=>u.id===BEN_ID)||null;
   const yuk=!kullanicilar||!gorevler||!urunler;
@@ -191,8 +194,7 @@ function App(){
       say(sg+" adet teslim"+(ks>0?(" · "+ks+" kusurlu zayiat"):"")+(kalan>0?(" · "+kalan+" sende kaldı"):"")+" · "+tlk(sg*num(g.birimUcret))); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
 
-  if(!BEN_ID||(kullanicilar&&kullanicilar.length&&ben&&ben.rol!=="montaj"))
-    return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--mut)",fontWeight:700}},"Yönlendiriliyor…");
+  if(!BEN_ID) return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--mut)",fontWeight:700}},"Yönlendiriliyor…");
   if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Yükleniyor…"));
@@ -200,12 +202,16 @@ function App(){
   const sekmeBtn=(k,lbl,n)=>h("button",{onClick:()=>setSekme(k),style:{flex:1,padding:"10px 6px",borderRadius:12,fontSize:13,fontWeight:800,
     background:sekme===k?"#1b1e25":"var(--surf2)",color:sekme===k?"#fff":"var(--mut)",border:"1px solid "+(sekme===k?"#1b1e25":"var(--line)")}},lbl+(n?(" "+n):""));
 
-  return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 24px"}},
+  return h("div",null,
+    AS_ID?h("div",{style:{background:"#1e3a5f",color:"#fff",fontSize:12,fontWeight:800,padding:"calc(env(safe-area-inset-top,0px) + 7px) 14px 7px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}},
+      h("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"👁 "+((ben&&ben.ad)||"kullanıcı")+" ekranı · yönetici görünümü"),
+      h("button",{onClick:()=>location.href="admin.html",style:{flexShrink:0,padding:"5px 11px",borderRadius:8,background:"rgba(255,255,255,.22)",color:"#fff",fontSize:11.5,fontWeight:800}},"← Komuta")):null,
+  h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 24px"}},
     h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:16}},
       h("img",{src:"tikita-logo.png",alt:"Tikita",style:{height:34,width:"auto"}}),
       h("div",{style:{flex:1,minWidth:0}}),
       h("div",{style:{fontSize:13,fontWeight:800,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(ben&&ben.ad)||""),
-      h("button",{onClick:()=>{ if(confirm("Çıkış yapmak istiyor musunuz?")) location.href="index.html?giris=1"; },
+      AS_ID?null:h("button",{onClick:()=>{ if(confirm("Çıkış yapmak istiyor musunuz?")) location.href="index.html?giris=1"; },
         style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:15,color:"var(--red)",flexShrink:0}},"⏻")),
 
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
@@ -251,7 +257,7 @@ function App(){
       alt:"istenen "+num(sheet.g.adet)+" adet",mevcut:num(sheet.g.adet),ctaTxt:"Teslim aldım",bekle,
       onClose:()=>setSheet(null),onOk:n=>teslimAl(sheet.g,n)}):null,
     sheet&&sheet.tip==="et"?h(TeslimSheet,{g:sheet.g,bekle,onClose:()=>setSheet(null),onOk:p=>teslimEt(sheet.g,p)}):null,
-    h(Toast,{msg:toastMsg}));
+    h(Toast,{msg:toastMsg})));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(h(App));
 </script>
