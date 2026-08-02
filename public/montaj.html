@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Tikita · Montaj</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+  :root{
+    --bg:#f4f2ee; --surf:#ffffff; --surf2:#faf8f4; --line:#ece7df;
+    --txt:#1b1e25; --mut:#7c818c; --mut2:#a9adb6;
+    --gold:#d97b12; --cyan:#0e8fce; --violet:#7c46e6; --green:#16a34a; --red:#e0483c;
+  }
+  html,body{background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none}
+  input,textarea,select{-webkit-user-select:text;user-select:text}
+  #root{max-width:520px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:40px}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  .card{background:var(--surf);border:1px solid var(--line);border-radius:20px;box-shadow:0 6px 22px rgba(28,30,45,.05)}
+  .lbl{font-size:12px;font-weight:800;letter-spacing:1.1px;color:var(--mut);text-transform:uppercase}
+  .fade{animation:fade .45s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes sheetup{from{transform:translateY(101%)}to{transform:none}}
+  @keyframes bdin{from{opacity:0}to{opacity:1}}
+  ::-webkit-scrollbar{display:none}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
+const __app=initializeApp(cfg);
+let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
+catch(e){ db=getFirestore(__app); }
+const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
+const SURUM="M1";
+let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}
+
+const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+const tl=n=>Math.round(num(n)).toLocaleString("tr-TR")+" ₺";
+const tlk=n=>(Math.round(num(n)*100)/100).toLocaleString("tr-TR",{maximumFractionDigits:2})+" ₺";
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
+const gerekenP=(u,p)=>Math.max(1,Math.round(num(((u&&u.parcaAdet)||{})[p]||1)));
+async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,coll,id),d,{merge:true}); return id; }
+
+function useColl(name){ const [rows,setRows]=useState(null);
+  useEffect(()=>{ const un=onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),
+    e=>{ console.error(name,e); setRows(r=>r===null?[]:r); });
+    return ()=>un(); },[]);
+  return rows; }
+
+const inp={width:"100%",padding:"13px 14px",borderRadius:13,border:"1px solid var(--line)",background:"var(--surf2)",fontSize:17,fontWeight:800,color:"var(--txt)",fontFamily:"inherit",outline:"none"};
+
+function Toast({msg}){ if(!msg) return null;
+  return h("div",{className:"fade",style:{position:"fixed",left:"50%",bottom:28,transform:"translateX(-50%)",zIndex:60,
+    background:"#1b1e25",color:"#fff",padding:"12px 18px",borderRadius:14,fontSize:13.5,fontWeight:600,
+    boxShadow:"0 12px 40px rgba(0,0,0,.28)",maxWidth:"88%",textAlign:"center"}},msg); }
+
+function Sheet({ik,hex,baslik,alt,onClose,cta,onCta,disabled,children}){
+  return h("div",{onClick:onClose,style:{position:"fixed",inset:0,zIndex:70,background:"rgba(10,15,25,.46)",
+    display:"flex",alignItems:"flex-end",justifyContent:"center",animation:"bdin .2s ease both"}},
+    h("div",{onClick:e=>e.stopPropagation(),style:{width:"100%",maxWidth:520,background:"var(--surf)",borderRadius:"24px 24px 0 0",
+      padding:"18px 18px calc(env(safe-area-inset-bottom,0px) + 18px)",maxHeight:"88vh",overflowY:"auto",animation:"sheetup .28s cubic-bezier(.2,.7,.2,1) both"}},
+      h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:16}},
+        ik?h("div",{style:{width:44,height:44,borderRadius:14,background:(hex||"#0e8fce")+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}},ik):null,
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:18,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},baslik),
+          alt?h("div",{style:{fontSize:12,color:"var(--mut)",marginTop:2}},alt):null),
+        h("button",{onClick:onClose,style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,color:"var(--mut)",flexShrink:0}},"✕")),
+      children,
+      cta?h("button",{onClick:onCta,disabled:disabled,style:{width:"100%",marginTop:18,padding:15,borderRadius:16,
+        background:disabled?"var(--surf2)":(hex||"#0e8fce"),color:disabled?"var(--mut2)":"#fff",fontSize:15,fontWeight:800}},cta):null));
+}
+function Stat({v,l,renk,onClick}){
+  return h(onClick?"button":"div",{onClick:onClick||undefined,className:"card",style:{padding:"14px 13px",textAlign:"left",width:"100%",boxShadow:"none"}},
+    h("div",{style:{fontSize:20,fontWeight:800,color:renk||"var(--txt)",lineHeight:1.1}},v),
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",fontWeight:700,marginTop:3}},l));
+}
+
+const DURUM={
+  acik:{ad:"Bekliyor",renk:"var(--gold)",bg:"#fff7ed",bd:"#fdba74"},
+  alindi:{ad:"Montajda",renk:"var(--cyan)",bg:"#eff8fd",bd:"#a5d8f3"},
+  teslim:{ad:"Teslim edildi",renk:"var(--green)",bg:"#f0fdf4",bd:"#86efac"},
+};
+
+// adet onay penceresi — teslim al / teslim et
+function AdetSheet({baslik,alt,hex,ik,mevcut,ctaTxt,onClose,onOk,bekle}){
+  const [n,setN]=useState(String(mevcut||""));
+  const v=Math.max(0,Math.floor(num(n)));
+  return h(Sheet,{ik,hex,baslik,alt,onClose,cta:bekle?"⏳…":(ctaTxt+" · "+v+" adet"),disabled:v<1||bekle,onCta:()=>onOk(v)},
+    h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
+    h("input",{type:"number",inputMode:"numeric",value:n,onChange:e=>setN(e.target.value),onFocus:e=>e.target.select(),style:{...inp,textAlign:"center",fontSize:24}}),
+    h("div",{style:{display:"flex",gap:8,marginTop:12}},
+      [mevcut,Math.floor(mevcut/2)].filter((x,i,a)=>x>0&&a.indexOf(x)===i).map(x=>
+        h("button",{key:x,onClick:()=>setN(String(x)),style:{flex:1,padding:"11px 8px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,color:"var(--mut)"}},x+" adet"))));
+}
+
+function App(){
+  const kullanicilar=useColl("kullanici");
+  const gorevler=useColl("montaj_gorev");
+  const urunler=useColl("stok_urun");
+  const [toastMsg,setToastMsg]=useState("");
+  const [sheet,setSheet]=useState(null);
+  const [bekle,setBekle]=useState(false);
+  const [sekme,setSekme]=useState("acik");
+  const say=m=>{ setToastMsg(m); setTimeout(()=>setToastMsg(""),2600); };
+
+  useEffect(()=>{ if(!BEN_ID){ location.replace("index.html?giris=1"); return; }
+    if(kullanicilar&&kullanicilar.length){ const me=kullanicilar.find(u=>u.id===BEN_ID);
+      if(!me){ location.replace("index.html?giris=1"); return; }
+      if(me.rol==="admin"){ location.replace("admin.html"); return; }
+      if(me.rol!=="montaj") location.replace("deneme.html"); } },[kullanicilar]);
+
+  const ben=(kullanicilar||[]).find(u=>u.id===BEN_ID)||null;
+  const yuk=!kullanicilar||!gorevler||!urunler;
+  const benim=useMemo(()=>(gorevler||[]).filter(g=>(g.kullaniciId||"")===BEN_ID)
+    .sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0)),[gorevler]);
+
+  const hak=useMemo(()=>{ let bekleyen=0,odenen=0,adet=0;
+    benim.forEach(g=>{ if(g.durum!=="teslim") return; const t=num(g.teslimAdet)*num(g.birimUcret);
+      adet+=num(g.teslimAdet); if(g.odendi) odenen+=t; else bekleyen+=t; });
+    return {bekleyen,odenen,adet}; },[benim]);
+
+  const acik=benim.filter(g=>g.durum!=="alindi"&&g.durum!=="teslim");
+  const montajda=benim.filter(g=>g.durum==="alindi");
+  const biten=benim.filter(g=>g.durum==="teslim");
+  const liste=sekme==="acik"?acik:sekme==="montajda"?montajda:biten;
+
+  async function teslimAl(g,n){ if(bekle) return; setBekle(true);
+    try{ await save("montaj_gorev",{id:g.id,durum:"alindi",alinanAdet:n,alinanTarih:new Date().toISOString()});
+      setSheet(null); say(n+" adet teslim alındı"); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
+
+  async function teslimEt(g,n){ if(bekle) return; setBekle(true);
+    try{
+      const u=(urunler||[]).find(x=>x.id===g.urunId);
+      if(u){ const parcalar=u.parcalar||[];
+        if(parcalar.length){
+          const elle=Math.max(0,num(u.montajElle)), elleDus=Math.min(elle,n), kalan=n-elleDus;
+          const tk={...(u.parcaTuket||{})}; if(kalan>0) parcalar.forEach(p=>tk[p]=num(tk[p])+kalan*gerekenP(u,p));
+          const patch={id:u.id,parcaTuket:tk,stokta:increment(n)}; if(elleDus) patch.montajElle=increment(-elleDus);
+          await save("stok_urun",patch);
+        } else await save("stok_urun",{id:u.id,montajBitti:increment(n),stokta:increment(n)});
+        await save("stok_hareket",{urunId:u.id,urunAd:u.ad||"",delta:n,sebep:"montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"});
+      }
+      await save("montaj_gorev",{id:g.id,durum:"teslim",teslimAdet:n,teslimTarih:new Date().toISOString()});
+      setSheet(null); say(n+" adet teslim edildi · "+tlk(n*num(g.birimUcret))+" hakediş"); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
+
+  if(!BEN_ID||(kullanicilar&&kullanicilar.length&&ben&&ben.rol!=="montaj"))
+    return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--mut)",fontWeight:700}},"Yönlendiriliyor…");
+  if(yuk) return h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
+    h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
+    h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Yükleniyor…"));
+
+  const sekmeBtn=(k,lbl,n)=>h("button",{onClick:()=>setSekme(k),style:{flex:1,padding:"10px 6px",borderRadius:12,fontSize:13,fontWeight:800,
+    background:sekme===k?"#1b1e25":"var(--surf2)",color:sekme===k?"#fff":"var(--mut)",border:"1px solid "+(sekme===k?"#1b1e25":"var(--line)")}},lbl+(n?(" "+n):""));
+
+  return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 24px"}},
+    h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:16}},
+      h("img",{src:"tikita-logo.png",alt:"Tikita",style:{height:34,width:"auto"}}),
+      h("div",{style:{flex:1,minWidth:0}}),
+      h("div",{style:{fontSize:13,fontWeight:800,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(ben&&ben.ad)||""),
+      h("button",{onClick:()=>{ if(confirm("Çıkış yapmak istiyor musunuz?")) location.href="index.html?giris=1"; },
+        style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:15,color:"var(--red)",flexShrink:0}},"⏻")),
+
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
+      h(Stat,{v:tlk(hak.bekleyen),l:"ödenmemiş hakediş",renk:"var(--gold)"}),
+      h(Stat,{v:tlk(hak.odenen),l:"ödenen toplam",renk:"var(--green)"}),
+      h(Stat,{v:String(montajda.reduce((s,g)=>s+num(g.alinanAdet),0)),l:"elimdeki adet",renk:"var(--cyan)"}),
+      h(Stat,{v:String(hak.adet),l:"teslim ettiğim toplam",renk:"var(--txt)"})),
+
+    h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+      sekmeBtn("acik","Bekleyen",acik.length),
+      sekmeBtn("montajda","Montajda",montajda.length),
+      sekmeBtn("biten","Biten",biten.length)),
+
+    liste.length?h("div",{style:{display:"grid",gap:10}},liste.map(g=>{
+      const d=DURUM[g.durum||"acik"]||DURUM.acik;
+      const istenen=num(g.adet), alinan=num(g.alinanAdet), teslim=num(g.teslimAdet);
+      const tutar=(g.durum==="teslim"?teslim:istenen)*num(g.birimUcret);
+      return h("div",{key:g.id,className:"card",style:{padding:"14px 15px"}},
+        h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}},
+          h("div",{style:{flex:1,minWidth:0,fontSize:16,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.urunAd||"?"),
+          h("span",{style:{fontSize:11,fontWeight:800,color:d.renk,background:d.bg,border:"1px solid "+d.bd,padding:"3px 9px",borderRadius:9,flexShrink:0}},d.ad)),
+        h("div",{style:{display:"flex",flexWrap:"wrap",gap:"3px 12px",fontSize:12,color:"var(--mut)",fontWeight:700,marginBottom:10}},
+          h("span",null,"istenen "+istenen+" ad"),
+          alinan>0?h("span",null,"alınan "+alinan+" ad"):null,
+          teslim>0?h("span",{style:{color:"var(--green)"}},"teslim "+teslim+" ad"):null,
+          h("span",null,tlk(g.birimUcret)+"/ad"),
+          h("span",{style:{color:"var(--gold)"}},tlk(tutar)),
+          g.durum==="teslim"?h("span",{style:{color:g.odendi?"var(--green)":"var(--gold)"}},g.odendi?"ödendi":"ödeme bekliyor"):null),
+        g.not?h("div",{style:{fontSize:12,color:"var(--mut)",marginBottom:10}},g.not):null,
+        g.durum==="teslim"
+          ? h("div",{style:{fontSize:11,color:"var(--mut2)",fontWeight:700}},fmtS(g.teslimTarih))
+          : h("button",{onClick:()=>setSheet(g.durum==="alindi"?{tip:"et",g}:{tip:"al",g}),
+              style:{width:"100%",padding:13,borderRadius:14,fontSize:14,fontWeight:800,color:"#fff",
+                background:g.durum==="alindi"?"var(--green)":"var(--cyan)"}},
+              g.durum==="alindi"?"Montajı teslim et":"Ürünleri teslim al")); }))
+      :h("div",{style:{padding:"28px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},
+        sekme==="acik"?"Bekleyen görev yok.":sekme==="montajda"?"Montajda iş yok.":"Tamamlanan görev yok."),
+
+    h("div",{style:{textAlign:"center",fontSize:10.5,color:"var(--mut2)",marginTop:22,fontWeight:700}},"Tikita · Montaj "+SURUM),
+
+    sheet&&sheet.tip==="al"?h(AdetSheet,{ik:"📥",hex:"#0e8fce",baslik:"Teslim al · "+(sheet.g.urunAd||""),
+      alt:"istenen "+num(sheet.g.adet)+" adet",mevcut:num(sheet.g.adet),ctaTxt:"Teslim aldım",bekle,
+      onClose:()=>setSheet(null),onOk:n=>teslimAl(sheet.g,n)}):null,
+    sheet&&sheet.tip==="et"?h(AdetSheet,{ik:"📤",hex:"#16a34a",baslik:"Montajı teslim et · "+(sheet.g.urunAd||""),
+      alt:"aldığın "+num(sheet.g.alinanAdet)+" adet · "+tlk(sheet.g.birimUcret)+"/ad",mevcut:num(sheet.g.alinanAdet),ctaTxt:"Teslim ettim",bekle,
+      onClose:()=>setSheet(null),onOk:n=>teslimEt(sheet.g,n)}):null,
+    h(Toast,{msg:toastMsg}));
+}
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+</body>
+</html>
