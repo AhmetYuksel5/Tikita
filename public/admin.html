@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="J7";   // komuta (admin) deneme sürümü
+const SURUM="J8";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -2016,22 +2016,27 @@ function MakineDuzenSheet({mk,onKaydet,onSil,bekle}){
 // 🧵 FİLAMENT YÖNETİMİ — ad + ₺/kg (maliyet için)
 function FilamentYonetimSheet({filamentler,onClose,onAc}){
   const list=(filamentler||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
-  return h(Sheet,{ik:"🧵",hex:"#7c46e6",baslik:"Filamentler",alt:list.length+" çeşit",onClose,cta:"Kapat",onCta:onClose},
+  const deger=list.reduce((s2,f2)=>s2+num(f2.stokKg)*num(f2.kgFiyat),0);
+  const kgTop=list.reduce((s2,f2)=>s2+num(f2.stokKg),0);
+  return h(Sheet,{ik:"🧵",hex:"#7c46e6",baslik:"Filamentler",alt:list.length+" çeşit"+(kgTop>0?(" · "+(Math.round(kgTop*10)/10)+" kg · "+tlk(deger)):""),onClose,cta:"Kapat",onCta:onClose},
     h("button",{onClick:()=>onAc({tip:"filamentDuzen",fl:null}),style:{width:"100%",padding:12,borderRadius:13,marginBottom:12,background:"var(--surf)",border:"1.5px dashed #7c46e6",color:"#7c46e6",fontSize:14,fontWeight:800}},"Yeni filament"),
     list.length?list.map((fl,i)=>h("button",{key:fl.id||i,onClick:()=>onAc({tip:"filamentDuzen",fl}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 12px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",marginBottom:8,textAlign:"left"}},
       h("span",{style:{fontSize:20}},"🧵"),
       h("div",{style:{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:9}},
         flKod(fl)?h("span",{style:{flexShrink:0,fontSize:13,fontWeight:800,color:"var(--violet)",background:"var(--surf)",border:"1px solid var(--line)",borderRadius:8,padding:"2px 7px"}},flKod(fl)):null,
         h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},flAd(fl)||"?")),
-      h("span",{style:{fontSize:12.5,fontWeight:800,color:"var(--mut)"}},num(fl.kgFiyat)>0?(tl(fl.kgFiyat)+"/kg"):"—"))):h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Filament yok."));
+      h("div",{style:{textAlign:"right",flexShrink:0}},
+        h("div",{style:{fontSize:12.5,fontWeight:800,color:"var(--mut)"}},num(fl.kgFiyat)>0?(tl(fl.kgFiyat)+"/kg"):"—"),
+        num(fl.stokKg)>0?h("div",{style:{fontSize:11,fontWeight:800,color:"var(--violet)",marginTop:1}},(Math.round(num(fl.stokKg)*10)/10)+" kg"):null))):h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Filament yok."));
 }
-function FilamentDuzenSheet({fl,onKaydet,onSil,bekle}){
+function FilamentDuzenSheet({fl,onKaydet,onSil,onAlim,bekle}){
   const duzen=!!(fl&&fl.id);
   const [no,setNo]=useState(duzen?String(fl.no||"").replace(/^[Ff]/,""):"");
   const [ad,setAd]=useState(duzen?flAd(fl):"");
   const [kg,setKg]=useState(duzen?String(fl.kgFiyat||""):"");
+  const [stokKg,setStokKg]=useState(duzen?String(num(fl.stokKg)||""):"");
   return h(Sheet,{ik:duzen?null:"➕",hex:"#7c46e6",baslik:duzen?("Düzenle · "+(fl.ad||"")):"Yeni filament",onClose:()=>onKaydet(null),
-    cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!ad.trim()||bekle,onCta:()=>onKaydet({id:duzen?fl.id:null,no:no.trim(),ad:ad.trim(),kgFiyat:num(kg)})},
+    cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!ad.trim()||bekle,onCta:()=>onKaydet({id:duzen?fl.id:null,no:no.trim(),ad:ad.trim(),kgFiyat:num(kg),stokKg:num(stokKg)})},
     h("div",{style:{display:"grid",gridTemplateColumns:"92px 1fr",gap:10,marginBottom:14}},
       h("div",null,
         h("div",{className:"lbl",style:{marginBottom:8}},"Kod"),
@@ -2041,9 +2046,46 @@ function FilamentDuzenSheet({fl,onKaydet,onSil,bekle}){
       h("div",null,
         h("div",{className:"lbl",style:{marginBottom:8}},"Filament adı/rengi *"),
         h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. PLA Siyah",style:inp}))),
-    h("div",{className:"lbl",style:{marginBottom:8}},"₺ / kg (maliyet için)"),
-    h("input",{type:"number",inputMode:"numeric",value:kg,onChange:e=>setKg(e.target.value),placeholder:"örn. 700",style:{...inp,marginBottom:duzen?14:0}}),
-    duzen?h("button",{onClick:()=>onSil(fl),style:{width:"100%",padding:"12px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"Filamenti sil"):null);
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:duzen?14:0}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"₺ / kg (ortalama)"),
+        h("input",{type:"number",inputMode:"decimal",step:"any",value:kg,onChange:e=>setKg(e.target.value),placeholder:"örn. 700",style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Stok kg"),
+        h("input",{type:"number",inputMode:"decimal",step:"any",value:stokKg,onChange:e=>setStokKg(e.target.value),placeholder:"0",style:inp}))),
+    (duzen&&num(stokKg)>0&&num(kg)>0)?h("div",{style:{textAlign:"right",fontSize:12,fontWeight:800,color:"var(--violet)",marginBottom:12}},"Stok değeri "+tlk(num(stokKg)*num(kg))):null,
+    duzen?h("div",{style:{display:"flex",gap:8,marginTop:2}},
+      h("button",{onClick:()=>onAlim&&onAlim(fl),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--cyan)",fontSize:13,fontWeight:800}},"Alım ekle"),
+      h("button",{onClick:()=>onSil(fl),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},"Sil")):null);
+}
+// 📦 FİLAMENT ALIMI — stok kg artar, kg fiyatı ağırlıklı ortalamaya gider, nakit çıkışı yazılır
+function FilamentAlimSheet({fl,giderler,onKaydet,onClose,bekle}){
+  const bugun=()=>{ const d2=new Date(); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset()); return d2.toISOString().slice(0,10); };
+  const [kg,setKg]=useState(""); const [tutar,setTutar]=useState(""); const [tarih,setTarih]=useState(bugun());
+  const a=Math.max(0,num(kg)), t=Math.max(0,num(tutar));
+  const yeniKg=a>0?t/a:0;
+  const eskiKg=Math.max(0,num(fl.stokKg)), eskiFiyat=num(fl.kgFiyat);
+  const ort=(eskiKg+a)>0?((eskiKg*eskiFiyat+a*yeniKg)/(eskiKg+a)):yeniKg;
+  const gecmis=(giderler||[]).filter(g=>g.ref===fl.id&&g.stok).sort((x,y)=>new Date(y.tarih)-new Date(x.tarih)).slice(0,6);
+  return h(Sheet,{ik:"📦",hex:"#7c46e6",baslik:"Alım · "+(flAd(fl)||fl.ad||""),alt:"stok "+(Math.round(eskiKg*10)/10)+" kg",onClose,
+    cta:bekle?"⏳…":("Alımı işle · "+tlk(t)),disabled:a<=0||t<=0||bekle,
+    onCta:()=>onKaydet({filamentId:fl.id,ad:flAd(fl)||fl.ad||"",kg:a,tutar:t,tarih:new Date(tarih+"T12:00:00").toISOString(),yeniFiyat:Math.round(ort*100)/100})},
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Kg"),
+        h("input",{type:"number",inputMode:"decimal",step:"any",value:kg,onChange:e=>setKg(e.target.value),style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Ödenen toplam ₺"),
+        h("input",{type:"number",inputMode:"decimal",step:"any",value:tutar,onChange:e=>setTutar(e.target.value),style:inp}))),
+    h("div",{className:"lbl",style:{marginBottom:8}},"Tarih"),
+    h("input",{type:"date",value:tarih,onChange:e=>setTarih(e.target.value),style:{...inp,fontSize:14,padding:"12px 10px",marginBottom:12}}),
+    (a>0&&t>0)?h("div",{style:{display:"grid",gap:6,padding:"11px 13px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700,marginBottom:12}},
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Bu alımın kg fiyatı"),h("b",null,tlk(yeniKg))),
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Yeni ortalama ₺/kg"),h("b",{style:{color:"var(--violet)"}},tlk(ort))),
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Yeni stok"),h("b",null,(Math.round((eskiKg+a)*10)/10)+" kg"))):null,
+    h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#eff8fd",border:"1px solid #a5d8f3",fontSize:11.5,fontWeight:700,color:"#0369a1",marginBottom:gecmis.length?12:0,lineHeight:1.5}},
+      "Stok artar, tutar 'Filament alımı' olarak nakit çıkışına yazılır — net kârdan düşmez."),
+    gecmis.length?h(React.Fragment,null,
+      h("div",{className:"lbl",style:{marginBottom:6}},"Önceki alımlar"),
+      gecmis.map((g,i)=>h("div",{key:g.id||i,style:{display:"flex",justifyContent:"space-between",padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:12}},
+        h("span",{style:{color:"var(--mut)"}},fmtS(g.tarih)+(g.aciklama?(" · "+g.aciklama.split(" · ").slice(1).join(" · ")):"")),
+        h("b",{style:{color:"var(--cyan)"}},tlk(g.tutar))))):null);
 }
 function Stok({d,ac,fotoMap}){
   const uEks=d.stok.filter(u=>u.fiyat<=0).length;
@@ -2891,7 +2933,7 @@ function App(){
     try{ await remove("makineler",mk.id); setModal(null); say("Makine silindi"); }
     catch(e){ console.error(e); say("Silinemedi"); } finally{ setIsBekle(false); } }
   async function filamentKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
-    try{ await save("filament",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",ad:p2.ad,kgFiyat:p2.kgFiyat}); setModal(null); say((p2.id?"Güncellendi":"Filament eklendi")+" · "+p2.ad); }
+    try{ await save("filament",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",ad:p2.ad,kgFiyat:p2.kgFiyat,stokKg:num(p2.stokKg)}); setModal(null); say((p2.id?"Güncellendi":"Filament eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function filamentSil(fl){ if(!fl||!fl.id||isBekle) return; if(!confirm("🗑 "+(fl.ad||"filament")+" silinsin mi?")) return; setIsBekle(true);
     try{ await remove("filament",fl.id); setModal(null); say("Filament silindi"); }
@@ -3079,7 +3121,14 @@ function App(){
     modal&&modal.tip==="makineYonet"&&h(MakineYonetimSheet,{makineler,onClose:()=>setModal(null),onAc:setModal}),
     modal&&modal.tip==="makineDuzen"&&h(MakineDuzenSheet,{mk:modal.mk,bekle:isBekle,onKaydet:makineKaydet,onSil:makineSil}),
     modal&&modal.tip==="filamentYonet"&&h(FilamentYonetimSheet,{filamentler,onClose:()=>setModal(null),onAc:setModal}),
-    modal&&modal.tip==="filamentDuzen"&&h(FilamentDuzenSheet,{fl:modal.fl,bekle:isBekle,onKaydet:filamentKaydet,onSil:filamentSil}),
+    modal&&modal.tip==="filamentDuzen"&&h(FilamentDuzenSheet,{fl:modal.fl,bekle:isBekle,onKaydet:filamentKaydet,onSil:filamentSil,onAlim:f2=>setModal({tip:"filamentAlim",fl:f2})}),
+    modal&&modal.tip==="filamentAlim"&&h(FilamentAlimSheet,{fl:modal.fl,giderler,bekle:isBekle,onClose:()=>setModal(null),
+      onKaydet:async(a2)=>{ if(isBekle) return; setIsBekle(true);
+        try{ await save("filament",{id:a2.filamentId,stokKg:increment(a2.kg),kgFiyat:a2.yeniFiyat});
+          await save("gider",{tur:"Filament alımı",tutar:a2.tutar,tarih:a2.tarih,stok:true,oto:true,ref:a2.filamentId,
+            aciklama:a2.ad+" · "+a2.kg+" kg"});
+          setModal(null); say("Alım işlendi · stok arttı"); }
+        catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }}),
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
     modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap,onRota:talepRota,onSil:talepSil}),
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
