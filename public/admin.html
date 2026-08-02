@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="J6";   // komuta (admin) deneme sürümü
+const SURUM="J7";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1341,12 +1341,43 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},sekme==="acik"?"Açık görev yok.":"Tamamlanan görev yok."));
 }
 // 🧵 SARF MALZEMESİ — anahtarlık halkası, zincir, mıknatıs… stok elle düzenlenir, ürün maliyetine girer
-function SarfYonetimSheet({sarflar,stok,onKaydet,onSil,onClose,bekle}){
+function SarfYonetimSheet({sarflar,stok,giderler,onKaydet,onSil,onAlim,onClose,bekle}){
   const [duzen,setDuzen]=useState(null);   // {id?,ad,birim,stokta,birimFiyat}
+  const [alim,setAlim]=useState(null);     // 📦 alım kaydı — stok artar + nakit çıkışı yazılır
+  const bugunStr=()=>{ const d2=new Date(); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset()); return d2.toISOString().slice(0,10); };
   const bos={id:null,ad:"",tur:"sarf",birim:"adet",stokta:"",birimFiyat:""};
   const list=(sarflar||[]).slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   // her sarf kalemi hangi ürünlerde kullanılıyor
   const kullanim=sf=>(stok||[]).filter(u=>(u.sarfList||[]).some(x=>x.sarfId===sf.id));
+  if(alim){ const sf=(sarflar||[]).find(x=>x.id===alim.sarfId)||{};
+    const ad=Math.max(0,num(alim.adet)), tut=Math.max(0,num(alim.tutar));
+    const yeniBirim=ad>0?tut/ad:0;
+    const eskiStok=Math.max(0,num(sf.stokta)), eskiFiyat=num(sf.birimFiyat);
+    const ortalama=(eskiStok+ad)>0?((eskiStok*eskiFiyat+ad*yeniBirim)/(eskiStok+ad)):yeniBirim;
+    const gecmis=(giderler||[]).filter(g=>g.ref===alim.sarfId&&g.stok).sort((x,y)=>new Date(y.tarih)-new Date(x.tarih)).slice(0,6);
+    return h(Sheet,{ik:"📦",hex:"#0369a1",baslik:"Alım · "+(sf.ad||""),alt:"stok "+eskiStok+" "+(sf.birim||"adet"),onClose:()=>setAlim(null),
+      cta:bekle?"⏳…":("Alımı işle · "+tlk(tut)),disabled:ad<1||tut<=0||bekle,
+      onCta:()=>{ onAlim({sarfId:alim.sarfId,ad:sf.ad||"",birim:sf.birim||"adet",adet:ad,tutar:tut,
+        tarih:new Date(alim.tarih+"T12:00:00").toISOString(),yeniBirim:Math.round(ortalama*10000)/10000}); setAlim(null); }},
+      h("button",{onClick:()=>setAlim(null),style:{marginBottom:12,fontSize:12.5,fontWeight:800,color:"var(--cyan)",background:"none",padding:0}},"‹ Geri"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Adet ("+(sf.birim||"adet")+")"),
+          h("input",{type:"number",inputMode:"decimal",step:"any",value:alim.adet,onChange:e=>setAlim(o=>({...o,adet:e.target.value})),style:inp})),
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Ödenen toplam ₺"),
+          h("input",{type:"number",inputMode:"decimal",step:"any",value:alim.tutar,onChange:e=>setAlim(o=>({...o,tutar:e.target.value})),style:inp}))),
+      h("div",{className:"lbl",style:{marginBottom:8}},"Tarih"),
+      h("input",{type:"date",value:alim.tarih,onChange:e=>setAlim(o=>({...o,tarih:e.target.value})),style:{...inp,fontSize:14,padding:"12px 10px",marginBottom:12}}),
+      ad>0&&tut>0?h("div",{style:{display:"grid",gap:6,padding:"11px 13px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700,marginBottom:12}},
+        h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Bu alımın birim fiyatı"),h("b",null,tlk(yeniBirim))),
+        h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Yeni ortalama birim"),h("b",{style:{color:"var(--violet)"}},tlk(ortalama))),
+        h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Yeni stok"),h("b",null,(eskiStok+ad)+" "+(sf.birim||"adet")))):null,
+      h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#eff8fd",border:"1px solid #a5d8f3",fontSize:11.5,fontWeight:700,color:"#0369a1",marginBottom:gecmis.length?12:0,lineHeight:1.5}},
+        "Stok artar, tutar 'Sarf malzemesi alımı' olarak nakit çıkışına yazılır — net kârdan düşmez."),
+      gecmis.length?h(React.Fragment,null,
+        h("div",{className:"lbl",style:{marginBottom:6}},"Önceki alımlar"),
+        gecmis.map((g,i)=>h("div",{key:g.id||i,style:{display:"flex",justifyContent:"space-between",padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:12}},
+          h("span",{style:{color:"var(--mut)"}},fmtS(g.tarih)+(g.aciklama?(" · "+g.aciklama.split(" · ").slice(1).join(" · ")):"")),
+          h("b",{style:{color:"var(--cyan)"}},tlk(g.tutar))))):null); }
   if(duzen){ const dIsc=false;
     return h(Sheet,{ik:"🧵",hex:"#0f766e",baslik:duzen.id?("Düzenle · "+(duzen.ad||"")):"Yeni sarf malzemesi",alt:"",
     onClose:()=>setDuzen(null),cta:bekle?"⏳…":"Kaydet",disabled:!String(duzen.ad||"").trim()||bekle,
@@ -1362,9 +1393,13 @@ function SarfYonetimSheet({sarflar,stok,onKaydet,onSil,onClose,bekle}){
         h("input",{type:"number",inputMode:"decimal",step:"any",value:duzen.stokta,onChange:e=>setDuzen(s2=>({...s2,stokta:e.target.value})),style:{...inp,padding:"13px 8px"}})),
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Birim ₺"),
         h("input",{type:"number",inputMode:"decimal",step:"any",value:duzen.birimFiyat,onChange:e=>setDuzen(s2=>({...s2,birimFiyat:e.target.value})),style:{...inp,padding:"13px 8px"}}))),
-    duzen.id?h("button",{onClick:()=>{ if(confirm((duzen.ad||"Kalem")+" silinsin mi?")){ onSil(duzen.id); setDuzen(null); } },
-      style:{width:"100%",padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},"Kalemi sil"):null); }
-  return h(Sheet,{ik:"🧵",hex:"#0f766e",baslik:"Sarf malzemesi",alt:"",onClose,cta:"Kapat",onCta:onClose,
+    duzen.id?h("div",{style:{display:"flex",gap:8}},
+      h("button",{onClick:()=>{ setAlim({sarfId:duzen.id,adet:"",tutar:"",tarih:bugunStr()}); setDuzen(null); },
+        style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--cyan)",fontSize:13,fontWeight:800}},"Alım ekle"),
+      h("button",{onClick:()=>{ if(confirm((duzen.ad||"Kalem")+" silinsin mi?")){ onSil(duzen.id); setDuzen(null); } },
+        style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},"Sil")):null); }
+  const stokDeger=(sarflar||[]).reduce((s2,x)=>s2+num(x.stokta)*num(x.birimFiyat),0);
+  return h(Sheet,{ik:"🧵",hex:"#0f766e",baslik:"Sarf malzemesi",alt:stokDeger>0?("stok değeri "+tlk(stokDeger)):"",onClose,cta:"Kapat",onCta:onClose,
     basEk:h("button",{onClick:()=>setDuzen(bos),title:"Ekle",style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:19,fontWeight:800,color:"var(--cyan)"}},"+")},
     list.length?list.map((sf,i)=>{ const kul=kullanim(sf);
       return h("button",{key:sf.id,onClick:()=>setDuzen({id:sf.id,ad:sf.ad||"",tur:sf.tur==="iscilik"?"iscilik":"sarf",birim:sf.birim||"adet",stokta:String(num(sf.stokta)),birimFiyat:String(num(sf.birimFiyat))}),
@@ -3073,7 +3108,13 @@ function App(){
           say("Ödendi · gidere yazıldı"); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onGeri:async(g)=>{ if(!g||!g.id||isBekle) return; await montajGeriAl(g); }}),
-    modal&&modal.tip==="sarfYonet"&&h(SarfYonetimSheet,{sarflar,stok:d.stok,bekle:isBekle,onClose:()=>setModal(null),
+    modal&&modal.tip==="sarfYonet"&&h(SarfYonetimSheet,{sarflar,stok:d.stok,giderler,bekle:isBekle,onClose:()=>setModal(null),
+      onAlim:async(a)=>{ if(isBekle) return; setIsBekle(true);
+        try{ await save("sarf",{id:a.sarfId,stokta:increment(a.adet),birimFiyat:a.yeniBirim});
+          await save("gider",{tur:"Sarf malzemesi alımı",tutar:a.tutar,tarih:a.tarih,stok:true,oto:true,ref:a.sarfId,
+            aciklama:a.ad+" · "+a.adet+" "+a.birim});
+          say("Alım işlendi · stok arttı"); }
+        catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onKaydet:async(x)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("sarf",{...(x.id?{id:x.id}:{}),ad:x.ad,birim:x.birim,stokta:num(x.stokta),birimFiyat:num(x.birimFiyat)}); say(x.id?"Güncellendi":"Malzeme eklendi"); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
