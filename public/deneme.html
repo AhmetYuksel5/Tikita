@@ -61,7 +61,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v79";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v80";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // yönetici 👁 view-as
 let BEN_ID=AS_ID||REAL_ID;   // etkin kullanıcı: view-as varsa o, yoksa giriş yapan
@@ -277,7 +277,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const gorevler=kaleler.filter(k=>k.durum.key!=="saglam").sort((a,b)=>oncelik[a.durum.key]-oncelik[b.durum.key]||b.guc-a.guc);
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
-  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,tanitim:u.tanitim||""}))
+  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
     .filter(u=>u.ad!=="?").sort((a,b)=>(b.canta-a.canta)||(b.stokta-a.stokta));
   const cantaTop=cephane.reduce((s,u)=>s+u.canta,0);
   // rozetler (kazanılan başarımlar)
@@ -1910,7 +1910,7 @@ function App(){
     } else if(p.type==="satis"){
       const u=p.urun||{}; const gerilla=!k; const satisId=uid();
       await save("pazarlama_hareket",{id:satisId,...kul,tip:"satis",...(gerilla?{gerilla:true,kaynak:"gerilla"}:gecEk),urunId:u.id||"",urunAd:u.ad||"?",
-        adet:num(p.adet),alisFiyat:(num(p.veris)>0?num(p.veris):num(u.pazFiyat)),satisFiyat:num(p.fiyat),tahsil:gerilla?num(p.adet)*num(p.fiyat):0,
+        adet:num(p.adet),alisFiyat:(num(p.veris)>0?num(p.veris):num(u.pazFiyat)),maliyetBirim:num(u.maliyet),satisFiyat:num(p.fiyat),tahsil:gerilla?num(p.adet)*num(p.fiyat):0,
         yer:gerilla?"⚡ Seyyar":k.ad,bolge:k?(k.bolge||""):"",musteriId:k?(k.musteriId||""):"",tarih:now});
       if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-num(p.adet));
       // satışta anında alınan: satışın tahsil'i artar (borç kapanır) + tahsilat kaydı (önce üretici) — ana uygulama ile aynı
@@ -1930,13 +1930,13 @@ function App(){
         for(const {urun,adet} of p.items){
           const birim=maliyet>0?Math.round(num(urun.pazFiyat)*oran*100)/100:Math.round((p.para/parca)*100)/100;
           await save("pazarlama_hareket",{...kul,tip:"satis",gerilla:true,toptan:true,kaynak:"gerilla",urunId:urun.id||"",urunAd:urun.ad,
-            adet,alisFiyat:num(urun.pazFiyat),satisFiyat:birim,tahsil:adet*birim,yer,bolge:p.bolge||"",lat:p.lat||"",lng:p.lng||"",musteriId:"",tarih:now});
+            adet,alisFiyat:num(urun.pazFiyat),maliyetBirim:num(urun.maliyet),satisFiyat:birim,tahsil:adet*birim,yer,bolge:p.bolge||"",lat:p.lat||"",lng:p.lng||"",musteriId:"",tarih:now});
           if(urun.id) await cantaDelta(urun.id,urun.ad,-adet);
         }
       } else {
         for(const {urun,adet,fiyat} of p.satirlar){
           await save("pazarlama_hareket",{...kul,tip:"satis",gerilla:true,kaynak:"gerilla",urunId:urun.id||"",urunAd:urun.ad,
-            adet,alisFiyat:num(urun.pazFiyat),satisFiyat:fiyat,tahsil:adet*fiyat,yer,bolge:p.bolge||"",lat:p.lat||"",lng:p.lng||"",musteriId:"",tarih:now});
+            adet,alisFiyat:num(urun.pazFiyat),maliyetBirim:num(urun.maliyet),satisFiyat:fiyat,tahsil:adet*fiyat,yer,bolge:p.bolge||"",lat:p.lat||"",lng:p.lng||"",musteriId:"",tarih:now});
           if(urun.id) await cantaDelta(urun.id,urun.ad,-adet);
         }
       }
@@ -1955,11 +1955,11 @@ function App(){
           if(kmod2==="hediye"){
             // 🎁 HEDİYE: ayrı tip + üründe hediye sayacı (stok takibi) — çantadan düşer, geri beklenmez
             await save("pazarlama_hareket",{...kul,tip:"hediye",urunId:u.id||"",urunAd:u.ad||"?",adet:ad,
-              alisFiyat:num(u.pazFiyat),satisFiyat:num(u.fiyat),...yerB,...gecEk,tarih:now});
+              alisFiyat:num(u.pazFiyat),maliyetBirim:num(u.maliyet),satisFiyat:num(u.fiyat),...yerB,...gecEk,tarih:now});
             if(u.id&&!p.gecTarih){ await cantaDelta(u.id,u.ad,-ad); await save("stok_urun",{id:u.id,hediye:increment(ad)}); }
           } else {
             await save("pazarlama_hareket",{...kul,tip:"konsinye",urunId:u.id||"",urunAd:u.ad||"?",adet:ad,kalan:ad,
-              konsMod:"konsinye",alisFiyat:num(u.pazFiyat),satisFiyat:birim,...yerB,...gecEk,tarih:now});
+              konsMod:"konsinye",alisFiyat:num(u.pazFiyat),maliyetBirim:num(u.maliyet),satisFiyat:birim,...yerB,...gecEk,tarih:now});
             if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-ad);
           } }
       } else {
@@ -1972,15 +1972,19 @@ function App(){
         // 🔒 alış fiyatı BIRAKIŞ anındaki fiyattır; birden fazla partiden düşüldüyse ağırlıklı ortalama alınır
         const urunGuncel=(urunler||[]).find(u2=>(rec.urunId&&u2.id===rec.urunId)||(u2.ad||"")===ad)||{};
         const sonAlis=tuk.length?num(tuk[tuk.length-1].r.alisFiyat):verisOf(urunGuncel,emirId);
+        const sonMal=tuk.length?num(tuk[tuk.length-1].r.maliyetBirim):num(urunGuncel.maliyetGuncel);
         const tukAd=tuk.reduce((s2,t2)=>s2+t2.dd,0);
         const acikta=Math.max(0,num(p.adet)-tukAd);   // kayda bağlanamayan fazlalık
         const alisTop=tuk.reduce((s2,t2)=>s2+t2.dd*num(t2.r.alisFiyat),0)+acikta*sonAlis;
         const alisOrt=num(p.adet)>0?Math.round(alisTop/num(p.adet)*100)/100:0;
+        // 🔒 üretim maliyeti de bırakış anındaki değerden — FIFO ağırlıklı
+        const malTop=tuk.reduce((s2,t2)=>s2+t2.dd*num(t2.r.maliyetBirim),0)+acikta*sonMal;
+        const malOrt=num(p.adet)>0?Math.round(malTop/num(p.adet)*100)/100:0;
         if(p.kmod==="satis"){
           const satisId=uid();
           const birimF=num(p.fiyat)>0?num(p.fiyat):num(rec.satisFiyat);
           await save("pazarlama_hareket",{id:satisId,...kul,tip:"satis",kaynak:"konsinye",urunId:rec.urunId||urunGuncel.id||"",urunAd:ad,
-            adet:num(p.adet),alisFiyat:alisOrt,
+            adet:num(p.adet),alisFiyat:alisOrt,maliyetBirim:malOrt,
             satisFiyat:birimF,   // GERÇEK satış fiyatı — pazarlamacının girdiği
             tahsil:0,...yerB,tarih:now});
           // 🧾 sayımsız tahsilat varsa bu satışa mahsup et — önce üretici, sonra pazarlamacı

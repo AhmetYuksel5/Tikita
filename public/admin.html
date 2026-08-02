@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="H5";   // komuta (admin) deneme sürümü
+const SURUM="H6";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -2160,7 +2160,9 @@ function RaporA({d,ac,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGo
   // Kâr    = ciro − üretim maliyeti (tahsilattan bağımsız)
   const malById={}, malByAd={};
   (d.stok||[]).forEach(u=>{ malById[u.id]=num(u.maliyet); malByAd[(u.ad||"").toLocaleLowerCase("tr")]=num(u.maliyet); });
-  const malOf=x=>{ const a=x.urunId?malById[x.urunId]:undefined; if(a!=null&&a>0) return num(a);
+  // kayda donmuş birim maliyet varsa o geçerli; yoksa (eski kayıt) ürünün güncel maliyeti
+  const malOf=x=>{ if(num(x.maliyetBirim)>0) return num(x.maliyetBirim);
+    const a=x.urunId?malById[x.urunId]:undefined; if(a!=null&&a>0) return num(a);
     return num(malByAd[(x.urunAd||"").toLocaleLowerCase("tr")]); };
   const tkSat=R.filter(x=>x.tip==="satis");
   const tkK=x=>num(x.adet)*num(x.alisFiyat);                      // Tikita'nın o satıştaki alacağı
@@ -2516,6 +2518,11 @@ function App(){
   const [genisEkran,setGenisEkran]=useState(()=>{ try{ return window.innerWidth>=760; }catch(e){ return false; } });
   useEffect(()=>{ const f=()=>setGenisEkran(window.innerWidth>=760); window.addEventListener("resize",f); return ()=>window.removeEventListener("resize",f); },[]);
   const yanMenu=gorunum==="pc"&&genisEkran;
+  // 💾 hesaplanan birim maliyeti ürüne yaz — pazarlamacı satış anında bu değeri kayda dondurur
+  useEffect(()=>{ if(!d) return; const t=setTimeout(()=>{
+    (d.stok||[]).forEach(u=>{ const m=num(u.maliyet); const eski=num(u.raw&&u.raw.maliyetGuncel);
+      if(m>0&&Math.abs(m-eski)>0.005) save("stok_urun",{id:u.id,maliyetGuncel:Math.round(m*100)/100}).catch(()=>{}); }); },3000);
+    return ()=>clearTimeout(t); },[d]);
   const cikisYap=()=>{ if(confirm("Çıkış yap / hesap değiştir?")) location.href="index.html?giris=1"; };
   async function sifremiDegistir(){ setModal(null); const np=prompt("Yeni şifren (en az 4 hane):"); if(np==null) return; const v=String(np).trim();
     if(v.length<4){ say("Şifre en az 4 hane olmalı"); return; }
