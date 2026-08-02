@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="K5";   // komuta (admin) deneme sürümü
+const SURUM="K6";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1175,7 +1175,7 @@ const SABIT_TUR=["Kira","İnternet","Maaş","Abonelik","Sigorta","Vergi","Diğer
 // aylık sabit giderleri seçili döneme yay — tam ay = tam tutar, kısa dönem = gün oranı
 function sabitHesap(list,b0,b1){
   const L=(list||[]).filter(x=>num(x.tutar)>0&&x.baslangic);
-  const bos={toplam:0,tur:{},aylik:0};
+  const bos={toplam:0,tur:{},aylik:0,sayi:0,gun:0};
   if(!L.length) return bos;
   const simdi=Date.now();
   const s0=b0>0?b0:Math.min.apply(null,L.map(x=>new Date(x.baslangic+"-01T00:00:00").getTime()));
@@ -1184,19 +1184,20 @@ function sabitHesap(list,b0,b1){
   const buAy=ayKey(new Date().getFullYear(),new Date().getMonth());
   const aylik=L.filter(x=>x.baslangic<=buAy&&(!x.bitis||x.bitis>=buAy)).reduce((s2,x)=>s2+num(x.tutar),0);
   if(!(s1>s0)) return {...bos,aylik};
-  let toplam=0; const tur={};
+  let toplam=0,gun=0; const tur={}; const gorulen={};
   let d=new Date(s0); d=new Date(d.getFullYear(),d.getMonth(),1);
   while(d.getTime()<s1){
     const y=d.getFullYear(), m=d.getMonth();
     const ayBas=new Date(y,m,1).getTime(), aySon=new Date(y,m+1,1).getTime();
     const gunSayi=(aySon-ayBas)/864e5;
-    const gun=Math.max(0,(Math.min(aySon,s1)-Math.max(ayBas,s0))/864e5);
+    const g2=Math.max(0,(Math.min(aySon,s1)-Math.max(ayBas,s0))/864e5);
     const key=ayKey(y,m);
+    gun+=g2;
     L.forEach(x=>{ if(x.baslangic>key) return; if(x.bitis&&x.bitis<key) return;
-      const t=num(x.tutar)*gun/gunSayi; toplam+=t; const k=x.tur||"Diğer"; tur[k]=(tur[k]||0)+t; });
+      const t=num(x.tutar)*g2/gunSayi; toplam+=t; const k=x.tur||"Diğer"; tur[k]=(tur[k]||0)+t; gorulen[x.id||k]=1; });
     d=new Date(y,m+1,1);
   }
-  return {toplam,tur,aylik};
+  return {toplam,tur,aylik,sayi:Object.keys(gorulen).length,gun:Math.round(gun*10)/10};
 }
 function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet,onSil,onSabitKaydet,onSabitSil,onClose,bekle}){
   const [sekme,setSekme]=useState("tek");
@@ -2574,6 +2575,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
     stokAlim:()=>({ik:"📦",hex:"#0369a1",baslik:"Stok alımları — kâra düşmez",
       rows:srt(tkStokList).map(x=>({t:x.tur||"Alım",alt:fmtS(x.tarih)+(x.aciklama?(" · "+x.aciklama):""),v:tlk(x.tutar),renk:"var(--cyan)"}))}),
     gider:()=>({ik:"💸",hex:"#b91c1c",baslik:"Gider dökümü",
+      alt:(tkSabit.toplam>0?("sabitler "+tkSabit.gun+" günlük pay · aylık "+tlk(tkSabit.aylik)):(tkGerGider.length+" kayıt")),
       rows:tkGiderTur.map(o=>({t:o.tur,alt:"cironun %"+(tkCiro>0?Math.round(o.tut/tkCiro*100):0)+"'i",v:tlk(o.tut),renk:"var(--red)"}))}),
     malsiz:()=>({ik:"⚠️",hex:"#c2410c",baslik:"Üretim maliyeti tanımsız ürünler",
       rows:tkUList.filter(o=>o.malsiz>0).sort((a2,b2)=>b2.malsiz-a2.malsiz).map(o=>({t:o.u,
@@ -2620,7 +2622,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         h(KStat,{ik:h(Icn,{n:"percent",c:"var(--cyan)"}),l:"Kâr oranı",v:"%"+Math.round(tkOran*100),s:"ürün dökümü",renk:"var(--cyan)",onClick:()=>setDet(tkDet.oran())}),
         h(KStat,{ik:h(Icn,{n:"check",c:tkAlacak>0.5?"var(--red)":"var(--green)"}),l:"Alacak",v:tl(tkAlacak),s:"tahsil edilmemiş",renk:tkAlacak>0.5?"var(--red)":"var(--green)",onClick:()=>setDet(tkDet.alacak())}),
         h(KStat,{ik:h(Icn,{n:"box",c:"var(--txt)"}),l:"Maliyet",v:tl(tkMal),s:tkUList.length+" ürün",renk:"var(--txt)",onClick:()=>setDet(tkDet.urunAd())}),
-        h(KStat,{ik:h(Icn,{n:"wallet",c:"var(--red)"}),l:"Gider",v:tlk(tkGider),s:(tkGiderList.length+" kayıt"+(tkSabit.aylik>0?(" · sabit "+tlk(tkSabit.aylik)+"/ay"):"")+" ›"),renk:"var(--red)",onClick:()=>ac&&ac({tip:"gider",b0,b1})}),
+        h(KStat,{ik:h(Icn,{n:"wallet",c:"var(--red)"}),l:"Gider",v:tlk(tkGider),s:((tkGerGider.length+tkSabit.sayi)+" kalem"+(tkSabit.aylik>0?(" · sabit "+tlk(tkSabit.aylik)+"/ay"):"")+" ›"),renk:"var(--red)",onClick:()=>ac&&ac({tip:"gider",b0,b1})}),
         h(KStat,{ik:h(Icn,{n:"trend",c:tkNet<0?"var(--red)":"var(--green)"}),l:"Net kâr",v:tlk(tkNet),s:"kâr − gider",renk:tkNet<0?"var(--red)":"var(--green)",onClick:tkGiderTur.length?()=>setDet(tkDet.gider()):null}),
         tkStokAlim>0?h(KStat,{ik:h(Icn,{n:"box",c:"var(--cyan)"}),l:"Stok alımı",v:tlk(tkStokAlim),s:"kâra düşmez ›",renk:"var(--cyan)",onClick:()=>setDet(tkDet.stokAlim())}):null),
       tkMalsiz>0?h("button",{onClick:()=>setDet(tkDet.malsiz()),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412",marginBottom:14}},tkMalsiz+" adette üretim maliyeti tanımsız · "+tkUList.filter(o=>o.malsiz>0).length+" ürün ›"):null,
@@ -2629,7 +2631,8 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
       tkUList.length?Tbl(["Ürün","Adet","Ciro","Maliyet","Kâr","%"],
         tkUList.slice().sort((a2,b2)=>b2.kar-a2.kar).map(o=>[o.u,String(o.adet),tl(o.ciro),tl(o.mal),tl(o.kar),"%"+Math.round(o.oran*100)]))
         :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde satış yok."),
-      h("div",{className:"lbl",style:{margin:"4px 0 8px",display:"flex",alignItems:"center",gap:6}},h(Icn,{n:"wallet",c:"var(--mut)",s:15}),"Gider kalemleri"),
+      h("div",{className:"lbl",style:{margin:"4px 0 8px",display:"flex",alignItems:"center",gap:6}},h(Icn,{n:"wallet",c:"var(--mut)",s:15}),
+        "Gider kalemleri"+(tkSabit.toplam>0?(" · sabitler "+tkSabit.gun+" gün"):"")),
       tkGiderTur.length?Tbl(["Kalem","Tutar","Kârın %"],
         tkGiderTur.map(o=>[o.tur,tlk(o.tut),"%"+(tkKar>0?Math.round(o.tut/tkKar*100):0)])
           .concat([["TOPLAM",tlk(tkGider),"%"+(tkKar>0?Math.round(tkGider/tkKar*100):0)]]),{fit:true})
