@@ -3867,76 +3867,52 @@ function OyunTab({ plan, urunler, hareketler, makineler, filamentler, bolgeler, 
    ============================================================ */
 function GirisEkran({ kullanicilar, onGiris }){
   const yok=!kullanicilar.length;
-  const [secId,setSecId]=useState(null);
-  const [pin,setPin]=useState("");
+  const [kad,setKad]=useState("");
+  const [sifre,setSifre]=useState("");
   const [ad,setAd]=useState(""); const [yeniPin,setYeniPin]=useState("");
-  const [denemeAcik,setDenemeAcik]=useState(false);
+  const [hata,setHata]=useState(""); const [bekle,setBekle]=useState(false);
   useEffect(()=>{ document.body.classList.add("tk-giris-acik");
     return ()=>document.body.classList.remove("tk-giris-acik"); },[]);
-  const [hata,setHata]=useState(""); const [bekle,setBekle]=useState(false);
-  const sec=kullanicilar.find(u=>u.id===secId)||null;
-  const sortF=(a,b)=>(a.rol==="admin"?-1:1)-(b.rol==="admin"?-1:1)||(a.ad||"").localeCompare(b.ad||"","tr");
-  const gercek=kullanicilar.filter(u=>!u.demo&&!u.minimal).sort(sortF);       // ana liste
-  const denemeler=kullanicilar.filter(u=>u.demo||u.minimal).sort(sortF);      // 🧪 demo + minimal
   async function ilkAdmin(){
     if(!ad.trim()) return alert("İsim gir.");
     if(yeniPin.length<4) return alert("4+ haneli bir PIN belirle.");
     const obj={ad:ad.trim(),rol:"admin",simge:"👑",renkH:adRenk(ad).H,...(await yeniKullaniciPin(yeniPin))};
     const id=await save("kullanici",obj); onGiris({id,...obj});
   }
-  function ac(u){ setSecId(u.id); setPin(""); setHata(""); }
-  function kapat(){ setSecId(null); setPin(""); setHata(""); }
-  // rakam gir → 4+ hanede otomatik kontrol; doğruysa giriş (enter yok), yanlışsa uyar
-  const bas=n=>{ const s=sec; if(!s) return; const np=(pin+n).slice(0,10); setHata(""); setPin(np);
-    if(np.length>=4) pinDogru(s,np).then(ok=>{ if(ok) onGiris(s); else setHata("Şifre yanlış — tekrar dene"); }); };
-  const geri=()=>{ setHata(""); setPin(p=>p.slice(0,-1)); };
-  // hesap satırı
-  const satir=u=>h("button",{key:u.id,onClick:()=>ac(u),type:"button",
-    style:{display:"flex",alignItems:"center",gap:12,padding:"13px 14px",border:"1px solid "+C.line,borderRadius:14,background:"#fff",cursor:"pointer",textAlign:"left",width:"100%"}},
-    h("div",{style:{width:40,height:40,borderRadius:"50%",background:"#f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}},u.simge||"🙂"),
-    h("div",{style:{flex:1,minWidth:0}},
-      h("div",{style:{fontWeight:800,fontSize:15}},u.ad)),
-    h("div",{style:{fontSize:18,color:C.mut}},"›"));
-  // tuş takımı tuşu
-  const tus=(lbl,fn,tip)=>{ const st=tip==="ok"?{background:"#16a34a",color:"#fff",border:"1px solid #16a34a"}
-    : tip==="del"?{background:"transparent",color:C.mut,border:"1px solid transparent"}
-    : {background:"#f8fafc",color:"#1e293b",border:"1px solid #e2e8f0"};
-    return h("button",{key:lbl,type:"button",onClick:fn,disabled:bekle,
-      style:{padding:"15px 0",borderRadius:14,fontSize:tip?20:23,fontWeight:800,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",...st}},lbl); };
+  const norm=t=>String(t||"").trim().toLocaleLowerCase("tr");
+  async function girisYap(){
+    if(bekle) return; setHata("");
+    const k=norm(kad), p=String(sifre||"");
+    if(!k||p.length<4){ setHata("Kullanıcı adı ve şifreyi gir"); return; }
+    setBekle(true);
+    try{
+      const aday=kullanicilar.filter(u=>norm(u.ad)===k&&!u.arsiv);
+      for(const u of aday){ if(await pinDogru(u,p)){ onGiris(u); return; } }
+      setHata("Kullanıcı adı ya da şifre hatalı"); setSifre("");
+    }catch(e){ setHata("Giriş yapılamadı"); }
+    finally{ setBekle(false); }
+  }
   return h("div",{className:"tk-giris",style:{background:"linear-gradient(160deg,#eef4ff 0%,#fdf2f8 55%,#fff7ed 100%)"}},
     h("div",{style:{width:"100%",maxWidth:400,maxHeight:"100%",overflowY:"auto",background:"#fff",borderRadius:22,padding:"22px 20px",boxShadow:"0 20px 50px rgba(30,41,80,.16)"}},
-      h("div",{style:{textAlign:"center",marginBottom:14}},
+      h("div",{style:{textAlign:"center",marginBottom:16}},
         h("img",{src:"tikita-logo.png",alt:"Tikita",style:{width:"72%",maxWidth:220,height:"auto",display:"block",margin:"0 auto"}}),
         yok?h("div",{style:{fontSize:13,color:C.mut,marginTop:8}},"İlk yönetici hesabını oluştur"):null),
       yok ? h("div",null,
           h(Field,{label:"Yönetici adı"}, h("input",{style:S.input,value:ad,onChange:e=>setAd(e.target.value)})),
           h(Field,{label:"PIN (4+ hane)"}, h("input",{type:"password",inputMode:"numeric",style:S.input,value:yeniPin,onChange:e=>setYeniPin(e.target.value.replace(/\D/g,"")),onKeyDown:e=>{if(e.key==="Enter")ilkAdmin();}})),
           h("button",{style:{...S.btn("p"),width:"100%",marginTop:8},onClick:ilkAdmin},"👑 Yönetici oluştur ve gir"))
-      : h("div",{style:{display:"grid",gap:10}},
-          gercek.map(satir),
-          denemeler.length? h("div",null,
-            h("button",{onClick:()=>setDenemeAcik(v=>!v),type:"button",
-              style:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",marginTop:4,padding:"11px 12px",
-                border:"1px dashed "+C.line,borderRadius:12,background:"transparent",color:C.mut,fontWeight:800,fontSize:13,cursor:"pointer"}},
-              "🧪 Denemeler", h("span",{style:{fontSize:11}},denemeAcik?"▲":"▼")),
-            denemeAcik? h("div",{style:{display:"grid",gap:10,marginTop:10}}, denemeler.map(satir)) : null) : null),
-      // 🔢 ŞİFRE MODALI — sistem klavyesi yok, tuş takımı
-      sec? h("div",{style:{...S.overlay,zIndex:60},onClick:kapat},
-        h("div",{onClick:e=>e.stopPropagation(),style:{width:"100%",maxWidth:330,background:"#fff",borderRadius:22,padding:"20px 20px 18px",boxShadow:"0 24px 60px rgba(0,0,0,.32)"}},
-          h("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:6,marginBottom:12}},
-            h("div",{style:{width:52,height:52,borderRadius:"50%",background:"#f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}},sec.simge||"🙂"),
-            h("div",{style:{fontWeight:800,fontSize:17}},sec.ad),
-            null),
-          h("div",{style:{display:"flex",justifyContent:"center",gap:11,margin:"2px 0 3px",minHeight:18}},
-            Array.from({length:Math.max(4,pin.length)}).map((_,i)=>h("span",{key:i,
-              style:{width:14,height:14,borderRadius:"50%",background:i<pin.length?(hata?"#dc2626":"#1e293b"):"#e2e8f0",transition:"background .15s"}}))),
-          h("div",{style:{textAlign:"center",height:18,fontSize:12,fontWeight:700,color:"#dc2626",marginBottom:8}},hata||""),
-          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}},
-            ["1","2","3","4","5","6","7","8","9"].map(n=>tus(n,()=>bas(n))),
-            h("div",null),
-            tus("0",()=>bas("0")),
-            tus("⌫",geri,"del"))
-        )) : null
+      : h("div",{style:{display:"grid",gap:12}},
+          h("input",{value:kad,onChange:e=>{setKad(e.target.value);setHata("");},placeholder:"Kullanıcı adı",autoComplete:"username",
+            onKeyDown:e=>{ if(e.key==="Enter") girisYap(); },
+            style:{...S.input,fontSize:16,padding:"14px 14px"}}),
+          h("input",{value:sifre,onChange:e=>{setSifre(e.target.value.replace(/\D/g,""));setHata("");},placeholder:"Şifre",
+            type:"password",inputMode:"numeric",autoComplete:"current-password",
+            onKeyDown:e=>{ if(e.key==="Enter") girisYap(); },
+            style:{...S.input,fontSize:16,padding:"14px 14px",letterSpacing:3}}),
+          h("div",{style:{minHeight:18,textAlign:"center",fontSize:12.5,fontWeight:700,color:"#dc2626"}},hata||""),
+          h("button",{onClick:girisYap,disabled:bekle,type:"button",
+            style:{width:"100%",padding:"15px 0",borderRadius:14,border:"none",fontSize:15.5,fontWeight:800,cursor:"pointer",
+              background:bekle?"#cbd5e1":"#1e293b",color:"#fff"}},bekle?"⏳ Kontrol ediliyor…":"Giriş yap"))
     ));
 }
 function EkipModal({ kullanicilar, aktif, tablaUcret, ayar, plan, onKapat }){
