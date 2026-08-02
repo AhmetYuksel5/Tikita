@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="K6";   // komuta (admin) deneme sürümü
+const SURUM="K7";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1172,19 +1172,21 @@ const GIDER_TUR=["Montaj işçiliği","Elektrik","Kargo","Bakım","Vergi","Tanı
 const STOK_TUR=["Filament alımı","Sarf malzemesi alımı","Yedek parça alımı"];
 const stokAlimMi=g=>!!(g&&(g.stok||STOK_TUR.indexOf(g.tur)>=0));
 const SABIT_TUR=["Kira","İnternet","Maaş","Abonelik","Sigorta","Vergi","Diğer"];
+const YATIRIM_TUR=["Makine taksidi","Kredi taksidi","Yatırım"];
 // aylık sabit giderleri seçili döneme yay — tam ay = tam tutar, kısa dönem = gün oranı
 function sabitHesap(list,b0,b1){
   const L=(list||[]).filter(x=>num(x.tutar)>0&&x.baslangic);
-  const bos={toplam:0,tur:{},aylik:0,sayi:0,gun:0};
+  const bos={toplam:0,tur:{},aylik:0,sayi:0,gun:0,yatirim:0};
   if(!L.length) return bos;
   const simdi=Date.now();
   const s0=b0>0?b0:Math.min.apply(null,L.map(x=>new Date(x.baslangic+"-01T00:00:00").getTime()));
   const s1=isFinite(b1)?b1:simdi;   // seçilen aralık aynen esas alınır; "Tümü" bugüne kadar
   const ayKey=(y,m)=>y+"-"+String(m+1).padStart(2,"0");
   const buAy=ayKey(new Date().getFullYear(),new Date().getMonth());
-  const aylik=L.filter(x=>x.baslangic<=buAy&&(!x.bitis||x.bitis>=buAy)).reduce((s2,x)=>s2+num(x.tutar),0);
+  const aktifler=L.filter(x=>x.baslangic<=buAy&&(!x.bitis||x.bitis>=buAy));
+  const aylik=aktifler.filter(x=>!x.stok).reduce((s2,x)=>s2+num(x.tutar),0);
   if(!(s1>s0)) return {...bos,aylik};
-  let toplam=0,gun=0; const tur={}; const gorulen={};
+  let toplam=0,gun=0,yatirim=0; const tur={}; const gorulen={};
   let d=new Date(s0); d=new Date(d.getFullYear(),d.getMonth(),1);
   while(d.getTime()<s1){
     const y=d.getFullYear(), m=d.getMonth();
@@ -1194,10 +1196,12 @@ function sabitHesap(list,b0,b1){
     const key=ayKey(y,m);
     gun+=g2;
     L.forEach(x=>{ if(x.baslangic>key) return; if(x.bitis&&x.bitis<key) return;
-      const t=num(x.tutar)*g2/gunSayi; toplam+=t; const k=x.tur||"Diğer"; tur[k]=(tur[k]||0)+t; gorulen[x.id||k]=1; });
+      const t=num(x.tutar)*g2/gunSayi; gorulen[x.id||(x.tur||"Diğer")]=1;
+      if(x.stok){ yatirim+=t; return; }   // yatırım/taksit → nakit çıkışı, kâra düşmez
+      toplam+=t; const k=x.tur||"Diğer"; tur[k]=(tur[k]||0)+t; });
     d=new Date(y,m+1,1);
   }
-  return {toplam,tur,aylik,sayi:Object.keys(gorulen).length,gun:Math.round(gun*10)/10};
+  return {toplam,tur,aylik,yatirim,sayi:Object.keys(gorulen).length,gun:Math.round(gun*10)/10};
 }
 function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet,onSil,onSabitKaydet,onSabitSil,onClose,bekle}){
   const [sekme,setSekme]=useState("tek");
@@ -1205,7 +1209,7 @@ function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet
   const [sDuzen,setSDuzen]=useState(null);
   const ayStr=d2=>d2.getFullYear()+"-"+String(d2.getMonth()+1).padStart(2,"0");
   const buAy=ayStr(new Date());
-  const sBos={id:null,tur:SABIT_TUR[0],aciklama:"",tutar:"",baslangic:buAy,bitis:""};
+  const sBos={id:null,tur:SABIT_TUR[0],aciklama:"",tutar:"",baslangic:buAy,bitis:"",stok:false};
   const sHesap=sabitHesap(sabitler,b0,b1);
   const sList=(sabitler||[]).slice().sort((a2,b2)=>(a2.bitis?1:0)-(b2.bitis?1:0)||(b2.baslangic||"").localeCompare(a2.baslangic||""));
   const bugun=()=>{ const d2=new Date(); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset()); return d2.toISOString().slice(0,10); };
@@ -1255,11 +1259,16 @@ function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet
       style:{width:"100%",padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},"Gideri sil"):null);
   if(sDuzen) return h(Sheet,{ik:"🔁",hex:"#b91c1c",baslik:sDuzen.id?"Sabit gideri düzenle":"Yeni sabit gider",alt:"aylık · güncellenene kadar geçerli",onClose:()=>setSDuzen(null),
     cta:bekle?"⏳…":"Kaydet",disabled:num(sDuzen.tutar)<=0||!sDuzen.baslangic||bekle,
-    onCta:()=>{ onSabitKaydet({id:sDuzen.id,tur:sDuzen.tur,aciklama:(sDuzen.aciklama||"").trim(),tutar:num(sDuzen.tutar),baslangic:sDuzen.baslangic,bitis:sDuzen.bitis||""}); setSDuzen(null); }},
+    onCta:()=>{ onSabitKaydet({id:sDuzen.id,tur:sDuzen.tur,aciklama:(sDuzen.aciklama||"").trim(),tutar:num(sDuzen.tutar),baslangic:sDuzen.baslangic,bitis:sDuzen.bitis||"",stok:!!sDuzen.stok}); setSDuzen(null); }},
     h("button",{onClick:()=>setSDuzen(null),style:{marginBottom:12,fontSize:12.5,fontWeight:800,color:"var(--cyan)",background:"none",padding:0}},"‹ Geri"),
-    h("div",{className:"lbl",style:{marginBottom:8}},"Kalem"),
+    h("div",{className:"lbl",style:{marginBottom:8}},"Gider kalemi — kârdan düşer"),
+    h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:12}},
+      SABIT_TUR.map(t=>h(Chip,{key:t,on:sDuzen.tur===t&&!sDuzen.stok,onClick:()=>setSDuzen(o=>({...o,tur:t,stok:false}))},t))),
+    h("div",{className:"lbl",style:{marginBottom:8}},"Yatırım / taksit — kârdan düşmez"),
     h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}},
-      SABIT_TUR.map(t=>h(Chip,{key:t,on:sDuzen.tur===t,onClick:()=>setSDuzen(o=>({...o,tur:t}))},t))),
+      YATIRIM_TUR.map(t=>h(Chip,{key:t,on:sDuzen.tur===t&&!!sDuzen.stok,onClick:()=>setSDuzen(o=>({...o,tur:t,stok:true}))},t))),
+    sDuzen.stok?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#eff8fd",border:"1px solid #a5d8f3",fontSize:11.5,fontWeight:700,color:"#0369a1",marginBottom:14,lineHeight:1.5}},
+      "Nakit çıkışı olarak tutulur, net kârdan düşülmez — makinenin yıpranması saat maliyetiyle ürüne zaten yansıyor."):null,
     h("div",{className:"lbl",style:{marginBottom:8}},"Aylık tutar ₺"),
     h("input",{type:"number",inputMode:"decimal",step:"any",value:sDuzen.tutar,onChange:e=>setSDuzen(o=>({...o,tutar:e.target.value})),style:{...inp,marginBottom:14}}),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
@@ -1280,13 +1289,13 @@ function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet
     basEk:h("button",{onClick:()=>setSDuzen(sBos),title:"Sabit gider ekle",style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:19,fontWeight:800,color:"var(--cyan)"}},"+")},
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},sekmeBtn("tek","Tek seferlik"),sekmeBtn("sabit","Aylık sabit")),
     sList.length?sList.map((g,i)=>{ const suruyor=!g.bitis||g.bitis>=buAy;
-      return h("button",{key:g.id||i,onClick:()=>setSDuzen({id:g.id,tur:g.tur||"Diğer",aciklama:g.aciklama||"",tutar:String(num(g.tutar)),baslangic:g.baslangic||buAy,bitis:g.bitis||""}),
+      return h("button",{key:g.id||i,onClick:()=>setSDuzen({id:g.id,tur:g.tur||"Diğer",aciklama:g.aciklama||"",tutar:String(num(g.tutar)),baslangic:g.baslangic||buAy,bitis:g.bitis||"",stok:!!g.stok}),
         style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"11px 0",borderTop:i?"1px solid var(--line)":"none",background:"none",opacity:suruyor?1:.55}},
         h("div",{style:{flex:1,minWidth:0}},
           h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.tur||"Diğer"),
           h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-            (g.baslangic||"")+" → "+(g.bitis?g.bitis:"sürüyor")+(g.aciklama?(" · "+g.aciklama):""))),
-        h("span",{style:{fontWeight:800,color:suruyor?"var(--red)":"var(--mut2)",flexShrink:0}},tlk(g.tutar)),
+            (g.baslangic||"")+" → "+(g.bitis?g.bitis:"sürüyor")+(g.aciklama?(" · "+g.aciklama):"")+(g.stok?" · yatırım":""))),
+        h("span",{style:{fontWeight:800,color:!suruyor?"var(--mut2)":(g.stok?"var(--cyan)":"var(--red)"),flexShrink:0}},tlk(g.tutar)),
         h("span",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:700,flexShrink:0}},"/ay")); })
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Sabit gider yok."));
   return h(Sheet,{ik:"💸",hex:"#b91c1c",baslik:"Giderler",alt:L.length+" kayıt · "+tlk(toplam+sHesap.toplam),onClose,cta:"Kapat",onCta:onClose,
@@ -1341,6 +1350,16 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
   return h(Sheet,{ik:"🔧",hex:"#0369a1",baslik:"Montaj görevleri",alt:borc>0?("ödenecek "+tlk(borc)):"",onClose,cta:"Kapat",onCta:onClose,
     basEk:h("button",{onClick:()=>setYeni({urunId:"",adet:"",kullaniciId:(personel[0]&&personel[0].id)||"",not:""}),title:"Görev ver",
       style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:19,fontWeight:800,color:"var(--cyan)"}},"+")},
+    (()=>{ const L2=liste;
+      const ad2=L2.reduce((s2,g)=>s2+num(g.durum==="teslim"?g.teslimAdet:(g.durum==="alindi"?g.alinanAdet:g.adet)),0);
+      const tut2=L2.reduce((s2,g)=>s2+num(g.durum==="teslim"?g.teslimAdet:(g.durum==="alindi"?g.alinanAdet:g.adet))*num(g.birimUcret),0);
+      const kutu=(v,l,renk)=>h("div",{style:{flex:1,minWidth:0,padding:"11px 12px",borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)"}},
+        h("div",{style:{fontSize:17,fontWeight:800,color:renk,lineHeight:1.1}},v),
+        h("div",{style:{fontSize:10.5,color:"var(--mut)",fontWeight:700,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},l));
+      return h("div",{style:{display:"flex",gap:8,marginBottom:12}},
+        kutu(ad2+" ad",sekme==="acik"?"verilen ürün":"teslim edilen","var(--txt)"),
+        kutu(tlk(tut2),sekme==="acik"?"montaj ücreti":"hakediş","var(--gold)"),
+        sekme==="biten"?kutu(tlk(borc),"ödenecek",borc>0?"var(--red)":"var(--green)"):null); })(),
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       [["acik","Açık",acik.length],["biten","Biten",biten.length]].map(([k,lbl,n])=>
         h("button",{key:k,onClick:()=>setSekme(k),style:{flex:1,padding:"10px 8px",borderRadius:12,fontSize:13.5,fontWeight:800,
@@ -2545,7 +2564,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
   const tkSabit=sabitHesap(sabitGider,b0,b1);
   const tkStokList=tkGiderList.filter(stokAlimMi);          // stok alımı — nakit çıkışı, kâra düşmez
   const tkGerGider=tkGiderList.filter(x=>!stokAlimMi(x));   // gerçek gider
-  const tkStokAlim=tkStokList.reduce((s2,x)=>s2+num(x.tutar),0);
+  const tkStokAlim=tkStokList.reduce((s2,x)=>s2+num(x.tutar),0)+num(tkSabit.yatirim);
   const tkGider=tkGerGider.reduce((s2,x)=>s2+num(x.tutar),0)+tkSabit.toplam;
   const tkGiderTur=(()=>{ const m={}; tkGerGider.forEach(x=>{ const k=x.tur||"Diğer"; m[k]=(m[k]||0)+num(x.tutar); });
     Object.keys(tkSabit.tur).forEach(k=>{ m[k]=(m[k]||0)+tkSabit.tur[k]; });
@@ -2572,8 +2591,9 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
       rows:tkUList.slice().sort((a,b)=>b.oran-a.oran).map(o=>({t:o.u,
         alt:o.adet+" ad · kâr "+tl(o.kar)+(o.malsiz>0?" · maliyet yok":""),
         v:"%"+Math.round(o.oran*100),renk:o.oran<0?"var(--red)":"var(--cyan)"}))}),
-    stokAlim:()=>({ik:"📦",hex:"#0369a1",baslik:"Stok alımları — kâra düşmez",
-      rows:srt(tkStokList).map(x=>({t:x.tur||"Alım",alt:fmtS(x.tarih)+(x.aciklama?(" · "+x.aciklama):""),v:tlk(x.tutar),renk:"var(--cyan)"}))}),
+    stokAlim:()=>({ik:"📦",hex:"#0369a1",baslik:"Yatırım & stok alımı — kâra düşmez",
+      rows:srt(tkStokList).map(x=>({t:x.tur||"Alım",alt:fmtS(x.tarih)+(x.aciklama?(" · "+x.aciklama):""),v:tlk(x.tutar),renk:"var(--cyan)"}))
+        .concat(num(tkSabit.yatirim)>0?[{t:"Aylık taksit/yatırım payı",alt:tkSabit.gun+" günlük pay",v:tlk(tkSabit.yatirim),renk:"var(--cyan)"}]:[])}),
     gider:()=>({ik:"💸",hex:"#b91c1c",baslik:"Gider dökümü",
       alt:(tkSabit.toplam>0?("sabitler "+tkSabit.gun+" günlük pay · aylık "+tlk(tkSabit.aylik)):(tkGerGider.length+" kayıt")),
       rows:tkGiderTur.map(o=>({t:o.tur,alt:"cironun %"+(tkCiro>0?Math.round(o.tut/tkCiro*100):0)+"'i",v:tlk(o.tut),renk:"var(--red)"}))}),
@@ -2624,7 +2644,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         h(KStat,{ik:h(Icn,{n:"box",c:"var(--txt)"}),l:"Maliyet",v:tl(tkMal),s:tkUList.length+" ürün",renk:"var(--txt)",onClick:()=>setDet(tkDet.urunAd())}),
         h(KStat,{ik:h(Icn,{n:"wallet",c:"var(--red)"}),l:"Gider",v:tlk(tkGider),s:((tkGerGider.length+tkSabit.sayi)+" kalem"+(tkSabit.aylik>0?(" · sabit "+tlk(tkSabit.aylik)+"/ay"):"")+" ›"),renk:"var(--red)",onClick:()=>ac&&ac({tip:"gider",b0,b1})}),
         h(KStat,{ik:h(Icn,{n:"trend",c:tkNet<0?"var(--red)":"var(--green)"}),l:"Net kâr",v:tlk(tkNet),s:"kâr − gider",renk:tkNet<0?"var(--red)":"var(--green)",onClick:tkGiderTur.length?()=>setDet(tkDet.gider()):null}),
-        tkStokAlim>0?h(KStat,{ik:h(Icn,{n:"box",c:"var(--cyan)"}),l:"Stok alımı",v:tlk(tkStokAlim),s:"kâra düşmez ›",renk:"var(--cyan)",onClick:()=>setDet(tkDet.stokAlim())}):null),
+        tkStokAlim>0?h(KStat,{ik:h(Icn,{n:"box",c:"var(--cyan)"}),l:"Yatırım & stok",v:tlk(tkStokAlim),s:"kâra düşmez ›",renk:"var(--cyan)",onClick:()=>setDet(tkDet.stokAlim())}):null),
       tkMalsiz>0?h("button",{onClick:()=>setDet(tkDet.malsiz()),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412",marginBottom:14}},tkMalsiz+" adette üretim maliyeti tanımsız · "+tkUList.filter(o=>o.malsiz>0).length+" ürün ›"):null,
       tkSorunlu.length?h("button",{onClick:()=>setAlisDuzen(tkSorunlu),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12,fontWeight:700,color:"#991b1b",marginBottom:14}},tkSorunluAd+" adette veriliş fiyatı maliyetin altında ya da eksik · "+tkSorunlu.length+" kayıt ›"):null,
       h("div",{className:"lbl",style:{marginBottom:8,display:"flex",alignItems:"center",gap:6}},h(Icn,{n:"box",c:"var(--mut)",s:15}),"Ürün bazında"),
@@ -2643,7 +2663,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         h("span",{style:{fontSize:17,fontWeight:800,color:tkNet<0?"var(--red)":"var(--green)"}},tlk(tkNet))),
       tkStokAlim>0?h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"11px 14px",borderRadius:14,
         background:"var(--surf2)",border:"1px solid var(--line)",marginBottom:16,fontSize:12.5,fontWeight:800}},
-        h("span",{style:{color:"var(--mut)"}},"Stok alımı (filament, sarf) — kâra düşmez"),
+        h("span",{style:{color:"var(--mut)"}},"Yatırım & stok alımı — kâra düşmez"),
         h("span",{style:{color:"var(--cyan)",fontSize:15}},tlk(tkStokAlim))):null,
       h("button",{onClick:()=>ac&&ac({tip:"gider",b0,b1}),style:{width:"100%",padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,color:"var(--cyan)"}},"Giderleri düzenle")):null,
     bol==="paz"?h(React.Fragment,null,
@@ -3243,7 +3263,7 @@ function App(){
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
     modal&&modal.tip==="gider"&&h(GiderYonetimSheet,{giderler,sabitler:sabitGider,filamentler,sarflar,b0:modal.b0!=null?modal.b0:0,b1:modal.b1!=null?modal.b1:Infinity,bekle:isBekle,onClose:()=>setModal(null),
       onSabitKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
-        try{ await save("sabit_gider",{...(g.id?{id:g.id}:{}),tur:g.tur,aciklama:g.aciklama,tutar:num(g.tutar),baslangic:g.baslangic,bitis:g.bitis||""}); say(g.id?"Güncellendi":"Sabit gider eklendi"); }
+        try{ await save("sabit_gider",{...(g.id?{id:g.id}:{}),tur:g.tur,aciklama:g.aciklama,tutar:num(g.tutar),baslangic:g.baslangic,bitis:g.bitis||"",stok:!!g.stok}); say(g.id?"Güncellendi":"Sabit gider eklendi"); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onSabitSil:async(id)=>{ try{ await remove("sabit_gider",id); say("Silindi"); }catch(e){ console.error(e); say("Silinemedi"); } },
       onKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
