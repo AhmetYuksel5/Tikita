@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="K1";   // komuta (admin) deneme sürümü
+const SURUM="K2";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1151,7 +1151,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
     (!duzen&&bas&&(new Date(bas).getTime()+num(sure)*60000<=Date.now()))?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#f0fdf4",border:"1px solid #86efac",fontSize:12,fontWeight:700,color:"#166534",marginBottom:12}},
       "Bu saat geçmişte — baskı 'zaten basıldı' olarak o saate kaydedilir (şimdiki saate çekilmez)."):null,
     (filamentler&&filamentler.length)?h("div",{style:{marginBottom:12}},
-      h("div",{className:"lbl",style:{marginBottom:8}},"Filament (ops.)"),
+      h("div",{className:"lbl",style:{marginBottom:8,color:(!filamentId&&num(gram)>0)?"#c2410c":undefined}},(!filamentId&&num(gram)>0)?"Filament — seçilmezse stoktan düşülmez":"Filament"),
       h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
         h(Chip,{on:!filamentId,onClick:()=>setFilamentId("")},"—"),
         filamentler.map(fl=>h(Chip,{key:fl.id,on:filamentId===fl.id,onClick:()=>setFilamentId(fl.id)},(flKod(fl)?flKod(fl)+" · ":"")+flAd(fl))))):null,
@@ -1768,6 +1768,7 @@ function Uretim({d,plan,makineler,ac,onTabla,fotoMap}){
   const GERI_MS=4*3600*1000;   // üretim hattı her zaman 4 saat geriden başlar
   const gunBasi=t=>{ const d2=new Date(t); d2.setHours(0,0,0,0); return d2.getTime(); };
   const [bas,setBas]=useState(()=>gunBasi(Date.now()-GERI_MS));
+  const [filsizAcik,setFilsizAcik]=useState(false);
   const elleRef=useRef(false);   // kullanıcı ileri/geri kaydırdıysa otomatik sabitleme durur
   const [gunSayisi,setGunSayisi]=useState(1);   // varsayılan: en dar aralık (1 gün) — her girişte standart
   const [aralikAcik,setAralikAcik]=useState(false);
@@ -1875,7 +1876,14 @@ function Uretim({d,plan,makineler,ac,onTabla,fotoMap}){
     if(basladi) durum=x.e<=now?"bitti":"basiyor"; else if(x.s>now) durum="sirada"; else if(x.e>now) durum="gecikti"; else durum="geride";
     ac({tip:"is",x:{p,es:x.s,ee:x.e,durum,mkAd:mk.ad||"?"}}); };
   const Lej=(renk,ad)=>h("div",{style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#fff"}},h("span",{style:{width:12,height:12,borderRadius:4,background:renk,display:"inline-block"}}),ad);
+  // ⚠️ filamenti seçilmemiş baskılar — stoktan düşülemiyor
+  const filsiz=(plan||[]).filter(p=>!p.filamentId&&num(p.gram)>0)
+    .sort((x,y)=>new Date(y.gercekBaslangic||y.baslangic)-new Date(x.gercekBaslangic||x.baslangic));
+  const filsizGram=filsiz.reduce((s2,p)=>s2+num(p.gram),0);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
+    filsiz.length?h("button",{onClick:()=>setFilsizAcik(true),style:{display:"block",width:"100%",textAlign:"left",padding:"10px 13px",borderRadius:12,
+      background:"#fff7ed",border:"1px solid #fdba74",fontSize:12.5,fontWeight:700,color:"#9a3412",marginBottom:12}},
+      filsiz.length+" baskıda filament seçilmemiş · "+Math.round(filsizGram)+" gr stoktan düşülemedi ›"):null,
     h("div",{style:{...GS.card,overflow:"hidden",marginBottom:16}},
       h("div",{ref:scrollRef,style:{overflowX:"auto",touchAction:"pan-x pan-y",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}},
         h("div",{style:{minWidth:LABEL_W+toplamW}},
@@ -1975,6 +1983,16 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
             (gramTop>0?Math.round(gramTop).toLocaleString("tr"):"0")+" gr"))),
       h("button",{onClick:()=>ac({tip:"makineYonet"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:15,borderRadius:14,marginBottom:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,color:"var(--txt)",textAlign:"left"}},h(Icn,{n:"printer",c:"var(--cyan)",s:19}),"Makineler"),
       h("button",{onClick:()=>ac({tip:"filamentYonet"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:15,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,color:"var(--txt)",textAlign:"left"}},h(Icn,{n:"box",c:"var(--violet)",s:19}),"Filamentler")):null,
+    filsizAcik?h(Sheet,{ik:"⚠️",hex:"#c2410c",baslik:"Filament seçilmemiş baskılar",alt:filsiz.length+" baskı · "+Math.round(filsizGram)+" gr",onClose:()=>setFilsizAcik(false),cta:"Kapat",onCta:()=>setFilsizAcik(false)},
+      filsiz.slice(0,40).map((p,i)=>{ const mk=(makineler||[]).find(m=>m.id===p.makineId); const pr=mk?mkParca(mk):null;
+        const bitti=new Date(p.gercekBaslangic||p.baslangic).getTime()+num(p.sureDk)*60000<=Date.now();
+        return h("button",{key:p.id||i,onClick:()=>{ setFilsizAcik(false); ac({tip:"isEkle",kayit:p}); },
+          style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"10px 0",borderTop:i?"1px solid var(--line)":"none",background:"none"}},
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(num(p.adet)||1)+" × "+(p.ad||"iş")),
+            h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},(pr?((pr.no?pr.no+" · ":"")+pr.ad):"makine")+" · "+fmtS(p.gercekBaslangic||p.baslangic)+" · "+(p.basladi?(bitti?"bitti":"basıyor"):"planlı"))),
+          h("span",{style:{fontWeight:800,color:"#c2410c",flexShrink:0}},num(p.gram)+" gr"),
+          h("span",{style:{color:"var(--mut2)",fontWeight:800,flexShrink:0}},"›")); })):null,
     aralikAcik?h(Sheet,{ik:h(Icn,{n:"cal",c:"#fff",s:22}),hex:GC.navyHdr,baslik:"Zaman aralığı",alt:"",onClose:()=>setAralikAcik(false)},
       h("div",{style:{display:"grid",gap:9,marginBottom:14}},
         [[1,"1 gün"],[3,"3 gün"],[7,"7 gün"]].map(g=>h("button",{key:g[0],onClick:()=>{ setGunSayisi(g[0]); setAralikAcik(false); },
