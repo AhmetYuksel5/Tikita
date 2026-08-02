@@ -80,6 +80,7 @@ const HESAP=[
  {k:"108",  ad:"Saha Kasası (pazarlamacıda)",  g:"DV",  y:"b", nakit:1},
  {k:"120",  ad:"Alıcılar (kaleler)",           g:"DV",  y:"b"},
  {k:"129",  ad:"Şüpheli Alacak Karşılığı (−)", g:"DV",  y:"a", eksi:1},
+ {k:"136",  ad:"Personelden Alacaklar",         g:"DV",  y:"b"},
  {k:"150",  ad:"İlk Madde ve Malzeme (filament)", g:"DV", y:"b", stok:1},
  {k:"151",  ad:"Yarı Mamuller (parçalar)",     g:"DV",  y:"b", stok:1},
  {k:"152.1",ad:"Mamuller · Depo",              g:"DV",  y:"b", stok:1},
@@ -106,7 +107,8 @@ const HESAP=[
  {k:"620",  ad:"Satılan Mamul Maliyeti",       g:"SMM", y:"b"},
  {k:"629",  ad:"Üretim Gider Farkı",           g:"SMM", y:"b"},
  {k:"659",  ad:"Stok Değerleme Farkı",         g:"DIG", y:"b"},
- {k:"631",  ad:"Pazarlama, Satış ve Dağıtım Giderleri", g:"FAG", y:"b"},
+ {k:"631",  ad:"Pazarlamacı Payı (değişken)",    g:"FAG", y:"b", degisken:1},
+ {k:"631.9",ad:"Diğer Pazarlama Giderleri",     g:"FAG", y:"b"},
  {k:"632",  ad:"Genel Yönetim Giderleri",      g:"FAG", y:"b"},
  {k:"654",  ad:"Karşılık Giderleri",           g:"FAG", y:"b"},
  {k:"689",  ad:"Diğer Olağandışı Gider (zayiat)", g:"DIG", y:"b"},
@@ -329,17 +331,25 @@ function defterUret(D,V){
     const hasilatBrut=brutView?mus:Math.min(veris,mus>0?mus:veris);
     const {net,kdv}=ayir(hasilatBrut);
     const prim=brutView?Math.max(0,mus-veris):0;         // pazarlamacı payı → pazarlama gideri
-    const sat=[{h:"120",b:hasilatBrut},{h:"600",a:net},{h:"391",a:kdv}];
-    ek(x.tarih,"satis","Satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),sat,"har:"+x.id);
+    // ⚡ gerilla (seyyar) satış PEŞİNDİR: ayrı tahsilat kaydı yazılmaz, para anında alınır.
+    // Bunu 120'ye borç yazarsak alacak sonsuza dek açık kalır.
+    const pesin=!!(x.gerilla||x.kaynak==="gerilla");
+    if(pesin){
+      ek(x.tarih,"satis","Gerilla satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
+        [{h:"100",b:hasilatBrut-prim},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
+    } else {
+      ek(x.tarih,"satis","Satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
+        [{h:"120",b:hasilatBrut},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
+      if(prim>0.004) ek(x.tarih,"prim","Pazarlamacı payı tahakkuku · "+(x.kullaniciAd||""),
+        [{h:"631",b:prim},{h:"335",a:prim}],"har:"+x.id+":p");
+    }
     if(mal>0) ek(x.tarih,"smm","SMM · "+(x.urunAd||""),[{h:"620",b:mal},{h:kaynakH,a:mal}],"har:"+x.id+":m");
-    if(prim>0.004) ek(x.tarih,"prim","Pazarlamacı payı tahakkuku · "+(x.kullaniciAd||""),
-      [{h:"631",b:prim},{h:"335",a:prim}],"har:"+x.id+":p");
   });
 
   /* ——— 4.7 hediye ——— */
   (D.hareketler||[]).forEach(x=>{ if(x.tip!=="hediye") return;
     const a=num(x.adet), mal=bm(x.urunId)*a; if(mal<=0) return;
-    ek(x.tarih,"hediye","Numune/hediye · "+(x.urunAd||""),[{h:"631",b:mal},{h:"152.2",a:mal}],"har:"+x.id); });
+    ek(x.tarih,"hediye","Numune/hediye · "+(x.urunAd||""),[{h:"631.9",b:mal},{h:"152.2",a:mal}],"har:"+x.id); });
 
   /* ——— 4.8 tahsilat ——— */
   (D.hareketler||[]).forEach(x=>{ if(x.tip!=="tahsilat") return;
@@ -360,11 +370,11 @@ function defterUret(D,V){
   /* ——— 4.9 stant ——— */
   (D.hareketler||[]).forEach(x=>{ if(x.tip!=="stant") return;
     const f=num(x.fiyat); if(f<=0) return;
-    ek(x.tarih,"stant","Stant bedeli · "+(x.yer||""),[{h:"631",b:f},{h:"100",a:f}],"har:"+x.id); });
+    ek(x.tarih,"stant","Stant bedeli · "+(x.yer||""),[{h:"631.9",b:f},{h:"100",a:f}],"har:"+x.id); });
 
   /* ——— 4.10 tek seferlik giderler ——— */
-  const GIDER_HESAP={"Montaj işçiliği":"335","Elektrik":"730","Kargo":"631","Bakım":"730",
-    "Vergi":"360","Tanıtım":"631","Diğer":"632"};
+  const GIDER_HESAP={"Montaj işçiliği":"335","Elektrik":"730","Kargo":"631.9","Bakım":"730",
+    "Vergi":"360","Tanıtım":"631.9","Diğer":"632"};
   const STOK_HESAP={"Filament alımı":"150","Sarf malzemesi alımı":"157","Yedek parça alımı":"157"};
   (D.giderler||[]).forEach(g=>{
     const brut=num(g.tutar); if(brut<=0) return;
@@ -425,7 +435,7 @@ function defterUret(D,V){
 
 /* ═════════ 4b · DÖNEM SONU KAPANIŞ FİŞLERİ ═════════
    Seçilen döneme bağlıdır — bu yüzden defterden ayrı üretilir. */
-function kapanisUret(F,b0,b1,fiziki,V){
+function kapanisUret(F,b0,b1,fiziki,V,D_HAR){
   const K=[]; const simdi=Date.now();
   const ek=(t,tur,ac,sat,ref)=>{ const s=(sat||[]).filter(x=>Math.abs(num(x.b))>0.004||Math.abs(num(x.a))>0.004)
       .map(x=>({h:x.h,b:r2(x.b),a:r2(x.a)}));
@@ -458,7 +468,22 @@ function kapanisUret(F,b0,b1,fiziki,V){
       sat.push({h:kars,b:sayimFark<0?-sayimFark:0,a:sayimFark>0?sayimFark:0});
       ek(son,"sayim","Stok sayım düzeltmesi · "+(kars==="571"?"özkaynak":"gelir tablosu"),sat,"kapanis:sayim"); }
   }
-  return {kapanis:K,ohFark,sayimFark:r2(sayimFark),sayimDetay,sayimGecerli};
+  // 3) alıcılar mutabakatı — satışların "tahsil" alanı ile tahsilat kayıtları uyuşmayabilir
+  //    (eski/excel kayıtlarında tahsilat fişi yazılmadan tahsil işaretlenmiş olabilir)
+  let mutFark=0;
+  if(sayimGecerli&&D_HAR){
+    let acik=0;
+    D_HAR.forEach(x=>{ if(x.tip!=="satis") return;
+      if(x.gerilla||x.kaynak==="gerilla") return;
+      const bek=num(x.adet)*num(x.satisFiyat);
+      acik+=Math.max(0,bek-(x.tahsil==null?bek:num(x.tahsil))); });
+    let defter=0; F.concat(K).forEach(f=>{ if(f.t>b1) return; f.s.forEach(x=>{ if(x.h==="120") defter+=x.b-x.a; }); });
+    mutFark=r2(defter-acik);
+    if(Math.abs(mutFark)>0.5)
+      ek(son,"mutabakat","Alıcılar mutabakatı · kayıtsız tahsilat",
+        mutFark>0?[{h:"100",b:mutFark},{h:"120",a:mutFark}]:[{h:"120",b:-mutFark},{h:"100",a:-mutFark}],"kapanis:120");
+  }
+  return {kapanis:K,ohFark,sayimFark:r2(sayimFark),sayimDetay,sayimGecerli,mutFark};
 }
 
 /* ═════════ 5 · MİZAN / TABLOLAR ═════════ */
@@ -492,7 +517,7 @@ function gelirTablosu(G){
   const netSatis=brutSatis-iade;
   const smm=g("620")+g("629");
   const brutKar=netSatis-smm;
-  const fag=g("631")+g("632")+g("654");
+  const fag=g("631")+g("631.9")+g("632")+g("654");
   const faalKar=brutKar-fag;
   const diger=-(g("689")+g("659"));
   const fvok=faalKar+diger;
@@ -502,10 +527,15 @@ function gelirTablosu(G){
   const net=vergiOncesi-vergi;
   return {brutSatis,iade,netSatis,smm,brutKar,fag,faalKar,diger,fvok,fin,vergiOncesi,vergi,net,
     d:{s600:g("600"),s602:g("602"),s610:iade,s620:g("620"),s629:g("629"),s631:g("631"),s632:g("632"),
-       s654:g("654"),s659:g("659"),s689:g("689"),s780:fin,s691:vergi}};
+       s631b:g("631.9"),s654:g("654"),s659:g("659"),s689:g("689"),s780:fin,s691:vergi}};
 }
 
-function bilancoKur(B,kumKar){
+function bilancoKur(B0,kumKar){
+  // 🔁 sunum düzeltmesi: ters bakiye veren hesap karşı tarafa taşınır
+  //    (335 Personele Borçlar borç bakiyesi verirse → 136 Personelden Alacaklar)
+  const B={...B0};
+  if(num(B["335"])<0){ B["136"]=num(B["136"])-num(B["335"]); B["335"]=0; }
+  if(num(B["120"])<0){ B["340"]=num(B["340"])-num(B["120"]); B["120"]=0; }
   const grup=gr=>HESAP.filter(x=>x.g===gr).map(x=>({k:x.k,ad:x.ad,v:num(B[x.k]),eksi:!!x.eksi})).filter(x=>Math.abs(x.v)>0.004);
   const top=a=>a.reduce((s,x)=>s+(x.eksi?-x.v:x.v),0);
   const DV=grup("DV"), DUV=grup("DUV"), KV=grup("KVYK"), UV=grup("UVYK"), OZ=grup("OZ");
@@ -586,10 +616,14 @@ function urunKarlilik(hareketler,M,b0,b1,V){
   return L;
 }
 
-function basabas(GTb,sabitGider,amort){
-  const katkiOran=GTb.netSatis>0?(GTb.netSatis-GTb.smm)/GTb.netSatis:0;
-  const sabit=sabitGider;
-  return {katkiOran:katkiOran*100, sabit, ciro:katkiOran>0?sabit/katkiOran:null,
+// katkı payı = net satış − DEĞİŞKEN maliyet.
+// Pazarlamacı payı (631) satışla orantılıdır → sabit gider değil, değişken maliyettir.
+function basabas(GTb){
+  const degisken=GTb.smm+GTb.d.s631;
+  const sabit=GTb.d.s631b+GTb.d.s632+GTb.d.s654+GTb.fin;
+  const katkiOran=GTb.netSatis>0?(GTb.netSatis-degisken)/GTb.netSatis:0;
+  return {katkiOran:katkiOran*100, sabit, degisken, katki:GTb.netSatis-degisken,
+    ciro:katkiOran>0?sabit/katkiOran:null,
     guvenlik:GTb.netSatis>0&&katkiOran>0?((GTb.netSatis-sabit/katkiOran)/GTb.netSatis*100):null};
 }
 
@@ -685,6 +719,16 @@ function denetim(D,V,F,MZ,BL,GTb,AY,UK,KP){
   const gereken=enDusukKasa<0?num(V.acilisKasa)-enDusukKasa:num(V.acilisKasa);
   dur(kasa<0?"hata":(enDusukKasa<0?"uyari":"ok"),"Kasa bakiyesi",tl(kasa),
     enDusukKasa<0?("Dönem içi en düşük nokta "+tl0(enDusukKasa)+" — açılış kasası en az "+tl0(gereken)+" olmalıydı"):"");
+  // 12b 120 Alıcılar mutabakatı — tahsilat kaydı olmadan "tahsil" işaretlenmiş satışlar
+  let acikBorc=0;
+  (D.hareketler||[]).forEach(x=>{ if(x.tip!=="satis") return;
+    if(x.gerilla||x.kaynak==="gerilla") return;
+    const bek=num(x.adet)*num(x.satisFiyat);
+    acikBorc+=Math.max(0,bek-(x.tahsil==null?bek:num(x.tahsil))); });
+  const mutFark=num(KP.mutFark);   // mutabakat fişi ÖNCESİ fark
+  dur(Math.abs(mutFark)<Math.max(200,acikBorc*0.05)?"ok":"uyari","Alıcılar mutabakatı",
+    "Açık borç "+tl(acikBorc)+(Math.abs(mutFark)>0.5?(" · düzeltilen "+tl(mutFark)):""),
+    Math.abs(mutFark)>0.5?"Tahsilat kaydı yazılmadan satışta tahsil işaretlenmiş — dönem sonu mutabakat fişiyle kasaya alındı":"");
   // 13 konsinye tutarlılığı
   let konsHar=0; (D.hareketler||[]).forEach(x=>{ if(x.tip==="konsinye") konsHar+=num(x.kalan); });
   const konsStok=(D.urunler||[]).reduce((s,u)=>s+num(u.konsinye),0);
@@ -695,7 +739,8 @@ function denetim(D,V,F,MZ,BL,GTb,AY,UK,KP){
   dur(avans>0?"uyari":"ok","Mahsup edilmemiş avans",tl(avans),avans>0?"Sayımsız tahsilat, satışla eşleştirilmemiş":"");
   // 15 personele borç
   const hak=num(MZ.B["335"]);
-  dur(hak>0?"bilgi":"ok","Ödenmemiş hakediş",tl(hak),"Pazarlamacı payı + montaj işçiliği tahakkuku");
+  dur(hak>0?"bilgi":(hak<-1?"uyari":"ok"),hak<-1?"Personele fazla ödeme":"Ödenmemiş hakediş",
+    tl(Math.abs(hak)),hak<-1?"Tahakkuk edenden fazla ödenmiş — bilançoda 136 Personelden Alacaklar":"Pazarlamacı payı + montaj işçiliği tahakkuku");
   // 16 KDV pozisyonu
   const kdvB=num(MZ.B["391"])-num(MZ.B["191"]);
   dur(kdvB>0?"bilgi":"ok","KDV pozisyonu",kdvB>0?("Ödenecek "+tl(kdvB)):("Devreden "+tl(-kdvB)),"");
@@ -784,7 +829,7 @@ function App(){
     const D={urunler,plan,hareketler,filamentler,sarflar,giderler,sabitGider,montajGorev,makineler,
       kullanicilar:kullanicilar||[],urunById,maliyet:M};
     const {fisler:ham,acKg,kgFiyatOrt,aylikAmort,mkSay,mkDeger,fiziki}=defterUret(D,V);
-    const KP=kapanisUret(ham,b0,b1,fiziki,V);
+    const KP=kapanisUret(ham,b0,b1,fiziki,V,hareketler);
     const fisler=ham.concat(KP.kapanis).sort((a,b)=>a.t-b.t);
     fisler.forEach((f,i)=>f.no=i+1);
     // defter stoğu (sayım öncesi) — denetim için
@@ -800,8 +845,8 @@ function App(){
     const NA=nakitAkis(fisler,b0,b1,GTb,donemAmort);
     const AY=alacakYaslandir(hareketler,b1,V);
     const UK=urunKarlilik(hareketler,M,b0,b1,V);
-    const sabitTop=GTb.d.s631+GTb.d.s632+GTb.d.s654+GTb.fin;
-    const BB=basabas(GTb,sabitTop,donemAmort);
+    const BB=basabas(GTb);
+    const sabitTop=BB.sabit;
     const OR=oranlar(BL,GTb,gunSayi,donemAmort);
     const DN=denetim(D,V,fisler,MZ,BL,GTb,AY,UK,KP);
     return {D,M,fisler,MZ,GTb,BL,NA,AY,UK,BB,OR,DN,KP,gunSayi,donemAmort,acKg,kgFiyatOrt,aylikAmort,mkSay,mkDeger,sabitTop};
@@ -876,7 +921,8 @@ function Panel({H,V,b0,b1}){
       h(Sat,{ad:"Net satışlar",v:GTb.netSatis,kalin:true}),
       h(Sat,{ad:"Satılan mamul maliyeti",v:-GTb.smm,gir:1}),
       h(Sat,{ad:"Brüt kâr",v:GTb.brutKar,kalin:true,ust:true}),
-      h(Sat,{ad:"Pazarlama, satış, dağıtım",v:-GTb.d.s631,gir:1}),
+      h(Sat,{ad:"Pazarlamacı payı",v:-GTb.d.s631,gir:1}),
+      GTb.d.s631b?h(Sat,{ad:"Diğer pazarlama giderleri",v:-GTb.d.s631b,gir:1}):null,
       h(Sat,{ad:"Genel yönetim",v:-GTb.d.s632,gir:1}),
       GTb.d.s654?h(Sat,{ad:"Şüpheli alacak karşılığı",v:-GTb.d.s654,gir:1}):null,
       h(Sat,{ad:"Faaliyet kârı",v:GTb.faalKar,kalin:true,ust:true}),
@@ -895,7 +941,8 @@ function Panel({H,V,b0,b1}){
           h(Bar,{p:Math.abs(x.katki)/enBuyuk*100,renk:x.katki<0?"var(--neg)":"var(--acc)"})))
         :h("div",{style:{fontSize:12.5,color:"var(--mut)",padding:"8px 0"}},"Dönemde satış yok"))),
 
-    h(Bolum,{b:"Başabaş",alt:"sabit gider "+tl0(BB.sabit)},
+    h(Bolum,{b:"Başabaş",alt:"sabit gider "+tl0(BB.sabit)+" · değişken "+tl0(BB.degisken)},
+      h(Sat,{ad:"Katkı payı",v:BB.katki}),
       h(Sat,{ad:"Katkı payı oranı",v:0,ik:yzd(BB.katkiOran)}),
       h(Sat,{ad:"Başabaş cirosu",v:0,ik:BB.ciro!=null?tl0(BB.ciro):"—"}),
       h(Sat,{ad:"Güvenlik payı",v:0,ik:BB.guvenlik!=null?yzd(BB.guvenlik):"—",
@@ -924,7 +971,8 @@ function GelirEkran({H,V}){
       h(Sat,{ad:"Satılan mamul maliyeti",v:-d.s620,gir:1,alt:p(d.s620)}),
       d.s629?h(Sat,{ad:"Üretim gider farkı",v:-d.s629,gir:1}):null,
       h(Sat,{ad:"BRÜT SATIŞ KÂRI",v:GTb.brutKar,kalin:true,ust:true,alt:p(GTb.brutKar)}),
-      h(Sat,{ad:"Pazarlama, satış ve dağıtım giderleri",v:-d.s631,gir:1,alt:p(d.s631)}),
+      h(Sat,{ad:"Pazarlamacı payı (değişken)",v:-d.s631,gir:1,alt:p(d.s631)}),
+      d.s631b?h(Sat,{ad:"Diğer pazarlama giderleri",v:-d.s631b,gir:1,alt:p(d.s631b)}):null,
       h(Sat,{ad:"Genel yönetim giderleri",v:-d.s632,gir:1,alt:p(d.s632)}),
       d.s654?h(Sat,{ad:"Karşılık giderleri",v:-d.s654,gir:1}):null,
       h(Sat,{ad:"FAALİYET KÂRI",v:GTb.faalKar,kalin:true,ust:true,alt:p(GTb.faalKar)}),
@@ -1102,7 +1150,7 @@ function AnalizEkran({H,V}){
           h("td",{className:"n",style:{fontWeight:800}},tl0(k.t)))))))),
     h(Bolum,{b:"Bütçe / gerçekleşen",alt:"aylık bütçe dönem uzunluğuna oranlandı"},
       h("div",{style:{padding:"6px 14px 12px"}},
-        [["Ciro",GTb.netSatis,butceCiro,true],["Gider",GTb.d.s631+GTb.d.s632,butceGider,false]].map(([b,g,bt,yuksekIyi])=>{
+        [["Ciro",GTb.netSatis,butceCiro,true],["Gider",GTb.d.s631+GTb.d.s631b+GTb.d.s632,butceGider,false]].map(([b,g,bt,yuksekIyi])=>{
           const o=bt>0?g/bt*100:0;
           const iyi=yuksekIyi?o>=100:o<=100;
           return h("div",{key:b,style:{marginTop:10}},
@@ -1112,11 +1160,13 @@ function AnalizEkran({H,V}){
               h("div",{className:"mono",style:{fontSize:12.5,fontWeight:800,color:iyi?"var(--pos)":"var(--warn)"}},
                 tl0(g)+" · "+yzd(o))),
             h(Bar,{p:Math.min(100,o),renk:iyi?"var(--pos)":"var(--warn)"})); }))),
-    h(Bolum,{b:"Başabaş analizi"},
-      h(Sat,{ad:"Sabit gider yükü",v:BB.sabit}),
+    h(Bolum,{b:"Başabaş analizi",alt:"pazarlamacı payı satışla orantılı → değişken maliyet"},
+      h(Sat,{ad:"Net satışlar",v:GTb.netSatis}),
+      h(Sat,{ad:"Değişken maliyet (SMM + pazarlamacı payı)",v:-BB.degisken,gir:1}),
+      h(Sat,{ad:"Katkı payı",v:BB.katki,kalin:true,ust:true}),
       h(Sat,{ad:"Katkı payı oranı",v:0,ik:yzd(BB.katkiOran)}),
+      h(Sat,{ad:"Sabit gider yükü",v:BB.sabit,ust:true}),
       h(Sat,{ad:"Başabaş cirosu",v:0,ik:BB.ciro!=null?tl0(BB.ciro):"—",kalin:true}),
-      h(Sat,{ad:"Gerçekleşen net satış",v:GTb.netSatis}),
       h(Sat,{ad:"Güvenlik payı",v:0,ik:BB.guvenlik!=null?yzd(BB.guvenlik):"—",ust:true,kalin:true,
         renk:BB.guvenlik!=null&&BB.guvenlik<0?"var(--neg)":"var(--pos)"})));
 }
