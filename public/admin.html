@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="J1";   // komuta (admin) deneme sürümü
+const SURUM="J2";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1160,6 +1160,42 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
       "Maliyet ~"+tl(maliyet)+(num(adet)>0?(" · birim ~"+tl(maliyet/num(adet))):"")+" (makine 12₺/sa"+(filSec?" + filament":"")+")"):null);
 }
 
+// 💸 GİDER KALEMLERİ — kira, elektrik, maaş, montaj işçiliği… Tikita hesabında net kârdan düşülür
+const GIDER_TUR=["Montaj işçiliği","Filament","Sarf malzemesi","Kira","Elektrik","İnternet","Maaş","Kargo","Bakım","Vergi","Diğer"];
+function GiderYonetimSheet({giderler,b0,b1,onKaydet,onSil,onClose,bekle}){
+  const [duzen,setDuzen]=useState(null);
+  const bugun=()=>{ const d2=new Date(); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset()); return d2.toISOString().slice(0,10); };
+  const bos={id:null,tur:GIDER_TUR[3],aciklama:"",tutar:"",tarih:bugun()};
+  const L=(giderler||[]).filter(g=>{ const t=new Date(g.tarih).getTime()||0; return t>=b0&&t<b1; })
+    .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+  const toplam=L.reduce((s2,g)=>s2+num(g.tutar),0);
+  if(duzen) return h(Sheet,{ik:"💸",hex:"#b91c1c",baslik:duzen.id?"Gideri düzenle":"Yeni gider",alt:"",onClose:()=>setDuzen(null),
+    cta:bekle?"⏳…":"Kaydet",disabled:num(duzen.tutar)<=0||!duzen.tarih||bekle,
+    onCta:()=>{ onKaydet({id:duzen.id,tur:duzen.tur,aciklama:(duzen.aciklama||"").trim(),tutar:num(duzen.tutar),tarih:new Date(duzen.tarih+"T12:00:00").toISOString()}); setDuzen(null); }},
+    h("button",{onClick:()=>setDuzen(null),style:{marginBottom:12,fontSize:12.5,fontWeight:800,color:"var(--cyan)",background:"none",padding:0}},"‹ Geri"),
+    h("div",{className:"lbl",style:{marginBottom:8}},"Kalem"),
+    h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}},
+      GIDER_TUR.map(t=>h(Chip,{key:t,on:duzen.tur===t,onClick:()=>setDuzen(o=>({...o,tur:t}))},t))),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Tutar ₺"),
+        h("input",{type:"number",inputMode:"decimal",step:"any",value:duzen.tutar,onChange:e=>setDuzen(o=>({...o,tutar:e.target.value})),style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Tarih"),
+        h("input",{type:"date",value:duzen.tarih,onChange:e=>setDuzen(o=>({...o,tarih:e.target.value})),style:{...inp,fontSize:14,padding:"12px 10px"}}))),
+    h("div",{className:"lbl",style:{marginBottom:8}},"Açıklama"),
+    h("input",{value:duzen.aciklama,onChange:e=>setDuzen(o=>({...o,aciklama:e.target.value})),style:{...inp,marginBottom:14}}),
+    duzen.id?h("button",{onClick:()=>{ if(confirm("Bu gider silinsin mi?")){ onSil(duzen.id); setDuzen(null); } },
+      style:{width:"100%",padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},"Gideri sil"):null);
+  return h(Sheet,{ik:"💸",hex:"#b91c1c",baslik:"Giderler",alt:L.length+" kayıt · "+tlk(toplam),onClose,cta:"Kapat",onCta:onClose,
+    basEk:h("button",{onClick:()=>setDuzen(bos),title:"Gider ekle",style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:19,fontWeight:800,color:"var(--cyan)"}},"+")},
+    L.length?L.map((g,i)=>h(g.oto?"div":"button",{key:g.id||i,...(g.oto?{}:{onClick:()=>setDuzen({id:g.id,tur:g.tur||"Diğer",aciklama:g.aciklama||"",tutar:String(num(g.tutar)),tarih:(g.tarih||"").slice(0,10)})}),
+      style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"10px 0",borderTop:i?"1px solid var(--line)":"none",background:"none"}},
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.tur||"Diğer"),
+        h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+          fmtS(g.tarih)+(g.aciklama?(" · "+g.aciklama):"")+(g.oto?" · otomatik":""))),
+      h("span",{style:{fontWeight:800,color:"var(--red)",flexShrink:0}},tlk(g.tutar))))
+      :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Bu dönemde gider yok."));
+}
 // 🔧 MONTAJ GÖREVLERİ — admin görev açar, montaj personeli teslim alır/verir, hakediş ödenir
 function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onGeri,onClose,bekle}){
   const [yeni,setYeni]=useState(null);   // {urunId,adet,birimUcret,kullaniciId,not}
@@ -2120,7 +2156,7 @@ function HakedisDuzenSheet({sales,onClose,onKaydet,baslik}){
           degisti?h("span",{style:{fontSize:11.5,fontWeight:800,color:"var(--gold)"}},tl(num(x.alisFiyat))+" → "+tl(alis)):null)); })
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde kale satışı yok."));
 }
-function RaporA({d,ac,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil,talepler,onTablaEmri,onTablaIptal}){
+function RaporA({d,ac,giderler,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil,talepler,onTablaEmri,onTablaIptal}){
   const [bol,setBol]=useState("paz");   // 🏢 üst bölüm: paz (pazarlama takip) / tikita (Tikita hesabı)
   const [alt,setAlt]=useState(odak?"hedef":"ozet");   // ozet/paz/kons/alacak/mus/hareket/hedef
   const [kod,setKod]=useState("hafta");
@@ -2261,9 +2297,15 @@ function RaporA({d,ac,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGo
   const tkSorunlu=tkSat.filter(x=>x.id&&(()=>{ const a2=num(x.alisFiyat); if(a2<=0) return true; const m2=malOf(x); return m2>0&&a2<m2; })())
     .sort((a2,b2)=>new Date(b2.tarih)-new Date(a2.tarih));
   const tkSorunluAd=tkSorunlu.reduce((s2,x)=>s2+num(x.adet),0);
+  // 💸 dönemin giderleri
+  const tkGiderList=(giderler||[]).filter(x=>{ const t=new Date(x.tarih).getTime()||0; return t>=b0&&t<b1; });
+  const tkGider=tkGiderList.reduce((s2,x)=>s2+num(x.tutar),0);
+  const tkGiderTur=(()=>{ const m={}; tkGiderList.forEach(x=>{ const k=x.tur||"Diğer"; m[k]=(m[k]||0)+num(x.tutar); });
+    return Object.entries(m).map(([tur,tut])=>({tur,tut})).sort((a2,b2)=>b2.tut-a2.tut); })();
   const tkAlacak=Math.max(0,tkCiro-tkTah);
   const tkKar=tkCiro-tkMal;
   const tkOran=tkCiro>0?tkKar/tkCiro:0;
+  const tkNet=tkKar-tkGider;
   const tkUList=Object.values(tkU).map(o=>({...o,kar:o.ciro-o.mal,oran:o.ciro>0?(o.ciro-o.mal)/o.ciro:0}));
   const tkSatir=x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.kullaniciAd||"?")+" · "+(x.yer||"—")+" · "+fmtS(x.tarih)});
   const stokBul=o=>(d.stok||[]).find(u=>(o.id&&u.id===o.id)||(u.ad||"").toLocaleLowerCase("tr")===(o.u||"").toLocaleLowerCase("tr"))||null;
@@ -2282,6 +2324,8 @@ function RaporA({d,ac,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGo
       rows:tkUList.slice().sort((a,b)=>b.oran-a.oran).map(o=>({t:o.u,
         alt:o.adet+" ad · kâr "+tl(o.kar)+(o.malsiz>0?" · maliyet yok":""),
         v:"%"+Math.round(o.oran*100),renk:o.oran<0?"var(--red)":"var(--cyan)"}))}),
+    gider:()=>({ik:"💸",hex:"#b91c1c",baslik:"Gider dökümü",
+      rows:tkGiderTur.map(o=>({t:o.tur,alt:"cironun %"+(tkCiro>0?Math.round(o.tut/tkCiro*100):0)+"'i",v:tlk(o.tut),renk:"var(--red)"}))}),
     malsiz:()=>({ik:"⚠️",hex:"#c2410c",baslik:"Üretim maliyeti tanımsız ürünler",
       rows:tkUList.filter(o=>o.malsiz>0).sort((a2,b2)=>b2.malsiz-a2.malsiz).map(o=>({t:o.u,
         alt:o.malsiz+" adette maliyet yok · ciro "+tl(o.ciro),v:"maliyet gir ›",renk:"#c2410c",
@@ -2326,7 +2370,9 @@ function RaporA({d,ac,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGo
         h(KStat,{ik:h(Icn,{n:"wallet",c:"var(--gold)"}),l:"Tahsil edilen",v:tl(tkTah),s:"cironun %"+(tkCiro>0?Math.round(tkTah/tkCiro*100):0)+"'i",renk:"var(--gold)",onClick:()=>setDet(tkDet.tah())}),
         h(KStat,{ik:h(Icn,{n:"percent",c:"var(--cyan)"}),l:"Kâr oranı",v:"%"+Math.round(tkOran*100),s:"ürün dökümü",renk:"var(--cyan)",onClick:()=>setDet(tkDet.oran())}),
         h(KStat,{ik:h(Icn,{n:"check",c:tkAlacak>0.5?"var(--red)":"var(--green)"}),l:"Alacak",v:tl(tkAlacak),s:"tahsil edilmemiş",renk:tkAlacak>0.5?"var(--red)":"var(--green)",onClick:()=>setDet(tkDet.alacak())}),
-        h(KStat,{ik:h(Icn,{n:"box",c:"var(--txt)"}),l:"Maliyet",v:tl(tkMal),s:tkUList.length+" ürün",renk:"var(--txt)",onClick:()=>setDet(tkDet.urunAd())})),
+        h(KStat,{ik:h(Icn,{n:"box",c:"var(--txt)"}),l:"Maliyet",v:tl(tkMal),s:tkUList.length+" ürün",renk:"var(--txt)",onClick:()=>setDet(tkDet.urunAd())}),
+        h(KStat,{ik:h(Icn,{n:"wallet",c:"var(--red)"}),l:"Gider",v:tlk(tkGider),s:tkGiderList.length+" kayıt ›",renk:"var(--red)",onClick:()=>ac&&ac({tip:"gider",b0,b1})}),
+        h(KStat,{ik:h(Icn,{n:"trend",c:tkNet<0?"var(--red)":"var(--green)"}),l:"Net kâr",v:tlk(tkNet),s:"kâr − gider",renk:tkNet<0?"var(--red)":"var(--green)",onClick:tkGiderTur.length?()=>setDet(tkDet.gider()):null})),
       tkMalsiz>0?h("button",{onClick:()=>setDet(tkDet.malsiz()),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412",marginBottom:14}},tkMalsiz+" adette üretim maliyeti tanımsız · "+tkUList.filter(o=>o.malsiz>0).length+" ürün ›"):null,
       tkSorunlu.length?h("button",{onClick:()=>setAlisDuzen(tkSorunlu),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12,fontWeight:700,color:"#991b1b",marginBottom:14}},tkSorunluAd+" adette veriliş fiyatı maliyetin altında ya da eksik · "+tkSorunlu.length+" kayıt ›"):null,
       h("div",{className:"lbl",style:{marginBottom:8,display:"flex",alignItems:"center",gap:6}},h(Icn,{n:"box",c:"var(--mut)",s:15}),"Ürün bazında"),
@@ -2566,6 +2612,7 @@ function App(){
   const filamentler=useColl("filament");
   const sarflar=useColl("sarf");   // 🧵 sarf malzemesi (anahtarlık halkası, zincir, mıknatıs…)
   const montajGorev=useColl("montaj_gorev");   // 🔧 montaj personeli görevleri
+  const giderler=useColl("gider");   // 💸 gider kalemleri
   const stokHareket=useColl("stok_hareket");
   const urunFoto=useColl("urun_foto");   // 🖼️ ürün fotoğrafları (pazarlamacı uygulamasıyla ortak)
   const fotoMap=useMemo(()=>{ const m={};
@@ -2781,10 +2828,11 @@ function App(){
           Object.keys(pt).forEach(k=>{ tk[k]=Math.max(0,num(tk[k])-num(pt[k])); }); patch.parcaTuket=tk; }
         if(Object.keys(patch).length>1) await save("stok_urun",patch); }
       if(e0.hareketId){ try{ await remove("stok_hareket",e0.hareketId); }catch(e){} }
+      if(g.giderId){ try{ await remove("gider",g.giderId); }catch(e){} }   // ödeme gideri de geri alınır
       if(g.kalanGorevId){ const kg=(montajGorev||[]).find(x=>x.id===g.kalanGorevId);
         if(kg&&kg.durum!=="teslim"){ try{ await remove("montaj_gorev",g.kalanGorevId); }catch(e){} } }
       if(sil){ await remove("montaj_gorev",g.id); say("Görev silindi — muhasebe geri alındı"); }
-      else { await save("montaj_gorev",{id:g.id,durum:"alindi",teslimAdet:0,kusurAdet:0,teslimTarih:"",etki:{},kalanGorevId:"",odendi:false,odemeTarih:""});
+      else { await save("montaj_gorev",{id:g.id,durum:"alindi",teslimAdet:0,kusurAdet:0,teslimTarih:"",etki:{},kalanGorevId:"",odendi:false,odemeTarih:"",giderId:""});
         say("Teslim geri alındı"); } }
     catch(e){ console.error(e); say(sil?"Silinemedi":"Geri alınamadı"); } finally{ setIsBekle(false); } }
   async function ayarKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
@@ -2870,7 +2918,7 @@ function App(){
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla,fotoMap});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler});
-  else ekran=h(RaporA,{d,ac:setModal,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
+  else ekran=h(RaporA,{d,ac:setModal,giderler,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
   return h("div",null,
     h(KomutaBar,{gorunum,yan:yanMenu,onGorunum:gorunumTog,onAyar:()=>setModal({tip:"komutaAyar"}),onTema:()=>setModal({tip:"tema"}),onCikis:cikisYap}),
     h("div",{className:"tk-barbosluk"}),
@@ -2894,6 +2942,11 @@ function App(){
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
     modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap,onRota:talepRota,onSil:talepSil}),
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
+    modal&&modal.tip==="gider"&&h(GiderYonetimSheet,{giderler,b0:modal.b0!=null?modal.b0:0,b1:modal.b1!=null?modal.b1:Infinity,bekle:isBekle,onClose:()=>setModal(null),
+      onKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
+        try{ await save("gider",{...(g.id?{id:g.id}:{}),tur:g.tur,aciklama:g.aciklama,tutar:num(g.tutar),tarih:g.tarih}); say(g.id?"Gider güncellendi":"Gider eklendi"); }
+        catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
+      onSil:async(id)=>{ try{ await remove("gider",id); say("Gider silindi"); }catch(e){ console.error(e); say("Silinemedi"); } }}),
     modal&&modal.tip==="montajYonet"&&h(MontajYonetimSheet,{gorevler:montajGorev,stok:d.stok,kullanicilar,bekle:isBekle,onClose:()=>setModal(null),
       onKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("montaj_gorev",{...g,durum:"acik",odendi:false,tarih:new Date().toISOString()}); say("Görev verildi · "+(g.urunAd||"")); }
@@ -2903,7 +2956,11 @@ function App(){
         if(!confirm("Bu montaj görevi silinsin mi?")) return;
         try{ await remove("montaj_gorev",g.id); say("Görev silindi"); }catch(e){ console.error(e); say("Silinemedi"); } },
       onOde:async(g)=>{ if(!g||!g.id||isBekle) return; setIsBekle(true);
-        try{ await save("montaj_gorev",{id:g.id,odendi:true,odemeTarih:new Date().toISOString()}); say("Ödendi olarak işaretlendi"); }
+        try{ const tutar=num(g.teslimAdet)*num(g.birimUcret); const gid=uid(); const now=new Date().toISOString();
+          if(tutar>0) await save("gider",{id:gid,tur:"Montaj işçiliği",tutar,tarih:now,oto:true,ref:g.id,
+            aciklama:(g.kullaniciAd||"")+" · "+num(g.teslimAdet)+" × "+(g.urunAd||"")});
+          await save("montaj_gorev",{id:g.id,odendi:true,odemeTarih:now,giderId:tutar>0?gid:""});
+          say("Ödendi · gidere yazıldı"); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onGeri:async(g)=>{ if(!g||!g.id||isBekle) return; await montajGeriAl(g); }}),
     modal&&modal.tip==="sarfYonet"&&h(SarfYonetimSheet,{sarflar,stok:d.stok,bekle:isBekle,onClose:()=>setModal(null),
