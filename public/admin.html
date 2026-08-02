@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="J9";   // komuta (admin) deneme sürümü
+const SURUM="K1";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -2055,7 +2055,9 @@ function FilamentDuzenSheet({fl,onKaydet,onSil,onAlim,bekle}){
   const [kg,setKg]=useState(duzen?String(fl.kgFiyat||""):"");
   const [stokKg,setStokKg]=useState(duzen?String(num(fl.stokKg)||""):"");
   return h(Sheet,{ik:duzen?null:"➕",hex:"#7c46e6",baslik:duzen?("Düzenle · "+(fl.ad||"")):"Yeni filament",onClose:()=>onKaydet(null),
-    cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!ad.trim()||bekle,onCta:()=>onKaydet({id:duzen?fl.id:null,no:no.trim(),ad:ad.trim(),kgFiyat:num(kg),stokKg:num(stokKg)})},
+    cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!ad.trim()||bekle,
+    onCta:()=>onKaydet({id:duzen?fl.id:null,no:no.trim(),ad:ad.trim(),kgFiyat:num(kg),stokKg:num(stokKg),
+      sayim:duzen&&Math.abs(num(stokKg)-num(fl.stokKg))>0.0005})},
     h("div",{style:{display:"grid",gridTemplateColumns:"92px 1fr",gap:10,marginBottom:14}},
       h("div",null,
         h("div",{className:"lbl",style:{marginBottom:8}},"Kod"),
@@ -2071,6 +2073,14 @@ function FilamentDuzenSheet({fl,onKaydet,onSil,onAlim,bekle}){
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Stok kg"),
         h("input",{type:"number",inputMode:"decimal",step:"any",value:stokKg,onChange:e=>setStokKg(e.target.value),placeholder:"0",style:inp}))),
     (duzen&&num(stokKg)>0&&num(kg)>0)?h("div",{style:{textAlign:"right",fontSize:12,fontWeight:800,color:"var(--violet)",marginBottom:12}},"Stok değeri "+tlk(num(stokKg)*num(kg))):null,
+    duzen?h("div",{style:{display:"grid",gap:6,padding:"11px 13px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700,marginBottom:12}},
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayımdan beri düşülen"),h("b",null,(Math.round(num(fl.dusenKg)*100)/100)+" kg")),
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayım"),h("b",null,fl.sayimTarih?fmtS(fl.sayimTarih):"—")),
+      num(fl.sonFark)?h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayım farkı"),
+        h("b",{style:{color:num(fl.sonFark)<0?"var(--red)":"var(--green)"}},(num(fl.sonFark)>0?"+":"")+(Math.round(num(fl.sonFark)*100)/100)+" kg")):null,
+      Math.abs(num(stokKg)-num(fl.stokKg))>0.0005?h("div",{style:{display:"flex",justifyContent:"space-between",borderTop:"1px solid var(--line)",paddingTop:6}},
+        h("span",{style:{color:"var(--mut)"}},"Kaydedince sayım farkı"),
+        h("b",{style:{color:(num(stokKg)-num(fl.stokKg))<0?"var(--red)":"var(--green)"}},((num(stokKg)-num(fl.stokKg))>0?"+":"")+(Math.round((num(stokKg)-num(fl.stokKg))*100)/100)+" kg")):null):null,
     duzen?h("div",{style:{display:"flex",gap:8,marginTop:2}},
       h("button",{onClick:()=>onAlim&&onAlim(fl),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--cyan)",fontSize:13,fontWeight:800}},"Alım ekle"),
       h("button",{onClick:()=>onSil(fl),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},"Sil")):null);
@@ -2873,6 +2883,23 @@ function App(){
   const veriHata=useVeriHata();
   const yuk=[plan,makineler,urunler,hareketler,kullanicilar,musteriler].some(x=>x===null);
   const d=useMemo(()=>yuk?null:hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filamentler,sarflar),[plan,makineler,urunler,hareketler,kullanicilar,musteriler,filamentler,sarflar,yuk]);
+  // 🧵 biten baskıların filamentini stoktan düş — kayda damga bırakır, iki kez düşmez
+  useEffect(()=>{ if(!plan||!filamentler) return;
+    const t=setTimeout(async()=>{ const now2=Date.now();
+      for(const p2 of plan){
+        if(!p2.basladi||!p2.filamentId||num(p2.gram)<=0) continue;
+        if(p2.filDus&&num(p2.filDus.gram)===num(p2.gram)&&p2.filDus.filamentId===p2.filamentId) continue;
+        const bit=new Date(p2.gercekBaslangic||p2.baslangic).getTime()+num(p2.sureDk)*60000;
+        if(bit>now2) continue;   // henüz bitmedi
+        try{
+          if(p2.filDus&&p2.filDus.filamentId){   // düzenlenmiş → önceki düşümü geri al
+            await save("filament",{id:p2.filDus.filamentId,stokKg:increment(num(p2.filDus.gram)/1000),dusenKg:increment(-num(p2.filDus.gram)/1000)}); }
+          const kg=num(p2.gram)/1000;
+          await save("filament",{id:p2.filamentId,stokKg:increment(-kg),dusenKg:increment(kg)});
+          await save("plan",{id:p2.id,filDus:{filamentId:p2.filamentId,gram:num(p2.gram),tarih:new Date().toISOString()}});
+        }catch(e){ console.error("filament düşümü",e); }
+      } },4000);
+    return ()=>clearTimeout(t); },[plan,filamentler]);
   // 💾 hesaplanan birim maliyeti ürüne yaz — pazarlamacı satış anında bu değeri kayda dondurur
   useEffect(()=>{ if(!d) return; const t=setTimeout(()=>{
     (d.stok||[]).forEach(u=>{ const m=num(u.maliyet); const eski=num(u.raw&&u.raw.maliyetGuncel);
@@ -2952,7 +2979,10 @@ function App(){
     try{ await remove("makineler",mk.id); setModal(null); say("Makine silindi"); }
     catch(e){ console.error(e); say("Silinemedi"); } finally{ setIsBekle(false); } }
   async function filamentKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
-    try{ await save("filament",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",ad:p2.ad,kgFiyat:p2.kgFiyat,stokKg:num(p2.stokKg)}); setModal(null); say((p2.id?"Güncellendi":"Filament eklendi")+" · "+p2.ad); }
+    try{ const onc=(filamentler||[]).find(x=>x.id===p2.id)||{};
+      const ek=p2.sayim?{dusenKg:0,sayimTarih:new Date().toISOString(),sonFark:Math.round((num(p2.stokKg)-num(onc.stokKg))*1000)/1000}:{};
+      await save("filament",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",ad:p2.ad,kgFiyat:p2.kgFiyat,stokKg:num(p2.stokKg),...ek});
+      setModal(null); say(p2.sayim?("Sayım kaydedildi · "+p2.ad):((p2.id?"Güncellendi":"Filament eklendi")+" · "+p2.ad)); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function filamentSil(fl){ if(!fl||!fl.id||isBekle) return; if(!confirm("🗑 "+(fl.ad||"filament")+" silinsin mi?")) return; setIsBekle(true);
     try{ await remove("filament",fl.id); setModal(null); say("Filament silindi"); }
@@ -3086,11 +3116,13 @@ function App(){
       ?("⚠ \""+(x.p.ad||"iş")+"\" ŞU AN BASILIYOR.\nİptal edilip plandan silinsin mi?")
       :("🗑 "+(x.p.ad||"iş")+" plandan silinsin mi?");
     if(!confirm(msj)) return;
-    try{ const yedek={...x.p}; await remove("plan",x.p.id); setModal(null);
+    try{ const yedek={...x.p};
+      if(x.p.filDus&&x.p.filDus.filamentId){ try{ await save("filament",{id:x.p.filDus.filamentId,stokKg:increment(num(x.p.filDus.gram)/1000),dusenKg:increment(-num(x.p.filDus.gram)/1000)}); }catch(e){} }
+      await remove("plan",x.p.id); setModal(null);
       setSilinen({p:yedek}); clearTimeout(silT.current); silT.current=setTimeout(()=>setSilinen(null),8000);   // 8 sn geri alınabilir
     }catch(e){ console.error(e); say("Silinemedi"); } }
   async function silGeriAl(){ if(!silinen) return;
-    try{ await save("plan",{...silinen.p}); clearTimeout(silT.current); setSilinen(null); say("Geri alındı · "+(silinen.p.ad||"iş")); }
+    try{ await save("plan",{...silinen.p,filDus:null}); clearTimeout(silT.current); setSilinen(null); say("Geri alındı · "+(silinen.p.ad||"iş")); }
     catch(e){ console.error(e); say("Geri alınamadı"); } }
   // (geri tuşu yönetimi yukarıda BACK_STACK ile — açık Sheet'ler otomatik kapanır)
   // 🔐 giriş kapısı — giriş yoksa PIN ekranına, yönetici değilse pazarlamacı sayfasına yönlen
