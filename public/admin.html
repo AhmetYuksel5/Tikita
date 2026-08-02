@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="K2";   // komuta (admin) deneme sürümü
+const SURUM="K3";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1764,11 +1764,14 @@ function KomutaMesajSheet({ekip,onKaydet,bekle}){
     h("textarea",{value:mesaj,onChange:e=>setMesaj(e.target.value),rows:3,placeholder:"örn. Yarın sabah stant için Kadıköy'e geç · Şu kaleye mutlaka uğra",style:{...inp,minHeight:88,resize:"vertical",fontSize:15,fontWeight:600,marginBottom:10}}),
     h("button",{onClick:()=>setKonum(v=>!v),style:{width:"100%",padding:12,borderRadius:12,fontSize:13.5,fontWeight:800,background:konum?"#0e8fce":"var(--surf2)",color:konum?"#fff":"var(--cyan)",border:"1px solid "+(konum?"#0e8fce":"var(--line)")}},(konum?"✅ ":"📍 ")+"Anlık konum iste"));
 }
-function Uretim({d,plan,makineler,ac,onTabla,fotoMap}){
+function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,fotoMap}){
   const GERI_MS=4*3600*1000;   // üretim hattı her zaman 4 saat geriden başlar
   const gunBasi=t=>{ const d2=new Date(t); d2.setHours(0,0,0,0); return d2.getTime(); };
   const [bas,setBas]=useState(()=>gunBasi(Date.now()-GERI_MS));
   const [filsizAcik,setFilsizAcik]=useState(false);
+  const [filsizSec,setFilsizSec]=useState({});     // toplu atama seçimi
+  const [filsizFil,setFilsizFil]=useState("");     // atanacak filament
+  const [filsizBek,setFilsizBek]=useState(false);
   const elleRef=useRef(false);   // kullanıcı ileri/geri kaydırdıysa otomatik sabitleme durur
   const [gunSayisi,setGunSayisi]=useState(1);   // varsayılan: en dar aralık (1 gün) — her girişte standart
   const [aralikAcik,setAralikAcik]=useState(false);
@@ -1983,16 +1986,42 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
             (gramTop>0?Math.round(gramTop).toLocaleString("tr"):"0")+" gr"))),
       h("button",{onClick:()=>ac({tip:"makineYonet"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:15,borderRadius:14,marginBottom:10,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,color:"var(--txt)",textAlign:"left"}},h(Icn,{n:"printer",c:"var(--cyan)",s:19}),"Makineler"),
       h("button",{onClick:()=>ac({tip:"filamentYonet"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:15,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14.5,fontWeight:800,color:"var(--txt)",textAlign:"left"}},h(Icn,{n:"box",c:"var(--violet)",s:19}),"Filamentler")):null,
-    filsizAcik?h(Sheet,{ik:"⚠️",hex:"#c2410c",baslik:"Filament seçilmemiş baskılar",alt:filsiz.length+" baskı · "+Math.round(filsizGram)+" gr",onClose:()=>setFilsizAcik(false),cta:"Kapat",onCta:()=>setFilsizAcik(false)},
-      filsiz.slice(0,40).map((p,i)=>{ const mk=(makineler||[]).find(m=>m.id===p.makineId); const pr=mk?mkParca(mk):null;
-        const bitti=new Date(p.gercekBaslangic||p.baslangic).getTime()+num(p.sureDk)*60000<=Date.now();
-        return h("button",{key:p.id||i,onClick:()=>{ setFilsizAcik(false); ac({tip:"isEkle",kayit:p}); },
-          style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"10px 0",borderTop:i?"1px solid var(--line)":"none",background:"none"}},
-          h("div",{style:{flex:1,minWidth:0}},
-            h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(num(p.adet)||1)+" × "+(p.ad||"iş")),
-            h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},(pr?((pr.no?pr.no+" · ":"")+pr.ad):"makine")+" · "+fmtS(p.gercekBaslangic||p.baslangic)+" · "+(p.basladi?(bitti?"bitti":"basıyor"):"planlı"))),
-          h("span",{style:{fontWeight:800,color:"#c2410c",flexShrink:0}},num(p.gram)+" gr"),
-          h("span",{style:{color:"var(--mut2)",fontWeight:800,flexShrink:0}},"›")); })):null,
+    filsizAcik?(()=>{
+      const secIds=filsiz.filter(p=>filsizSec[p.id]).map(p=>p.id);
+      const secGram=filsiz.filter(p=>filsizSec[p.id]).reduce((s2,p)=>s2+num(p.gram),0);
+      const urunler2=(()=>{ const m={}; filsiz.forEach(p=>{ const k=p.ad||"?"; m[k]=(m[k]||0)+1; }); return Object.entries(m).sort((x,y)=>y[1]-x[1]); })();
+      const tumSec=()=>{ const o={}; filsiz.forEach(p=>o[p.id]=true); setFilsizSec(o); };
+      const urunSec=adx=>setFilsizSec(o=>{ const n={...o}; filsiz.forEach(p=>{ if((p.ad||"?")===adx) n[p.id]=true; }); return n; });
+      return h(Sheet,{ik:"⚠️",hex:"#c2410c",baslik:"Filament seçilmemiş baskılar",alt:filsiz.length+" baskı · "+Math.round(filsizGram)+" gr",
+        onClose:()=>setFilsizAcik(false),
+        cta:filsizBek?"⏳…":(secIds.length&&filsizFil?(secIds.length+" baskıya uygula · "+Math.round(secGram)+" gr"):"Kapat"),
+        disabled:filsizBek,
+        onCta:async()=>{ if(!(secIds.length&&filsizFil)){ setFilsizAcik(false); return; }
+          setFilsizBek(true); try{ await onFilAta(secIds,filsizFil); setFilsizSec({}); setFilsizFil(""); }catch(e){} finally{ setFilsizBek(false); } }},
+        h("div",{className:"lbl",style:{marginBottom:8}},"Atanacak filament"),
+        h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:12}},
+          (filamentler||[]).map(f2=>h(Chip,{key:f2.id,on:filsizFil===f2.id,onClick:()=>setFilsizFil(f2.id)},(flKod(f2)?flKod(f2)+" · ":"")+(flAd(f2)||f2.ad)))),
+        urunler2.length>1?h(React.Fragment,null,
+          h("div",{className:"lbl",style:{marginBottom:8}},"Hızlı seçim"),
+          h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:12}},
+            h(Chip,{on:false,onClick:tumSec},"Tümü ("+filsiz.length+")"),
+            h(Chip,{on:false,onClick:()=>setFilsizSec({})},"Temizle"),
+            urunler2.slice(0,8).map(([adx,n])=>h(Chip,{key:adx,on:false,onClick:()=>urunSec(adx)},adx+" ("+n+")")))):
+          h("div",{style:{display:"flex",gap:7,marginBottom:12}},h(Chip,{on:false,onClick:tumSec},"Tümünü seç"),h(Chip,{on:false,onClick:()=>setFilsizSec({})},"Temizle")),
+        filsiz.slice(0,60).map((p,i)=>{ const mk=(makineler||[]).find(m=>m.id===p.makineId); const pr=mk?mkParca(mk):null;
+          const bitti=new Date(p.gercekBaslangic||p.baslangic).getTime()+num(p.sureDk)*60000<=Date.now();
+          const on=!!filsizSec[p.id];
+          return h("div",{key:p.id||i,style:{display:"flex",alignItems:"center",gap:9,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
+            h("button",{onClick:()=>setFilsizSec(o=>({...o,[p.id]:!on})),style:{display:"flex",alignItems:"center",gap:9,flex:1,minWidth:0,textAlign:"left",background:"none",padding:0}},
+              h("span",{style:{width:19,height:19,borderRadius:6,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,
+                background:on?"#0369a1":"transparent",border:"1.5px solid "+(on?"#0369a1":"var(--mut2)"),color:"#fff"}},on?"✓":""),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(num(p.adet)||1)+" × "+(p.ad||"iş")),
+                h("div",{style:{fontSize:10.5,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(pr?((pr.no?pr.no+" · ":"")+pr.ad):"makine")+" · "+fmtS(p.gercekBaslangic||p.baslangic)+" · "+(p.basladi?(bitti?"bitti":"basıyor"):"planlı")))),
+            h("span",{style:{fontWeight:800,color:"#c2410c",flexShrink:0,fontSize:12.5}},num(p.gram)+" gr"),
+            h("button",{onClick:()=>{ setFilsizAcik(false); ac({tip:"isEkle",kayit:p}); },title:"Düzenle",
+              style:{flexShrink:0,width:30,height:30,borderRadius:9,background:"var(--surf2)",border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"center"}},h(Icn,{n:"kalem",c:"var(--cyan)",s:14}))); }),
+        filsiz.length>60?h("div",{style:{padding:"10px 0",textAlign:"center",color:"var(--mut)",fontSize:12}},"+"+(filsiz.length-60)+" baskı daha"):null); })():null,
     aralikAcik?h(Sheet,{ik:h(Icn,{n:"cal",c:"#fff",s:22}),hex:GC.navyHdr,baslik:"Zaman aralığı",alt:"",onClose:()=>setAralikAcik(false)},
       h("div",{style:{display:"grid",gap:9,marginBottom:14}},
         [[1,"1 gün"],[3,"3 gün"],[7,"7 gün"]].map(g=>h("button",{key:g[0],onClick:()=>{ setGunSayisi(g[0]); setAralikAcik(false); },
@@ -3167,7 +3196,9 @@ function App(){
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Komuta merkezi hazırlanıyor…"));
   let ekran;
   if(view==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"}),onTalepSil:talepSil});
-  else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,ac:setModal,onTabla:tablaTopla,fotoMap});
+  else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,filamentler,ac:setModal,onTabla:tablaTopla,fotoMap,
+    onFilAta:async(ids,fid)=>{ for(const id of ids){ await save("plan",{id,filamentId:fid}); }
+      say(ids.length+" baskıya filament atandı"); }});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler});
   else ekran=h(RaporA,{d,ac:setModal,giderler,sabitGider,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal});
