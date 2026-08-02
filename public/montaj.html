@@ -39,7 +39,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="M1";
+const SURUM="M2";
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}
 
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
@@ -90,7 +90,7 @@ const DURUM={
   teslim:{ad:"Teslim edildi",renk:"var(--green)",bg:"#f0fdf4",bd:"#86efac"},
 };
 
-// adet onay penceresi — teslim al / teslim et
+// adet onay penceresi — teslim al
 function AdetSheet({baslik,alt,hex,ik,mevcut,ctaTxt,onClose,onOk,bekle}){
   const [n,setN]=useState(String(mevcut||""));
   const v=Math.max(0,Math.floor(num(n)));
@@ -100,6 +100,28 @@ function AdetSheet({baslik,alt,hex,ik,mevcut,ctaTxt,onClose,onOk,bekle}){
     h("div",{style:{display:"flex",gap:8,marginTop:12}},
       [mevcut,Math.floor(mevcut/2)].filter((x,i,a)=>x>0&&a.indexOf(x)===i).map(x=>
         h("button",{key:x,onClick:()=>setN(String(x)),style:{flex:1,padding:"11px 8px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,color:"var(--mut)"}},x+" adet"))));
+}
+// teslim etme — sağlam + kusurlu ayrımı, kalan için yeni görev
+function TeslimSheet({g,onClose,onOk,bekle}){
+  const alinan=num(g.alinanAdet);
+  const [saglam,setSaglam]=useState(String(alinan||""));
+  const [kusur,setKusur]=useState("");
+  const sg=Math.max(0,Math.floor(num(saglam))), ks=Math.max(0,Math.floor(num(kusur)));
+  const toplam=sg+ks, kalan=Math.max(0,alinan-toplam), asim=toplam>alinan;
+  const ucret=sg*num(g.birimUcret);
+  return h(Sheet,{ik:"📤",hex:"#16a34a",baslik:"Montajı teslim et",alt:(g.urunAd||"")+" · aldığın "+alinan+" adet",
+    onClose,cta:bekle?"⏳…":("Teslim et · "+tlk(ucret)),disabled:toplam<1||asim||bekle,onCta:()=>onOk({saglam:sg,kusur:ks,kalan})},
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Sağlam"),
+        h("input",{type:"number",inputMode:"numeric",value:saglam,onChange:e=>setSaglam(e.target.value),onFocus:e=>e.target.select(),style:{...inp,textAlign:"center",fontSize:22}})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Kusurlu"),
+        h("input",{type:"number",inputMode:"numeric",value:kusur,onChange:e=>setKusur(e.target.value),onFocus:e=>e.target.select(),placeholder:"0",style:{...inp,textAlign:"center",fontSize:22,color:ks>0?"var(--red)":"var(--txt)"}}))),
+    h("div",{style:{marginTop:14,display:"grid",gap:6,fontSize:12.5,fontWeight:700}},
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Stoğa girecek"),h("b",{style:{color:"var(--green)"}},sg+" adet")),
+      ks>0?h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Zayiat"),h("b",{style:{color:"var(--red)"}},ks+" adet")):null,
+      kalan>0?h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Sende kalan"),h("b",{style:{color:"var(--cyan)"}},kalan+" adet")):null,
+      h("div",{style:{display:"flex",justifyContent:"space-between",borderTop:"1px solid var(--line)",paddingTop:6}},h("span",{style:{color:"var(--mut)"}},"Hakediş"),h("b",{style:{color:"var(--gold)"}},tlk(ucret)))),
+    asim?h("div",{style:{marginTop:10,padding:"9px 12px",borderRadius:11,background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12,fontWeight:700,color:"#b91c1c"}},"Toplam, aldığın "+alinan+" adedi aşamaz."):null);
 }
 
 function App(){
@@ -138,20 +160,35 @@ function App(){
       setSheet(null); say(n+" adet teslim alındı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
 
-  async function teslimEt(g,n){ if(bekle) return; setBekle(true);
+  async function teslimEt(g,p){ if(bekle) return; const sg=num(p.saglam), ks=num(p.kusur), kalan=num(p.kalan);
+    const tuketilen=sg+ks; if(tuketilen<1) return; setBekle(true);
     try{
       const u=(urunler||[]).find(x=>x.id===g.urunId);
+      // 🔁 uygulanan etkiler kayda yazılır — admin geri alınca birebir tersi işlenir
+      const etki={stokta:sg,zayiat:ks,montajBitti:0,montajElle:0,parcaTuket:{},hareketId:""};
       if(u){ const parcalar=u.parcalar||[];
         if(parcalar.length){
-          const elle=Math.max(0,num(u.montajElle)), elleDus=Math.min(elle,n), kalan=n-elleDus;
-          const tk={...(u.parcaTuket||{})}; if(kalan>0) parcalar.forEach(p=>tk[p]=num(tk[p])+kalan*gerekenP(u,p));
-          const patch={id:u.id,parcaTuket:tk,stokta:increment(n)}; if(elleDus) patch.montajElle=increment(-elleDus);
+          const elle=Math.max(0,num(u.montajElle)), elleDus=Math.min(elle,tuketilen), kln=tuketilen-elleDus;
+          const tk={...(u.parcaTuket||{})};
+          if(kln>0) parcalar.forEach(pt=>{ const d2=kln*gerekenP(u,pt); tk[pt]=num(tk[pt])+d2; etki.parcaTuket[pt]=d2; });
+          const patch={id:u.id,parcaTuket:tk}; if(sg>0) patch.stokta=increment(sg); if(ks>0) patch.zayiat=increment(ks);
+          if(elleDus){ patch.montajElle=increment(-elleDus); etki.montajElle=-elleDus; }
           await save("stok_urun",patch);
-        } else await save("stok_urun",{id:u.id,montajBitti:increment(n),stokta:increment(n)});
-        await save("stok_hareket",{urunId:u.id,urunAd:u.ad||"",delta:n,sebep:"montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"});
+        } else {
+          const patch={id:u.id,montajBitti:increment(tuketilen)}; etki.montajBitti=tuketilen;
+          if(sg>0) patch.stokta=increment(sg); if(ks>0) patch.zayiat=increment(ks);
+          await save("stok_urun",patch); }
+        if(sg>0){ etki.hareketId=uid();
+          await save("stok_hareket",{id:etki.hareketId,urunId:u.id,urunAd:u.ad||"",delta:sg,sebep:"montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"}); }
       }
-      await save("montaj_gorev",{id:g.id,durum:"teslim",teslimAdet:n,teslimTarih:new Date().toISOString()});
-      setSheet(null); say(n+" adet teslim edildi · "+tlk(n*num(g.birimUcret))+" hakediş"); }
+      let kalanId="";
+      if(kalan>0){ kalanId=uid();   // kısmi teslim → kalan için otomatik yeni görev
+        await save("montaj_gorev",{id:kalanId,urunId:g.urunId,urunAd:g.urunAd||"",adet:kalan,birimUcret:num(g.birimUcret),
+          kullaniciId:g.kullaniciId,kullaniciAd:g.kullaniciAd||"",not:(g.not||""),durum:"alindi",alinanAdet:kalan,
+          alinanTarih:g.alinanTarih||new Date().toISOString(),devirId:g.id,odendi:false,tarih:new Date().toISOString()}); }
+      await save("montaj_gorev",{id:g.id,durum:"teslim",teslimAdet:sg,kusurAdet:ks,teslimTarih:new Date().toISOString(),etki,kalanGorevId:kalanId});
+      setSheet(null);
+      say(sg+" adet teslim"+(ks>0?(" · "+ks+" kusurlu zayiat"):"")+(kalan>0?(" · "+kalan+" sende kaldı"):"")+" · "+tlk(sg*num(g.birimUcret))); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
 
   if(!BEN_ID||(kullanicilar&&kullanicilar.length&&ben&&ben.rol!=="montaj"))
@@ -194,6 +231,7 @@ function App(){
           h("span",null,"istenen "+istenen+" ad"),
           alinan>0?h("span",null,"alınan "+alinan+" ad"):null,
           teslim>0?h("span",{style:{color:"var(--green)"}},"teslim "+teslim+" ad"):null,
+          num(g.kusurAdet)>0?h("span",{style:{color:"var(--red)"}},"kusurlu "+num(g.kusurAdet)):null,
           h("span",null,tlk(g.birimUcret)+"/ad"),
           h("span",{style:{color:"var(--gold)"}},tlk(tutar)),
           g.durum==="teslim"?h("span",{style:{color:g.odendi?"var(--green)":"var(--gold)"}},g.odendi?"ödendi":"ödeme bekliyor"):null),
@@ -212,9 +250,7 @@ function App(){
     sheet&&sheet.tip==="al"?h(AdetSheet,{ik:"📥",hex:"#0e8fce",baslik:"Teslim al · "+(sheet.g.urunAd||""),
       alt:"istenen "+num(sheet.g.adet)+" adet",mevcut:num(sheet.g.adet),ctaTxt:"Teslim aldım",bekle,
       onClose:()=>setSheet(null),onOk:n=>teslimAl(sheet.g,n)}):null,
-    sheet&&sheet.tip==="et"?h(AdetSheet,{ik:"📤",hex:"#16a34a",baslik:"Montajı teslim et · "+(sheet.g.urunAd||""),
-      alt:"aldığın "+num(sheet.g.alinanAdet)+" adet · "+tlk(sheet.g.birimUcret)+"/ad",mevcut:num(sheet.g.alinanAdet),ctaTxt:"Teslim ettim",bekle,
-      onClose:()=>setSheet(null),onOk:n=>teslimEt(sheet.g,n)}):null,
+    sheet&&sheet.tip==="et"?h(TeslimSheet,{g:sheet.g,bekle,onClose:()=>setSheet(null),onOk:p=>teslimEt(sheet.g,p)}):null,
     h(Toast,{msg:toastMsg}));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(h(App));

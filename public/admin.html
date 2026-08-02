@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="H8";   // komuta (admin) deneme sürümü
+const SURUM="H9";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -699,7 +699,7 @@ function EkipSheet({e,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,onView,b
 }
 
 /* ————— STOK ————— */
-function StokSheet({u,kullanicilar,hareketler,makineler,onClose,onDuzen,onGecmis,onKomut,onParca,onMaliyet,foto,onFoto,onFotoSil}){
+function StokSheet({u,kullanicilar,hareketler,makineler,montajGorev,onClose,onDuzen,onGecmis,onKomut,onParca,onMaliyet,foto,onFoto,onFotoSil}){
   const kad={}; (kullanicilar||[]).forEach(k=>kad[k.id]=k.ad||"?");
   const cantalar=Object.entries(u.pazStokK||{}).map(([id,v])=>({ad:kad[id]||id,adet:num(v)})).filter(x=>x.adet>0).sort((a,b)=>b.adet-a.adet);
   const parcali=(u.parcalar||[]).length>0;
@@ -781,6 +781,19 @@ function StokSheet({u,kullanicilar,hareketler,makineler,onClose,onDuzen,onGecmis
             return {t:(k.simge||"")+" "+k.ad,alt:oz>0?"kişiye özel":"genel fiyat",v:tl(verisOf({pazFiyatK:u.pazFiyatK,pazFiyat:u.alis},k.id)),renk:oz>0?"var(--gold)":"var(--mut)"}; }),undefined)
     : nav==="satisKale"
     ? rowsSheet("Kale (doğrudan) satışları","🏰","#16a34a",bKale.slice().sort(byDate).map(satRow),"satisDog")
+    : nav==="montajda"
+    ? h(Sheet,{ik:"🔧",hex:"#c2410c",baslik:"Montaj",alt:u.montajda+" takım hazır"+(mAdet>0?(" · "+mAdet+" adet montajcıda"):""),onClose:()=>setNav(null),cta:"Kapat",onCta:()=>setNav(null)},
+        mGorev.length?h(React.Fragment,null,
+          h("div",{className:"lbl",style:{marginBottom:8}},"Montajcıda"),
+          mGorev.map((g2,i)=>h("div",{key:g2.id||i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g2.kullaniciAd||"?"),
+              h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},fmtS(g2.alinanTarih||g2.tarih)+" · "+tlk(g2.birimUcret)+"/ad")),
+            h("span",{style:{fontWeight:800,color:"#c2410c",flexShrink:0}},num(g2.alinanAdet)+" ad"))),
+          h("div",{style:{marginTop:8,paddingTop:8,borderTop:"1px solid var(--line)",display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800}},
+            h("span",{style:{color:"var(--mut)"}},"Toplam montajcıda"),h("span",{style:{color:"#c2410c"}},mAdet+" adet")))
+          :h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Montajcıda ürün yok."),
+        h("button",{onClick:()=>{ setNav(null); onKomut&&onKomut("montajda"); },style:{width:"100%",marginTop:14,padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,color:"var(--cyan)"}},"Stoğa ekle / zayiat"))
     : nav==="parcaStok"
     ? h(Sheet,{ik:"🧩",hex:"#0369a1",baslik:"Parça stoğu",alt:u.hazirTakim+" takım çıkar",onClose:()=>setNav(null),cta:"Kapat",onCta:()=>setNav(null)},
         h("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"0 0 6px",fontSize:10,fontWeight:800,letterSpacing:.6,color:"var(--mut2)",textTransform:"uppercase"}},
@@ -838,7 +851,9 @@ function StokSheet({u,kullanicilar,hareketler,makineler,onClose,onDuzen,onGecmis
     h("span",{style:{fontSize:12.5,fontWeight:700,color:"var(--mut)",flexShrink:0}},deger),
     fn?h("span",{style:{color:"var(--mut2)",flexShrink:0,fontWeight:800}},"›"):null);
   // aşama pipeline — dokun: komut
-  const asama=[["","basımda",u.basimda,"var(--cyan)",null],["","montaj",u.montajda,"#c2410c",()=>onKomut("montajda")],["","stok",u.stokta,"var(--txt)",()=>onKomut("stokta")],["","konsinye",sahadaTop,"var(--violet)",()=>setNav("konsAcik")],["","satıldı",satTop,"var(--green)",()=>setNav("satis")]];
+  const mGorev=(montajGorev||[]).filter(g=>g.urunId===u.id&&g.durum==="alindi");
+  const mAdet=mGorev.reduce((s2,g)=>s2+num(g.alinanAdet),0);
+  const asama=[["","basımda",u.basimda,"var(--cyan)",null],["","montaj",u.montajda,"#c2410c",()=>setNav("montajda")],["","stok",u.stokta,"var(--txt)",()=>onKomut("stokta")],["","konsinye",sahadaTop,"var(--violet)",()=>setNav("konsAcik")],["","satıldı",satTop,"var(--green)",()=>setNav("satis")]];
   const ekBilgi=[["çanta",u.canta],["hediye",u.hediye],num(u.zayiat)>0?["zayiat",u.zayiat]:null].filter(Boolean);
   return h(React.Fragment,null,h(Sheet,{ik:foto?h(Foto,{src:foto,s:46,r:12}):IK("stok","#d97b12",24),hex:"#d97b12",baslik:u.ad,alt:"📥 "+u.stokta+" stok · "+u.montajda+" montaj · "+sahadaTop+" konsinye",onClose,cta:"Kapat",onCta:onClose},
     h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:8}},
@@ -1146,7 +1161,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
 }
 
 // 🔧 MONTAJ GÖREVLERİ — admin görev açar, montaj personeli teslim alır/verir, hakediş ödenir
-function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onClose,bekle}){
+function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onGeri,onClose,bekle}){
   const [yeni,setYeni]=useState(null);   // {urunId,adet,birimUcret,kullaniciId,not}
   const [sekme,setSekme]=useState("acik");
   const personel=(kullanicilar||[]).filter(k=>k.rol==="montaj"&&!k.arsiv);
@@ -1202,7 +1217,8 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onC
         h("div",{style:{display:"flex",gap:8,marginTop:8}},
           (g.durum==="teslim"&&!g.odendi)?h("button",{onClick:()=>onOde(g),style:{flex:1,padding:"9px 10px",borderRadius:11,background:"var(--green)",color:"#fff",fontSize:12.5,fontWeight:800}},"Ödendi işaretle"):null,
           (g.durum==="teslim"&&g.odendi)?h("span",{style:{flex:1,fontSize:12,fontWeight:800,color:"var(--green)"}},"Ödendi · "+fmtS(g.odemeTarih)):null,
-          g.durum!=="teslim"?h("button",{onClick:()=>onSil(g),style:{flexShrink:0,padding:"9px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:12.5,fontWeight:800}},"Görevi iptal et"):null)); })
+          g.durum==="teslim"?h("button",{onClick:()=>onGeri(g),style:{flexShrink:0,padding:"9px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--gold)",fontSize:12.5,fontWeight:800}},"Teslimi geri al"):null,
+          h("button",{onClick:()=>onSil(g),style:{flexShrink:0,padding:"9px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:12.5,fontWeight:800}},g.durum==="teslim"?"Sil":"İptal et"))); })
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},sekme==="acik"?"Açık görev yok.":"Tamamlanan görev yok."));
 }
 // 🧵 SARF MALZEMESİ — anahtarlık halkası, zincir, mıknatıs… stok elle düzenlenir, ürün maliyetine girer
@@ -2747,6 +2763,28 @@ function App(){
     if(stage==="satildi") return {baslik:"Satıldı · "+s.ad,mevcut:s.satildi,acts:[
       {label:"Stoğa iade",renk:"#0369a1",fn:n=>uretimSatIade(s,n)}]};
     return null; };
+  // 🔁 montaj teslimini geri al — stok, zayiat, parça tüketimi, stok hareketi ve kalan görev birlikte döner
+  async function montajGeriAl(g){ if(!g||!g.id||isBekle) return;
+    const e0=g.etki||{};
+    if(!confirm("Bu teslim geri alınsın mı?\n"+num(g.teslimAdet)+" adet stoktan, "+num(g.kusurAdet)+" adet zayiattan düşülecek; görev yeniden montajda görünecek."+(g.odendi?"\nÖdeme işareti de kalkacak.":""))) return;
+    setIsBekle(true);
+    try{
+      const u=(urunler||[]).find(x=>x.id===g.urunId);
+      if(u){ const patch={id:u.id};
+        if(num(e0.stokta)>0) patch.stokta=increment(-num(e0.stokta));
+        if(num(e0.zayiat)>0) patch.zayiat=increment(-num(e0.zayiat));
+        if(num(e0.montajBitti)>0) patch.montajBitti=increment(-num(e0.montajBitti));
+        if(num(e0.montajElle)<0) patch.montajElle=increment(-num(e0.montajElle));
+        const pt=e0.parcaTuket||{};
+        if(Object.keys(pt).length){ const tk={...(u.parcaTuket||{})};
+          Object.keys(pt).forEach(k=>{ tk[k]=Math.max(0,num(tk[k])-num(pt[k])); }); patch.parcaTuket=tk; }
+        if(Object.keys(patch).length>1) await save("stok_urun",patch); }
+      if(e0.hareketId){ try{ await remove("stok_hareket",e0.hareketId); }catch(e){} }
+      if(g.kalanGorevId){ const kg=(montajGorev||[]).find(x=>x.id===g.kalanGorevId);
+        if(kg&&kg.durum!=="teslim"){ try{ await remove("montaj_gorev",g.kalanGorevId); }catch(e){} } }
+      await save("montaj_gorev",{id:g.id,durum:"alindi",teslimAdet:0,kusurAdet:0,teslimTarih:"",etki:{},kalanGorevId:"",odendi:false,odemeTarih:""});
+      say("Teslim geri alındı"); }
+    catch(e){ console.error(e); say("Geri alınamadı"); } finally{ setIsBekle(false); } }
   async function ayarKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ await save("ayar",{id:"genel",...p2}); setModal(null); say("Ayarlar kaydedildi"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
@@ -2858,11 +2896,14 @@ function App(){
       onKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("montaj_gorev",{...g,durum:"acik",odendi:false,tarih:new Date().toISOString()}); say("Görev verildi · "+(g.urunAd||"")); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
-      onSil:async(g)=>{ if(!g||!g.id) return; if(!confirm("Bu montaj görevi iptal edilsin mi?")) return;
-        try{ await remove("montaj_gorev",g.id); say("Görev iptal edildi"); }catch(e){ console.error(e); say("Silinemedi"); } },
+      onSil:async(g)=>{ if(!g||!g.id) return;
+        if(g.durum==="teslim"){ say("Önce teslimi geri al"); return; }
+        if(!confirm("Bu montaj görevi silinsin mi?")) return;
+        try{ await remove("montaj_gorev",g.id); say("Görev silindi"); }catch(e){ console.error(e); say("Silinemedi"); } },
       onOde:async(g)=>{ if(!g||!g.id||isBekle) return; setIsBekle(true);
         try{ await save("montaj_gorev",{id:g.id,odendi:true,odemeTarih:new Date().toISOString()}); say("Ödendi olarak işaretlendi"); }
-        catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }}),
+        catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
+      onGeri:async(g)=>{ if(!g||!g.id||isBekle) return; await montajGeriAl(g); }}),
     modal&&modal.tip==="sarfYonet"&&h(SarfYonetimSheet,{sarflar,stok:d.stok,bekle:isBekle,onClose:()=>setModal(null),
       onKaydet:async(x)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("sarf",{...(x.id?{id:x.id}:{}),ad:x.ad,birim:x.birim,stokta:num(x.stokta),birimFiyat:num(x.birimFiyat)}); say(x.id?"Güncellendi":"Malzeme eklendi"); }
@@ -2877,7 +2918,7 @@ function App(){
         onSil:kullaniciSil,onArsiv:kullaniciArsivle,onArsivGeri:kullaniciArsivGeri,onSifre:sifreSet,onView:sifreGor,
         kisiTalep:kt,onTalep:t=>setModal({tip:"talep",t})}); })(),
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
-      return h(StokSheet,{u:s,kullanicilar,hareketler,makineler,foto:(fotoMap[s.id]||{}).data,onFoto:f=>urunFotoEkle(s.id,f),onFotoSil:()=>urunFotoSil(s.id),onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
+      return h(StokSheet,{u:s,kullanicilar,hareketler,makineler,montajGorev,foto:(fotoMap[s.id]||{}).data,onFoto:f=>urunFotoEkle(s.id,f),onFotoSil:()=>urunFotoSil(s.id),onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
         onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v),onMaliyet:(uu)=>setModal({tip:"maliyetGec",u:uu,uid:s.id})}); })(),
     modal&&modal.tip==="maliyetGec"&&h(MaliyetGecmisSheet,{u:modal.u,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stokKomut"&&h(StokKomutSheet,{cfg:modal.cfg,onClose:()=>setModal(null)}),
