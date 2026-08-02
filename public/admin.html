@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="H9";   // komuta (admin) deneme sürümü
+const SURUM="J1";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -2673,7 +2673,7 @@ function App(){
   async function sifreSet(id,pin){ if(!id||!pin||String(pin).trim().length<4||isBekle) return; setIsBekle(true);
     try{ await save("kullanici",{id,pin:String(pin).trim(),pinHash:"",pinSalt:""}); say("Şifre güncellendi"); }
     catch(e){ console.error(e); say("Güncellenemedi"); } finally{ setIsBekle(false); } }
-  const sifreGor=u=>{ if(u&&u.id) location.href="deneme.html?as="+u.id; };   // 👁 şifresiz o kullanıcının ekranına geç
+  const sifreGor=u=>{ if(u&&u.id) location.href=(u.rol==="montaj"?"montaj.html?as=":"deneme.html?as=")+u.id; };   // 👁 rolüne uygun ekrana geç
   async function alacakKapat(o){ if(!o||!o.x||!o.x.id||isBekle) return;
     if(!confirm("✓ "+(o.yer||"kale")+" · "+tl(o.acik)+" açık borç kapatılsın mı?\nSatış kaydı ve cirosu korunur; alacak 0 olur.")) return; setIsBekle(true);
     try{ await save("pazarlama_hareket",{id:o.x.id,tahsil:o.bek}); say("Borç kapatıldı · "+tl(o.acik)); }
@@ -2764,9 +2764,10 @@ function App(){
       {label:"Stoğa iade",renk:"#0369a1",fn:n=>uretimSatIade(s,n)}]};
     return null; };
   // 🔁 montaj teslimini geri al — stok, zayiat, parça tüketimi, stok hareketi ve kalan görev birlikte döner
-  async function montajGeriAl(g){ if(!g||!g.id||isBekle) return;
-    const e0=g.etki||{};
-    if(!confirm("Bu teslim geri alınsın mı?\n"+num(g.teslimAdet)+" adet stoktan, "+num(g.kusurAdet)+" adet zayiattan düşülecek; görev yeniden montajda görünecek."+(g.odendi?"\nÖdeme işareti de kalkacak.":""))) return;
+  async function montajGeriAl(g,opt){ if(!g||!g.id||isBekle) return;
+    const e0=g.etki||{}; const sil=!!(opt&&opt.sil);
+    const ozet=num(g.teslimAdet)+" adet stoktan"+(num(g.kusurAdet)>0?(", "+num(g.kusurAdet)+" adet zayiattan"):"")+" düşülecek"+(g.odendi?", ödeme işareti kalkacak":"");
+    if(!confirm(sil?("Bu görev silinsin mi?\n"+ozet+" ve kayıt tamamen kaldırılacak."):("Bu teslim geri alınsın mı?\n"+ozet+"; görev yeniden montajda görünecek."))) return;
     setIsBekle(true);
     try{
       const u=(urunler||[]).find(x=>x.id===g.urunId);
@@ -2782,9 +2783,10 @@ function App(){
       if(e0.hareketId){ try{ await remove("stok_hareket",e0.hareketId); }catch(e){} }
       if(g.kalanGorevId){ const kg=(montajGorev||[]).find(x=>x.id===g.kalanGorevId);
         if(kg&&kg.durum!=="teslim"){ try{ await remove("montaj_gorev",g.kalanGorevId); }catch(e){} } }
-      await save("montaj_gorev",{id:g.id,durum:"alindi",teslimAdet:0,kusurAdet:0,teslimTarih:"",etki:{},kalanGorevId:"",odendi:false,odemeTarih:""});
-      say("Teslim geri alındı"); }
-    catch(e){ console.error(e); say("Geri alınamadı"); } finally{ setIsBekle(false); } }
+      if(sil){ await remove("montaj_gorev",g.id); say("Görev silindi — muhasebe geri alındı"); }
+      else { await save("montaj_gorev",{id:g.id,durum:"alindi",teslimAdet:0,kusurAdet:0,teslimTarih:"",etki:{},kalanGorevId:"",odendi:false,odemeTarih:""});
+        say("Teslim geri alındı"); } }
+    catch(e){ console.error(e); say(sil?"Silinemedi":"Geri alınamadı"); } finally{ setIsBekle(false); } }
   async function ayarKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ await save("ayar",{id:"genel",...p2}); setModal(null); say("Ayarlar kaydedildi"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
@@ -2896,8 +2898,8 @@ function App(){
       onKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("montaj_gorev",{...g,durum:"acik",odendi:false,tarih:new Date().toISOString()}); say("Görev verildi · "+(g.urunAd||"")); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
-      onSil:async(g)=>{ if(!g||!g.id) return;
-        if(g.durum==="teslim"){ say("Önce teslimi geri al"); return; }
+      onSil:async(g)=>{ if(!g||!g.id||isBekle) return;
+        if(g.durum==="teslim"){ await montajGeriAl(g,{sil:true}); return; }
         if(!confirm("Bu montaj görevi silinsin mi?")) return;
         try{ await remove("montaj_gorev",g.id); say("Görev silindi"); }catch(e){ console.error(e); say("Silinemedi"); } },
       onOde:async(g)=>{ if(!g||!g.id||isBekle) return; setIsBekle(true);
