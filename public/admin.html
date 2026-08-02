@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="K3";   // komuta (admin) deneme sürümü
+const SURUM="K4";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -452,7 +452,8 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
     const sarfMaliyet=sarfSat.reduce((s2,x)=>s2+x.tutar,0);
     const montajUcret=num(u.iscilik);   // 🛠 montajcıya ödenen adet başı ücret — MALİYETE GİRMEZ, ödendiğinde gider olur
     const sarfYeter=sarfSat.length?Math.min.apply(null,sarfSat.filter(x=>x.yeter!=null).map(x=>x.yeter).concat([Infinity])):Infinity;
-    const maliyet=baskiMaliyet+sarfMaliyet;   // işçilik yok: yalnız gerçekten ödendiğinde gidere yazılır
+    const maliyet=baskiMaliyet+sarfMaliyet;   // muhasebe maliyeti — işçilik burada yok, ödendiğinde gider olur
+    const tamMaliyet=maliyet+montajUcret;     // karar maliyeti — fiyatlama için işçilik dahil
     const maliyetKaynak=elle?"elle":autoKaynak;
     const parcaBilgi=parts.map(p=>({p,avail:parcaAvailF(u,p),ger:gerekenP(u,p),takim:parcaTakimF(u,p),basildi:num((bldParca[u.id]||{})[p])}));
     const hazirTakim=parts.length?Math.min.apply(null,parts.map(p=>parcaTakimF(u,p))):0;
@@ -464,7 +465,7 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
       if(Object.values(pp).some(v=>v>0)) buHafta={parcali:true,pp,set}; }
     else { const ad=bhB.reduce((s,p)=>s+num(p.adet||1),0); if(ad>0) buHafta={parcali:false,adet:ad}; }
     return {id:u.id,ad:u.ad,stokta:num(u.stokta),canta,sahada:num(sahadaU[u.id])+num(sahadaU["a:"+u.ad]),fiyat:num(u.satisFiyat),alis:num(u.pazFiyat),pazFiyatK:u.pazFiyatK||{},
-      maliyet,baskiMaliyet,sarfMaliyet,montajUcret,sarfSat,sarfYeter:isFinite(sarfYeter)?sarfYeter:null,sarfList:u.sarfList||[],maliyetElle:num(u.maliyet)>0,maliyetKaynak,maliyetDetay,basimda:basimEqF(u),montajda:montajdaF(u),satildi:num(u.satildi),hediye:num(u.hediye),konsStok:num(u.konsinye),gram:num(u.gram),
+      maliyet,tamMaliyet,baskiMaliyet,sarfMaliyet,montajUcret,sarfSat,sarfYeter:isFinite(sarfYeter)?sarfYeter:null,sarfList:u.sarfList||[],maliyetElle:num(u.maliyet)>0,maliyetKaynak,maliyetDetay,basimda:basimEqF(u),montajda:montajdaF(u),satildi:num(u.satildi),hediye:num(u.hediye),konsStok:num(u.konsinye),gram:num(u.gram),
       zayiat:num(u.zayiat),parcalar:parts,parcaAdet:u.parcaAdet||{},parcaBilgi,hazirTakim,buHafta,proj:projF(u),baskilar:(baskiByU[u.id]||[]).slice().sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)),pazStokK:u.pazStokK||{},raw:u};
   }).sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   const dusuk=stok.filter(u=>u.stokta<=3).sort((a,b)=>a.stokta-b.stokta);
@@ -867,7 +868,8 @@ function StokSheet({u,kullanicilar,hareketler,makineler,montajGorev,onClose,onDu
       (()=>{ const ozelN=Object.values(u.pazFiyatK||{}).filter(v=>num(v)>0).length;
         return h(Stat,{ik:"🏭",v:tl(u.alis),l:(ozelN>0?(ozelN+" özel fiyat ›"):"alış ›"),renk:"var(--txt)",onClick:()=>setNav("verisPaz")}); })(),
       (()=>{ const md=u.maliyetDetay, varDetay=!!(md&&((md.rows&&md.rows.length)||(md.parcalar&&md.parcalar.length))); const eksik=u.maliyetKaynak==="eksik";
-        return h(Stat,{ik:"🧮",v:eksik?"—":tlk(u.maliyet),l:(eksik?"parça eksik — hesaplanmadı":(num(u.sarfMaliyet)>0?("baskı "+tlk(u.baskiMaliyet)+" + sarf "+tlk(u.sarfMaliyet)):("maliyet · "+(u.maliyetKaynak||"oto"))))+(varDetay?" ›":""),renk:eksik?"var(--mut2)":"var(--violet)",onClick:(varDetay&&onMaliyet)?()=>onMaliyet(u):null}); })()),
+        const par=["baskı "+tlk(u.baskiMaliyet)]; if(num(u.sarfMaliyet)>0) par.push("sarf "+tlk(u.sarfMaliyet)); if(num(u.montajUcret)>0) par.push("montaj "+tlk(u.montajUcret));
+        return h(Stat,{ik:"🧮",v:eksik?"—":tlk(u.tamMaliyet),l:(eksik?"parça eksik — hesaplanmadı":par.join(" + "))+(varDetay?" ›":""),renk:eksik?"var(--mut2)":"var(--violet)",onClick:(varDetay&&onMaliyet)?()=>onMaliyet(u):null}); })()),
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       onFoto?h("label",{style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--violet)",textAlign:"center",cursor:"pointer"}},
         foto?"Fotoğrafı değiştir":"Fotoğraf ekle",
@@ -880,6 +882,9 @@ function StokSheet({u,kullanicilar,hareketler,makineler,montajGorev,onClose,onDu
       parcali?detSatir("Parça stoğu",u.hazirTakim+" takım",()=>setNav("parcaStok")):null,
       (u.sarfSat&&u.sarfSat.length)?detSatir("Sarf malzemesi",(u.sarfYeter!=null?(u.sarfYeter+" ürüne yeter"):tlk(u.sarfMaliyet)),()=>setNav("sarfDet")):null,
       num(u.montajUcret)>0?detSatir("Montaj ücreti",tlk(u.montajUcret)+" / ad",null):null,
+      (num(u.tamMaliyet)>0&&num(u.alis)>0)?detSatir("Birim kâr · veriliş "+tlk(u.alis),
+        tlk(num(u.alis)-num(u.tamMaliyet))+" · %"+Math.round((num(u.alis)-num(u.tamMaliyet))/num(u.alis)*100),null):null,
+      num(u.montajUcret)>0?detSatir("Kâr hesabında kullanılan",tlk(u.maliyet)+" (montajsız)",null):null,
       proj?detSatir("Teslim projeksiyonu",gunKisa(proj.tarih)+" · "+proj.enfazla+" ad",()=>setNav("proj")):null,
       bh?detSatir("Bu hafta basılacak",bh.parcali?(bh.set+" set"):(bh.adet+" adet"),()=>setNav("buHafta")):null,
       (u.baskilar&&u.baskilar.length)?detSatir("Baskılar",u.baskilar.length+" kayıt",()=>setNav("baskilar")):null),
