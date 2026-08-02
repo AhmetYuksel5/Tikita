@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="J8";   // komuta (admin) deneme sürümü
+const SURUM="J9";   // komuta (admin) deneme sürümü
 /* 🎨 TEMA — YALNIZCA ADLANDIRMA katmanı. Hiçbir koleksiyon/alan/hesap değişmez;
    tema değişince sadece ekranda görünen etiketler değişir. */
 const TEMALAR={
@@ -1192,7 +1192,7 @@ function sabitHesap(list,b0,b1){
   }
   return {toplam,tur,aylik};
 }
-function GiderYonetimSheet({giderler,sabitler,b0,b1,onKaydet,onSil,onSabitKaydet,onSabitSil,onClose,bekle}){
+function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet,onSil,onSabitKaydet,onSabitSil,onClose,bekle}){
   const [sekme,setSekme]=useState("tek");
   const [duzen,setDuzen]=useState(null);
   const [sDuzen,setSDuzen]=useState(null);
@@ -1208,7 +1208,8 @@ function GiderYonetimSheet({giderler,sabitler,b0,b1,onKaydet,onSil,onSabitKaydet
   const toplam=L.reduce((s2,g)=>s2+num(g.tutar),0);
   if(duzen) return h(Sheet,{ik:"💸",hex:"#b91c1c",baslik:duzen.id?"Gideri düzenle":"Yeni gider",alt:"",onClose:()=>setDuzen(null),
     cta:bekle?"⏳…":"Kaydet",disabled:num(duzen.tutar)<=0||!duzen.tarih||bekle,
-    onCta:()=>{ onKaydet({id:duzen.id,tur:duzen.tur,aciklama:(duzen.aciklama||"").trim(),tutar:num(duzen.tutar),tarih:new Date(duzen.tarih+"T12:00:00").toISOString(),stok:stokAlimMi(duzen)}); setDuzen(null); }},
+    onCta:()=>{ onKaydet({id:duzen.id,tur:duzen.tur,aciklama:(duzen.aciklama||"").trim(),tutar:num(duzen.tutar),tarih:new Date(duzen.tarih+"T12:00:00").toISOString(),stok:stokAlimMi(duzen),
+      hedefId:duzen.hedefId||"",miktar:num(duzen.miktar)}); setDuzen(null); }},
     h("button",{onClick:()=>setDuzen(null),style:{marginBottom:12,fontSize:12.5,fontWeight:800,color:"var(--cyan)",background:"none",padding:0}},"‹ Geri"),
     h("div",{className:"lbl",style:{marginBottom:8}},"Gider kalemi — kârdan düşer"),
     h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:12}},
@@ -1218,6 +1219,24 @@ function GiderYonetimSheet({giderler,sabitler,b0,b1,onKaydet,onSil,onSabitKaydet
       STOK_TUR.map(t=>h(Chip,{key:t,on:duzen.tur===t,onClick:()=>setDuzen(o=>({...o,tur:t,stok:true}))},t))),
     stokAlimMi(duzen)?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#eff8fd",border:"1px solid #a5d8f3",fontSize:11.5,fontWeight:700,color:"#0369a1",marginBottom:14,lineHeight:1.5}},
       "Nakit çıkışı olarak tutulur, net kârdan düşülmez — bedeli ürün maliyetinde zaten sayılıyor."):null,
+    (duzen.tur==="Filament alımı"&&!duzen.id)?h(React.Fragment,null,
+      h("div",{className:"lbl",style:{marginBottom:8}},"Hangi filament"),
+      h("select",{value:duzen.hedefId||"",onChange:e=>setDuzen(o=>({...o,hedefId:e.target.value})),style:{...inp,fontSize:15,marginBottom:12}},
+        h("option",{value:""},"— stoğa işleme —"),
+        (filamentler||[]).slice().sort((x,y)=>(x.ad||"").localeCompare(y.ad||"","tr")).map(f2=>h("option",{key:f2.id,value:f2.id},(flKod(f2)?flKod(f2)+" · ":"")+(flAd(f2)||f2.ad)+" · "+(Math.round(num(f2.stokKg)*10)/10)+" kg"))),
+      duzen.hedefId?h(React.Fragment,null,
+        h("div",{className:"lbl",style:{marginBottom:8}},"Kaç kg"),
+        h("input",{type:"number",inputMode:"decimal",step:"any",value:duzen.miktar||"",onChange:e=>setDuzen(o=>({...o,miktar:e.target.value})),style:{...inp,marginBottom:12}}),
+        (num(duzen.miktar)>0&&num(duzen.tutar)>0)?h("div",{style:{textAlign:"right",fontSize:12,fontWeight:800,color:"var(--violet)",marginBottom:12}},
+          "Bu alım "+tlk(num(duzen.tutar)/num(duzen.miktar))+"/kg · stok ve ortalama güncellenecek"):null):null):null,
+    (duzen.tur==="Sarf malzemesi alımı"&&!duzen.id)?h(React.Fragment,null,
+      h("div",{className:"lbl",style:{marginBottom:8}},"Hangi malzeme"),
+      h("select",{value:duzen.hedefId||"",onChange:e=>setDuzen(o=>({...o,hedefId:e.target.value})),style:{...inp,fontSize:15,marginBottom:12}},
+        h("option",{value:""},"— stoğa işleme —"),
+        (sarflar||[]).slice().sort((x,y)=>(x.ad||"").localeCompare(y.ad||"","tr")).map(x=>h("option",{key:x.id,value:x.id},(x.ad||"?")+" · "+num(x.stokta)+" "+(x.birim||"adet")))),
+      duzen.hedefId?h(React.Fragment,null,
+        h("div",{className:"lbl",style:{marginBottom:8}},"Miktar"),
+        h("input",{type:"number",inputMode:"decimal",step:"any",value:duzen.miktar||"",onChange:e=>setDuzen(o=>({...o,miktar:e.target.value})),style:{...inp,marginBottom:12}})):null):null,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Tutar ₺"),
         h("input",{type:"number",inputMode:"decimal",step:"any",value:duzen.tutar,onChange:e=>setDuzen(o=>({...o,tutar:e.target.value})),style:inp})),
@@ -3132,13 +3151,26 @@ function App(){
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
     modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap,onRota:talepRota,onSil:talepSil}),
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
-    modal&&modal.tip==="gider"&&h(GiderYonetimSheet,{giderler,sabitler:sabitGider,b0:modal.b0!=null?modal.b0:0,b1:modal.b1!=null?modal.b1:Infinity,bekle:isBekle,onClose:()=>setModal(null),
+    modal&&modal.tip==="gider"&&h(GiderYonetimSheet,{giderler,sabitler:sabitGider,filamentler,sarflar,b0:modal.b0!=null?modal.b0:0,b1:modal.b1!=null?modal.b1:Infinity,bekle:isBekle,onClose:()=>setModal(null),
       onSabitKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("sabit_gider",{...(g.id?{id:g.id}:{}),tur:g.tur,aciklama:g.aciklama,tutar:num(g.tutar),baslangic:g.baslangic,bitis:g.bitis||""}); say(g.id?"Güncellendi":"Sabit gider eklendi"); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onSabitSil:async(id)=>{ try{ await remove("sabit_gider",id); say("Silindi"); }catch(e){ console.error(e); say("Silinemedi"); } },
       onKaydet:async(g)=>{ if(isBekle) return; setIsBekle(true);
-        try{ await save("gider",{...(g.id?{id:g.id}:{}),tur:g.tur,aciklama:g.aciklama,tutar:num(g.tutar),tarih:g.tarih,stok:!!g.stok}); say(g.id?"Gider güncellendi":"Gider eklendi"); }
+        try{ const ek={};
+          // 📦 filament/sarf alımı stoğa da işlensin — ağırlıklı ortalama fiyatla
+          if(g.hedefId&&num(g.miktar)>0&&num(g.tutar)>0){
+            const mk=num(g.miktar), bir=num(g.tutar)/mk;
+            if(g.tur==="Filament alımı"){ const f2=(filamentler||[]).find(x=>x.id===g.hedefId);
+              if(f2){ const es=Math.max(0,num(f2.stokKg)); const ort=(es+mk)>0?((es*num(f2.kgFiyat)+mk*bir)/(es+mk)):bir;
+                await save("filament",{id:f2.id,stokKg:increment(mk),kgFiyat:Math.round(ort*100)/100});
+                ek.ref=f2.id; ek.miktar=mk; } }
+            else if(g.tur==="Sarf malzemesi alımı"){ const sf=(sarflar||[]).find(x=>x.id===g.hedefId);
+              if(sf){ const es=Math.max(0,num(sf.stokta)); const ort=(es+mk)>0?((es*num(sf.birimFiyat)+mk*bir)/(es+mk)):bir;
+                await save("sarf",{id:sf.id,stokta:increment(mk),birimFiyat:Math.round(ort*10000)/10000});
+                ek.ref=sf.id; ek.miktar=mk; } } }
+          await save("gider",{...(g.id?{id:g.id}:{}),tur:g.tur,aciklama:g.aciklama,tutar:num(g.tutar),tarih:g.tarih,stok:!!g.stok,...ek});
+          say(g.id?"Gider güncellendi":(ek.ref?"Gider eklendi · stok arttı":"Gider eklendi")); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onSil:async(id)=>{ try{ await remove("gider",id); say("Gider silindi"); }catch(e){ console.error(e); say("Silinemedi"); } }}),
     modal&&modal.tip==="montajYonet"&&h(MontajYonetimSheet,{gorevler:montajGorev,stok:d.stok,kullanicilar,bekle:isBekle,onClose:()=>setModal(null),
