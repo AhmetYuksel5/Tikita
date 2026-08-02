@@ -49,7 +49,7 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo}=React; const h=React.createElement;
 
-const SURUM="F1";
+const SURUM="F3";
 const SAAT_MALIYET=12;          // ₺/saat — üretim panelindeki standart makine saati
 
 /* ═════════ 0 · yardımcılar ═════════ */
@@ -651,8 +651,36 @@ function oranlar(BL,GTb,gunSayi,amort){
   return o;
 }
 
+/* ——— aylık KDV beyanı ——— */
+function kdvAylik(F,b0,b1){
+  const A={};
+  F.forEach(f=>{ if(f.t<b0||f.t>b1) return; const k=ayEt(f.t);
+    f.s.forEach(x=>{ if(x.h!=="391"&&x.h!=="191") return;
+      A[k]=A[k]||{ay:k,hes:0,ind:0};
+      if(x.h==="391") A[k].hes+=x.a-x.b; else A[k].ind+=x.b-x.a; }); });
+  let devir=0;
+  return Object.keys(A).sort().map(k=>{ const o=A[k];
+    const net=o.hes-o.ind-devir;
+    const odenecek=Math.max(0,net); devir=Math.max(0,-net);
+    return {...o,odenecek:r2(odenecek),devreden:r2(devir),net:r2(net)}; });
+}
+
+/* ——— üretim gideri: standart yükleme vs fiili ——— */
+function ohAnaliz(F,b0,b1,V){
+  let yuklenen=0, fiili=0; const kaynak={};
+  F.forEach(f=>{ if(f.t<b0||f.t>b1||f.tur==="kapanis") return;   // kapanış fişi 730'u sıfırlar, yükleme değildir
+    f.s.forEach(x=>{ if(x.h!=="730") return;
+      if(x.a>0) yuklenen+=x.a;
+      if(x.b>0){ fiili+=x.b; kaynak[f.tur]=r2((kaynak[f.tur]||0)+x.b); } }); });
+  const std=num(V.ohAmort)+num(V.ohElektrik)+num(V.ohBakim);
+  const saat=SAAT_MALIYET>0?yuklenen/SAAT_MALIYET:0;
+  return {yuklenen:r2(yuklenen),fiili:r2(fiili),fark:r2(fiili-yuklenen),kaynak,saat:r2(saat),
+    std,birimFiili:saat>0?r2(fiili/saat):null,
+    bilesen:[["Amortisman",num(V.ohAmort)],["Elektrik",num(V.ohElektrik)],["Bakım",num(V.ohBakim)]]};
+}
+
 /* ═════════ 7 · DENETİM ═════════ */
-function denetim(D,V,F,MZ,BL,GTb,AY,UK,KP){
+function denetim(D,V,F,MZ,BL,GTb,AY,UK,KP,OH){
   const K=[]; const dur=(s,b,d,x)=>K.push({s,b,d,x});
   // 1 mizan dengesi
   let tb=0,ta=0; F.forEach(f=>f.s.forEach(x=>{tb+=x.b;ta+=x.a;}));
@@ -686,7 +714,14 @@ function denetim(D,V,F,MZ,BL,GTb,AY,UK,KP){
   const sapKap=num(KP.ohFark);
   dur(GTb.netSatis>0&&Math.abs(sapKap)>GTb.netSatis*0.15?"uyari":"ok","Üretim gider farkı",
     tl(sapKap)+(GTb.netSatis>0?(" · net satışın "+yzd(Math.abs(sapKap)/GTb.netSatis*100)):""),
-    sapKap>0?"Fiili genel üretim gideri, 12 ₺/saat standardının üstünde":"Fiili gider standardın altında");
+    sapKap>0?"Fiili genel üretim gideri, "+tl0(SAAT_MALIYET)+"/saat standardının üstünde":"Fiili gider standardın altında");
+  // 8b saat maliyeti standardı gerçeği yansıtıyor mu
+  if(OH&&OH.birimFiili!=null&&OH.saat>0.5){
+    const sapmaY=SAAT_MALIYET>0?(OH.birimFiili-SAAT_MALIYET)/SAAT_MALIYET*100:0;
+    dur(Math.abs(sapmaY)>35?"uyari":"ok","Saat maliyeti standardı",
+      "Standart "+tl0(SAAT_MALIYET)+"/saat · fiili "+tl(OH.birimFiili)+"/saat",
+      Math.abs(sapmaY)>35?("Standart "+(sapmaY>0?"düşük":"yüksek")+" · ürün maliyetleri "+(sapmaY>0?"olduğundan az":"olduğundan çok")+" görünüyor, kâr marjları "+(sapmaY>0?"iyimser":"kötümser")):"");
+  }
   // 9 stok sayım farkı
   const sf=num(KP.sayimFark);
   const sfDet=Object.keys(KP.sayimDetay||{}).map(k=>k+" "+tl0(KP.sayimDetay[k])).join(" · ");
@@ -848,8 +883,10 @@ function App(){
     const BB=basabas(GTb);
     const sabitTop=BB.sabit;
     const OR=oranlar(BL,GTb,gunSayi,donemAmort);
-    const DN=denetim(D,V,fisler,MZ,BL,GTb,AY,UK,KP);
-    return {D,M,fisler,MZ,GTb,BL,NA,AY,UK,BB,OR,DN,KP,gunSayi,donemAmort,acKg,kgFiyatOrt,aylikAmort,mkSay,mkDeger,sabitTop};
+    const KDV=kdvAylik(fisler,b0,b1);
+    const OH=ohAnaliz(fisler,b0,b1,V);
+    const DN=denetim(D,V,fisler,MZ,BL,GTb,AY,UK,KP,OH);
+    return {D,M,fisler,MZ,GTb,BL,NA,AY,UK,BB,OR,DN,KP,KDV,OH,gunSayi,donemAmort,acKg,kgFiyatOrt,aylikAmort,mkSay,mkDeger,sabitTop};
   },[yuklu,urunler,plan,hareketler,filamentler,sarflar,giderler,sabitGider,montajGorev,makineler,kullanicilar,V,b0,b1]);
 
   if(!yuklu) return h("div",{style:{padding:"120px 20px",textAlign:"center",color:"var(--mut)"}},
@@ -1160,6 +1197,34 @@ function AnalizEkran({H,V}){
               h("div",{className:"mono",style:{fontSize:12.5,fontWeight:800,color:iyi?"var(--pos)":"var(--warn)"}},
                 tl0(g)+" · "+yzd(o))),
             h(Bar,{p:Math.min(100,o),renk:iyi?"var(--pos)":"var(--warn)"})); }))),
+    h(Bolum,{b:"KDV beyanı",alt:"aylık · hesaplanan − indirilecek",ic:false},
+      h("div",{className:"kaydir"},h("table",null,
+        h("thead",null,h("tr",null,h("th",null,"Ay"),h("th",{className:"n"},"Hesaplanan"),
+          h("th",{className:"n"},"İndirilecek"),h("th",{className:"n"},"Ödenecek"),h("th",{className:"n"},"Devreden"))),
+        h("tbody",null,
+          H.KDV.length?H.KDV.map(k=>h("tr",{key:k.ay},
+            h("td",{className:"mono"},k.ay),
+            h("td",{className:"n"},tl0(k.hes)),
+            h("td",{className:"n",style:{color:"var(--mut)"}},tl0(k.ind)),
+            h("td",{className:"n",style:{fontWeight:800,color:k.odenecek>0?"var(--neg)":"var(--mut2)"}},k.odenecek>0?tl0(k.odenecek):"·"),
+            h("td",{className:"n",style:{color:k.devreden>0?"var(--acc)":"var(--mut2)"}},k.devreden>0?tl0(k.devreden):"·")))
+          :h("tr",null,h("td",{colSpan:5,style:{color:"var(--mut)"}},"Dönemde KDV hareketi yok")),
+          H.KDV.length?h("tr",{className:"tot"},h("td",null,"TOPLAM"),
+            h("td",{className:"n"},tl0(H.KDV.reduce((s,k)=>s+k.hes,0))),
+            h("td",{className:"n"},tl0(H.KDV.reduce((s,k)=>s+k.ind,0))),
+            h("td",{className:"n"},tl0(H.KDV.reduce((s,k)=>s+k.odenecek,0))),
+            h("td",{className:"n"},tl0(H.KDV.length?H.KDV[H.KDV.length-1].devreden:0))):null)))),
+    h(Bolum,{b:"Üretim gideri · standart ve fiili",
+      alt:tl0(SAAT_MALIYET)+"/saat standart · "+ad(H.OH.saat)+" saat yüklendi"},
+      h(Sat,{ad:"Mamule yüklenen (standart)",v:H.OH.yuklenen}),
+      h(Sat,{ad:"Fiili genel üretim gideri",v:H.OH.fiili}),
+      Object.keys(H.OH.kaynak).map(k=>h(Sat,{key:k,ad:k,v:H.OH.kaynak[k],gir:1})),
+      h(Sat,{ad:"Fark (620'ye aktarılan)",v:H.OH.fark,kalin:true,ust:true,
+        renk:H.OH.fark>0?"var(--neg)":"var(--pos)"}),
+      h(Sat,{ad:"Fiili saat maliyeti",v:0,ust:true,
+        ik:H.OH.birimFiili!=null?(tl(H.OH.birimFiili)+"/saat"):"—",
+        renk:H.OH.birimFiili!=null&&H.OH.birimFiili>SAAT_MALIYET?"var(--neg)":"var(--pos)"}),
+      H.OH.bilesen.map(([a2,v2])=>h(Sat,{key:a2,ad:"standart · "+a2.toLocaleLowerCase("tr"),v:v2,gir:1}))),
     h(Bolum,{b:"Başabaş analizi",alt:"pazarlamacı payı satışla orantılı → değişken maliyet"},
       h(Sat,{ad:"Net satışlar",v:GTb.netSatis}),
       h(Sat,{ad:"Değişken maliyet (SMM + pazarlamacı payı)",v:-BB.degisken,gir:1}),
