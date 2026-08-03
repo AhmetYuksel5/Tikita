@@ -49,7 +49,7 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo}=React; const h=React.createElement;
 
-const SURUM="F5";
+const SURUM="F6";
 const SAAT_MALIYET=12;          // ₺/saat — üretim panelindeki standart makine saati
 /* 🗓 HAKEDİŞ KESME TARİHİ — bu tarihten itibaren pazarlamacı hakedişi SATIŞA bağlıdır
    ve haftalık ayrı ödenir. Öncesinde tahsilattan mahsup ediliyordu (önce üretici). */
@@ -351,8 +351,9 @@ function defterUret(D,V){
     if(pesin){
       // kesme sonrası: pazarlamacı nakdin TAMAMINI teslim eder, hakedişi haftalık ayrı ödenir
       const yeni=ISO(x.tarih)>=HAKEDIS_BAS_MS;
+      // kesme sonrası: para PAZARLAMACININ elinde (108), teslim edilince 100'e geçer
       ek(x.tarih,"satis","Gerilla satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
-        yeni?[{h:"100",b:hasilatBrut},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv},{h:"335",a:prim}]
+        yeni?[{h:"108",b:hasilatBrut},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv},{h:"335",a:prim}]
             :[{h:"100",b:hasilatBrut-prim},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
     } else {
       ek(x.tarih,"satis","Satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
@@ -378,7 +379,7 @@ function defterUret(D,V){
       // kesme sonrası: tahsilatın tamamı Tikita'ya gelir, pazarlamacı payı mahsup edilmez
       if(ISO(x.tarih)>=HAKEDIS_BAS_MS){
         ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||""),
-          [{h:"100",b:tut},{h:"120",a:tut}],"har:"+x.id);
+          [{h:"108",b:tut},{h:"120",a:tut}],"har:"+x.id);
       } else {
         const bilinen=uP+pP; const artik=Math.max(0,tut-bilinen);
         ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||""),
@@ -394,6 +395,13 @@ function defterUret(D,V){
   (D.hareketler||[]).forEach(x=>{ if(x.tip!=="stant") return;
     const f=num(x.fiyat); if(f<=0) return;
     ek(x.tarih,"stant","Stant bedeli · "+(x.yer||""),[{h:"631.9",b:f},{h:"100",a:f}],"har:"+x.id); });
+
+  /* ——— 4.9b nakit teslim: saha kasası → Tikita kasası ——— */
+  (D.hareketler||[]).forEach(x=>{ if(x.tip!=="nakitTeslim") return;
+    const t=num(x.tutar); if(t<=0) return;
+    if(x.onay===false) return;   // henüz teslim alınmadı — para hâlâ sahada
+    ek(x.tarih,"teslim","Nakit teslim · "+(x.kullaniciAd||"")+(x.not?(" · "+x.not):""),
+      [{h:"100",b:t},{h:"108",a:t}],"har:"+x.id); });
 
   /* ——— 4.10 tek seferlik giderler ——— */
   const GIDER_HESAP={"Pazarlamacı hakedişi":"335","Montaj işçiliği":"335","Elektrik":"730","Bakım":"730",
@@ -575,7 +583,7 @@ function nakitAkis(F,b0,b1,amort){
   const NAK={"100":1,"102":1,"108":1};
   const kat={faaliyet:0,yatirim:0,finansman:0};
   const KAT_TUR={satis:"faaliyet",tahsilat:"faaliyet",gider:"faaliyet",sabit:"faaliyet",alim:"faaliyet",
-    odeme:"faaliyet",stant:"faaliyet",vergi:"faaliyet",yatirim:"finansman"};
+    odeme:"faaliyet",stant:"faaliyet",vergi:"faaliyet",teslim:"faaliyet",yatirim:"finansman"};
   let acilisNakit=0, kapanisNakit=0;
   F.forEach(f=>{
     let d=0; f.s.forEach(x=>{ if(NAK[x.h]) d+=x.b-x.a; });
@@ -809,6 +817,13 @@ function denetim(D,V,F,MZ,BL,GTb,AY,UK,KP,OH){
   // 14 kapanmamış avans
   const avans=num(MZ.B["340"]);
   dur(avans>0?"uyari":"ok","Mahsup edilmemiş avans",tl(avans),avans>0?"Sayımsız tahsilat, satışla eşleştirilmemiş":"");
+  // 14b saha kasası — pazarlamacıda duran, teslim alınmamış nakit
+  const saha=num(MZ.B["108"]);
+  let teslimBek=0;
+  (D.hareketler||[]).forEach(x=>{ if(x.tip==="nakitTeslim"&&x.onay===false) teslimBek+=num(x.tutar); });
+  dur(saha<-1?"hata":(saha>0.5?"uyari":"ok"),"Saha kasası (pazarlamacıda)",tl(saha),
+    saha<-1?"Teslim alınan, tahsil edilenden fazla — fazla teslim kaydı var"
+      :(saha>0.5?("Henüz Tikita kasasına girmemiş nakit"+(teslimBek>0.5?(" · "+tl(teslimBek)+" onay bekliyor"):"")):""));
   // 15 personele borç
   const hak=num(MZ.B["335"]);
   dur(hak>0?"bilgi":(hak<-1?"uyari":"ok"),hak<-1?"Personele fazla ödeme":"Ödenmemiş hakediş",
