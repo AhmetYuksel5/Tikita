@@ -49,8 +49,11 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo}=React; const h=React.createElement;
 
-const SURUM="F4";
+const SURUM="F5";
 const SAAT_MALIYET=12;          // ₺/saat — üretim panelindeki standart makine saati
+/* 🗓 HAKEDİŞ KESME TARİHİ — bu tarihten itibaren pazarlamacı hakedişi SATIŞA bağlıdır
+   ve haftalık ayrı ödenir. Öncesinde tahsilattan mahsup ediliyordu (önce üretici). */
+const HAKEDIS_BAS_MS=new Date("2026-08-08T00:00:00").getTime();
 
 /* ═════════ 0 · yardımcılar ═════════ */
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
@@ -346,8 +349,11 @@ function defterUret(D,V){
     // Bunu 120'ye borç yazarsak alacak sonsuza dek açık kalır.
     const pesin=!!(x.gerilla||x.kaynak==="gerilla");
     if(pesin){
+      // kesme sonrası: pazarlamacı nakdin TAMAMINI teslim eder, hakedişi haftalık ayrı ödenir
+      const yeni=ISO(x.tarih)>=HAKEDIS_BAS_MS;
       ek(x.tarih,"satis","Gerilla satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
-        [{h:"100",b:hasilatBrut-prim},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
+        yeni?[{h:"100",b:hasilatBrut},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv},{h:"335",a:prim}]
+            :[{h:"100",b:hasilatBrut-prim},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
     } else {
       ek(x.tarih,"satis","Satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
         [{h:"120",b:hasilatBrut},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
@@ -369,9 +375,15 @@ function defterUret(D,V){
         [{h:"100",b:tut},{h:"340",a:tut}],"har:"+x.id); return; }
     const uP=num(x.ureticiPay), pP=num(x.pazPay);
     if(brutView){
-      const bilinen=uP+pP; const artik=Math.max(0,tut-bilinen);
-      ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||""),
-        [{h:"100",b:uP+artik},{h:"335",b:pP},{h:"120",a:tut}],"har:"+x.id);
+      // kesme sonrası: tahsilatın tamamı Tikita'ya gelir, pazarlamacı payı mahsup edilmez
+      if(ISO(x.tarih)>=HAKEDIS_BAS_MS){
+        ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||""),
+          [{h:"100",b:tut},{h:"120",a:tut}],"har:"+x.id);
+      } else {
+        const bilinen=uP+pP; const artik=Math.max(0,tut-bilinen);
+        ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||""),
+          [{h:"100",b:uP+artik},{h:"335",b:pP},{h:"120",a:tut}],"har:"+x.id);
+      }
     } else {
       ek(x.tarih,"tahsilat","Tahsilat (üretici payı) · "+(x.yer||""),
         [{h:"100",b:uP>0?uP:tut},{h:"120",a:uP>0?uP:tut}],"har:"+x.id);
@@ -384,8 +396,8 @@ function defterUret(D,V){
     ek(x.tarih,"stant","Stant bedeli · "+(x.yer||""),[{h:"631.9",b:f},{h:"100",a:f}],"har:"+x.id); });
 
   /* ——— 4.10 tek seferlik giderler ——— */
-  const GIDER_HESAP={"Montaj işçiliği":"335","Elektrik":"730","Kargo":"631.9","Bakım":"730",
-    "Vergi":"360","Tanıtım":"631.9","Diğer":"632"};
+  const GIDER_HESAP={"Pazarlamacı hakedişi":"335","Montaj işçiliği":"335","Elektrik":"730","Bakım":"730",
+    "Kargo":"631.9","Vergi":"360","Tanıtım":"631.9","Diğer":"632"};
   const STOK_HESAP={"Filament alımı":"150","Sarf malzemesi alımı":"157","Yedek parça alımı":"157"};
   (D.giderler||[]).forEach(g=>{
     const brut=num(g.tutar); if(brut<=0) return;
@@ -394,7 +406,7 @@ function defterUret(D,V){
     if(sh){ ek(g.tarih,"alim","Stok alımı · "+(g.tur||"")+(g.aciklama?(" · "+g.aciklama):""),
         [{h:sh,b:net},{h:"191",b:kdv},{h:"100",a:brut}],"gid:"+g.id); return; }
     const hs=GIDER_HESAP[g.tur]||"632";
-    if(hs==="335"){ ek(g.tarih,"odeme","Montaj ödemesi"+(g.aciklama?(" · "+g.aciklama):""),
+    if(hs==="335"){ ek(g.tarih,"odeme",(g.tur||"Hakediş ödemesi")+(g.aciklama?(" · "+g.aciklama):""),
         [{h:"335",b:brut},{h:"100",a:brut}],"gid:"+g.id); return; }
     if(hs==="360"){ ek(g.tarih,"vergi","Vergi ödemesi"+(g.aciklama?(" · "+g.aciklama):""),
         [{h:"360",b:brut},{h:"100",a:brut}],"gid:"+g.id); return; }
