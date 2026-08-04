@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L4";   // komuta (admin) deneme sürümü
+const SURUM="L5";   // komuta (admin) deneme sürümü
 
 /* ═══ 🗓 HAKEDİŞ DÖNEMİ — Cumartesi 00:00 → Cuma 23:59 (deneme.html ile birebir) ═══ */
 const HAKEDIS_BAS="2026-08-08";
@@ -398,9 +398,21 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
     const fl2=filById[p.filamentId]; const kg2=fl2?num(fl2.kgFiyat):0;
     const mk=(makineler||[]).find(m=>m.id===p.makineId);
     const sd=num(p.sureDk);
+    /* 🧩 PARÇALI ÜRÜN: bir baskı ürünün yalnızca bazı parçalarını basar.
+       Ham "adet" toplanırsa aynı ürünün Üst ve Alt baskısı iki ayrı tam ürün gibi sayılır.
+       Doğrusu TAKIM EŞDEĞERİ: her parçanın (basılan / bir takımda gereken) oranının
+       parça sayısına bölünmüş toplamı — yani bu baskı kaç takımlık iş yaptı. */
+    const parts2=(u2&&(u2.parcalar||[]).filter(Boolean))||[];
+    let setAdet=num(p.adet), parcaBilgi="";
+    if(parts2.length){
+      const kk=plParcaKatki(p,u2);
+      setAdet=parts2.reduce((s2,pt)=>s2+num(kk[pt])/gerekenP(u2,pt),0)/parts2.length;
+      parcaBilgi=plParcalari(p,parts2).map(pt=>pt+" ×"+Math.round(num(kk[pt]))).join(" · ");
+    }
     const k={p,id:p.id,ts:isFinite(bs)?bs:0,tarih:p.gercekBaslangic||p.baslangic,
       ad:u2?(u2.ad||"?"):"", urunYok:!u2,
-      adet:num(p.adet), sureDk:sd, gram:num(p.gram),
+      adet:setAdet, hamAdet:num(p.adet), parcali:parts2.length>0, parcaBilgi,
+      parcaSay:parts2.length, sureDk:sd, gram:num(p.gram),
       maliyet:sd/60*SAAT_MALIYET+num(p.gram)/1000*kg2,
       makineAd:mk?(mk.ad||""):"",
       bos:num(p.adet)<=0&&sd<=0&&num(p.gram)<=0};
@@ -413,15 +425,16 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
   ["hafta","gecik","ileri","bos"].forEach(k=>planListe[k].sort((a2,b2)=>a2.ts-b2.ts));
   const hSay=dur=>planListe.hafta.filter(x=>x.durum===dur);
   const hafUretim={bitti:hSay("bitti"),basiyor:hSay("basiyor"),bekliyor:hSay("bekliyor")};
-  hafUretim.bittiAdet=hafUretim.bitti.reduce((s2,x)=>s2+x.adet,0);
-  hafUretim.basiyorAdet=hafUretim.basiyor.reduce((s2,x)=>s2+x.adet,0);
-  hafUretim.bekliyorAdet=hafUretim.bekliyor.reduce((s2,x)=>s2+x.adet,0);
-  planAdet=planListe.hafta.reduce((s2,x)=>s2+x.adet,0);
+  const yuv=n=>Math.round(n*10)/10;
+  hafUretim.bittiAdet=yuv(hafUretim.bitti.reduce((s2,x)=>s2+x.adet,0));
+  hafUretim.basiyorAdet=yuv(hafUretim.basiyor.reduce((s2,x)=>s2+x.adet,0));
+  hafUretim.bekliyorAdet=yuv(hafUretim.bekliyor.reduce((s2,x)=>s2+x.adet,0));
+  planAdet=Math.round(planListe.hafta.reduce((s2,x)=>s2+x.adet,0));
   planDeger=planListe.hafta.reduce((s2,x)=>s2+x.maliyet,0);
   gecikSay=planListe.gecik.length;
-  gecikAdet=planListe.gecik.reduce((s2,x)=>s2+x.adet,0);
+  gecikAdet=Math.round(planListe.gecik.reduce((s2,x)=>s2+x.adet,0));
   gecikDeger=planListe.gecik.reduce((s2,x)=>s2+x.maliyet,0);
-  ileriAdet=planListe.ileri.reduce((s2,x)=>s2+x.adet,0);
+  ileriAdet=Math.round(planListe.ileri.reduce((s2,x)=>s2+x.adet,0));
   const olu=planListe.gecik.concat(planListe.bos,planListe.ileri).filter(x=>x.bos||x.urunYok);
   // parça-stoğu / montaj yardımcıları (index.html ile birebir)
   const parcaAvailF=(u,p)=> Math.max(0, num((bldParca[u.id]||{})[p]) + num((u.parcaElle||{})[p]) - num((u.parcaTuket||{})[p]));
@@ -2298,6 +2311,7 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
     bekliyor:["bekliyor","#fef3c7","#92400e"]};
   const L=G?G.L:[];
   const tAd=L.reduce((s2,x)=>s2+x.adet,0), tMal=L.reduce((s2,x)=>s2+x.maliyet,0);
+  const parcaliVar=L.some(x=>x.parcali);
   const gun2=t=>{ const dd=new Date(t); return isNaN(+dd)?"tarihsiz":dd.toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"}); };
   const oluSay=(d.oluPlan||[]).length;
   return h(Sheet,{ik:"🖨",hex:"#0e8fce",baslik:"Üretim planı",
@@ -2321,7 +2335,7 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
         h("div",{style:{fontSize:13,fontWeight:800,color:G.renk}},G.ad),
         h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},G.alt)),
       h("div",{style:{textAlign:"right"}},
-        h("div",{style:{fontSize:15,fontWeight:800}},tAd+" adet"),
+        h("div",{style:{fontSize:15,fontWeight:800}},(Math.round(tAd*10)/10)+" takım"),
         tMal>0?h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700}},tlk(tMal)):null)):null,
     L.map(x=>h("div",{key:x.id,className:"card",style:{padding:"11px 13px",marginBottom:8,boxShadow:"none",
         borderLeft:"3px solid "+((x.urunYok||x.bos)?"var(--red)":G.renk)}},
@@ -2335,11 +2349,14 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
           h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},
             gun2(x.tarih)+(x.makineAd?(" · "+x.makineAd):""))),
         h("div",{style:{textAlign:"right",flexShrink:0}},
-          h("div",{style:{fontSize:14,fontWeight:800}},x.adet+" ad"),
+          h("div",{style:{fontSize:14,fontWeight:800}},
+            (Math.round(x.adet*10)/10)+(x.parcali?" takım":" ad")),
           x.maliyet>0?h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700}},tlk(x.maliyet)):null)),
       h("div",{style:{fontSize:11,color:"var(--mut2)",fontWeight:700,marginBottom:8}},
         x.bos?"adet, süre ve gram sıfır — bu kayıt hiçbir şey üretmez"
              :(dkYaz(x.sureDk)+" · "+Math.round(x.gram)+" g"+(x.urunYok?" · bu iş artık hiçbir ürüne bağlı değil":""))),
+      x.parcali&&x.parcaBilgi?h("div",{style:{fontSize:11,color:"var(--violet)",fontWeight:700,marginBottom:8}},
+        "🧩 "+x.parcaBilgi+"  ("+x.parcaSay+" parçalı ürün)"):null,
       h("div",{style:{display:"flex",gap:7}},
         (!x.bos&&!x.urunYok)?h("button",{onClick:()=>onPlanAc&&onPlanAc(x),
           style:{flex:1,padding:"9px 8px",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",
@@ -2348,7 +2365,12 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
           style:{flex:1,padding:"9px 8px",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",
             fontSize:12.5,fontWeight:800,color:"var(--red)"}},x.durum==="basiyor"?"🗑 İptal et":"🗑 Plandan sil"):null))),
     !L.length?h("div",{style:{padding:"26px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},
-      "Başlatılmamış iş yok."):null,
+      "Bu grupta iş yok."):null,
+    parcaliVar?h("div",{style:{marginTop:12,padding:"11px 13px",borderRadius:12,background:"#f5f3ff",
+      border:"1px solid #ddd6fe",fontSize:11.5,fontWeight:700,color:"#5b21b6",lineHeight:1.55}},
+      "🧩 Parçalı üründe bir baskı yalnız bazı parçaları basar. Rakam TAKIM EŞDEĞERİ: "
+      +"kaç tam ürünlük iş yapıldığını gösterir. Kaplumbağa'nın Üst ve Alt baskısı ayrı ayrı 25 adet olsa da "
+      +"bu 25 kaplumbağa eder, 50 değil."):null,
     oluSay?h("div",{style:{marginTop:12,padding:"11px 13px",borderRadius:12,background:"#fff7ed",
       border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412",lineHeight:1.5}},
       oluSay+" iş ölü: ürünü silinmiş ya da tamamen boş. Başlatılsalar bile stoğa bir şey eklemezler."):null);
