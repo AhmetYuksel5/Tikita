@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L3";   // komuta (admin) deneme sürümü
+const SURUM="L4";   // komuta (admin) deneme sürümü
 
 /* ═══ 🗓 HAKEDİŞ DÖNEMİ — Cumartesi 00:00 → Cuma 23:59 (deneme.html ile birebir) ═══ */
 const HAKEDIS_BAS="2026-08-08";
@@ -387,28 +387,37 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
         if(parcali){ bldParca[p.urunId]=bldParca[p.urunId]||{}; const kk=plParcaKatki(p,u); for(const pt in kk) bldParca[p.urunId][pt]=num(bldParca[p.urunId][pt])+kk[pt]; } } }
     });
 
-  /* 🖨 BAŞLATILMAMIŞ PLAN DÖKÜMÜ — ekranda tek tek listelenir, rakamlar buradan türer.
+  /* 🖨 HAFTANIN ÜRETİMİ — Cmt 00:00 → Cuma 23:59 arasında BAŞLAYAN her iş.
+     Sadece planlananı değil, biteni ve şu an basılanı da sayar.
      Ana döngü adet=0 olan kayıtları atladığı için burada ayrı geçiliyor. */
-  const planListe={bu:[],gecik:[],ileri:[],bos:[]};
+  const planListe={hafta:[],gecik:[],ileri:[],bos:[]};
   (plan||[]).forEach(p=>{
-    if(p.basladi) return;
-    const bs=new Date(p.baslangic).getTime();
+    const bs=new Date(p.gercekBaslangic||p.baslangic).getTime();   // fiilen ne zaman başladı
+    const bsPlan=new Date(p.baslangic).getTime();                  // ne zamana planlanmıştı
     const u2=p.urunId?urunById[p.urunId]:null;
     const fl2=filById[p.filamentId]; const kg2=fl2?num(fl2.kgFiyat):0;
     const mk=(makineler||[]).find(m=>m.id===p.makineId);
-    const k={p,id:p.id,ts:isFinite(bs)?bs:0,tarih:p.baslangic,
+    const sd=num(p.sureDk);
+    const k={p,id:p.id,ts:isFinite(bs)?bs:0,tarih:p.gercekBaslangic||p.baslangic,
       ad:u2?(u2.ad||"?"):"", urunYok:!u2,
-      adet:num(p.adet), sureDk:num(p.sureDk), gram:num(p.gram),
-      maliyet:num(p.sureDk)/60*SAAT_MALIYET+num(p.gram)/1000*kg2,
+      adet:num(p.adet), sureDk:sd, gram:num(p.gram),
+      maliyet:sd/60*SAAT_MALIYET+num(p.gram)/1000*kg2,
       makineAd:mk?(mk.ad||""):"",
-      bos:num(p.adet)<=0&&num(p.sureDk)<=0&&num(p.gram)<=0};
-    if(k.bos||!isFinite(bs)) planListe.bos.push(k);
-    else if(bs<hafBas) planListe.gecik.push(k);
-    else if(bs<hafBit) planListe.bu.push(k);
-    else planListe.ileri.push(k); });
-  ["bu","gecik","ileri","bos"].forEach(k=>planListe[k].sort((a2,b2)=>a2.ts-b2.ts));
-  planAdet=planListe.bu.reduce((s2,x)=>s2+x.adet,0);
-  planDeger=planListe.bu.reduce((s2,x)=>s2+x.maliyet,0);
+      bos:num(p.adet)<=0&&sd<=0&&num(p.gram)<=0};
+    if(k.bos||!isFinite(bs)){ planListe.bos.push(k); return; }
+    if(bs>=hafBas&&bs<hafBit){
+      k.durum=!p.basladi?"bekliyor":((bs+sd*60000<=now)?"bitti":"basiyor");
+      planListe.hafta.push(k); return; }
+    if(p.basladi) return;                       // geçmiş haftaların bitmiş işleri burada aranmaz
+    if(bsPlan<hafBas) planListe.gecik.push(k); else planListe.ileri.push(k); });
+  ["hafta","gecik","ileri","bos"].forEach(k=>planListe[k].sort((a2,b2)=>a2.ts-b2.ts));
+  const hSay=dur=>planListe.hafta.filter(x=>x.durum===dur);
+  const hafUretim={bitti:hSay("bitti"),basiyor:hSay("basiyor"),bekliyor:hSay("bekliyor")};
+  hafUretim.bittiAdet=hafUretim.bitti.reduce((s2,x)=>s2+x.adet,0);
+  hafUretim.basiyorAdet=hafUretim.basiyor.reduce((s2,x)=>s2+x.adet,0);
+  hafUretim.bekliyorAdet=hafUretim.bekliyor.reduce((s2,x)=>s2+x.adet,0);
+  planAdet=planListe.hafta.reduce((s2,x)=>s2+x.adet,0);
+  planDeger=planListe.hafta.reduce((s2,x)=>s2+x.maliyet,0);
   gecikSay=planListe.gecik.length;
   gecikAdet=planListe.gecik.reduce((s2,x)=>s2+x.adet,0);
   gecikDeger=planListe.gecik.reduce((s2,x)=>s2+x.maliyet,0);
@@ -528,7 +537,7 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
   const stokDeger=sd.depo+sd.canta+sd.kons+sd.montaj;
   const sarfDeger=(sarflar||[]).reduce((s2,x)=>s2+num(x.stokta)*num(x.birimFiyat),0);
   return {bugun,hafta,makDurum,aktifBaski,tablaBek,ekip,alacakTop,stok,dusuk,stokDeger,stokDetay:sd,sarfDeger,
-    planAdet,planDeger,gecikSay,gecikAdet,gecikDeger,ileriAdet,planListe,oluPlan:olu,sarfSay:(sarflar||[]).length};
+    planAdet,planDeger,gecikSay,gecikAdet,gecikDeger,ileriAdet,planListe,hafUretim,oluPlan:olu,sarfSay:(sarflar||[]).length};
 }
 
 /* ————— ortak UI (pazarlamacı sayfasıyla birebir) ————— */
@@ -2276,20 +2285,23 @@ function StokDegerSheet({SD,sarfDeger,toplam,onClose}){
 /* 🖨 ÜRETİM PLANI — başlatılmamış işlerin tek tek dökümü */
 function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
   const PL=d.planListe||{bu:[],gecik:[],ileri:[],bos:[]};
-  const [grup,setGrup]=useState(PL.gecik.length?"gecik":(PL.bu.length?"bu":"bos"));
+  const [grup,setGrup]=useState(PL.hafta.length?"hafta":(PL.gecik.length?"gecik":"bos"));
+  const HU=d.hafUretim||{bitti:[],basiyor:[],bekliyor:[],bittiAdet:0,basiyorAdet:0,bekliyorAdet:0};
   const GRUPLAR=[
+    {k:"hafta",ad:"Bu hafta",L:PL.hafta,renk:"var(--cyan)",alt:"cumartesi – cuma · başlayan her iş"},
     {k:"gecik",ad:"Gecikmiş",L:PL.gecik,renk:"var(--red)",alt:"planlanan günü geçti, hiç başlamadı"},
-    {k:"bu",   ad:"Bu hafta",L:PL.bu,   renk:"var(--cyan)",alt:"cumartesi – cuma"},
     {k:"ileri",ad:"İleri",   L:PL.ileri,renk:"var(--mut)",alt:"gelecek haftalar"},
     {k:"bos",  ad:"Boş kayıt",L:PL.bos, renk:"var(--gold)",alt:"adet, süre ve gram sıfır — işe yaramıyor"},
   ].filter(g=>g.L.length);
   const G=GRUPLAR.find(g=>g.k===grup)||GRUPLAR[0];
+  const DURUM={bitti:["üretildi","#dcfce7","#166534"],basiyor:["basılıyor","#e0f2fe","#075985"],
+    bekliyor:["bekliyor","#fef3c7","#92400e"]};
   const L=G?G.L:[];
   const tAd=L.reduce((s2,x)=>s2+x.adet,0), tMal=L.reduce((s2,x)=>s2+x.maliyet,0);
   const gun2=t=>{ const dd=new Date(t); return isNaN(+dd)?"tarihsiz":dd.toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"}); };
   const oluSay=(d.oluPlan||[]).length;
   return h(Sheet,{ik:"🖨",hex:"#0e8fce",baslik:"Üretim planı",
-    alt:"başlatılmamış "+((PL.bu.length+PL.gecik.length+PL.ileri.length+PL.bos.length))+" iş",
+    alt:"bu hafta "+PL.hafta.length+" iş · "+d.planAdet+" adet",
     onClose,cta:"Kapat",onCta:onClose},
     GRUPLAR.length?h("div",{style:{display:"flex",gap:6,marginBottom:13,flexWrap:"wrap"}},
       GRUPLAR.map(g=>h("button",{key:g.k,onClick:()=>setGrup(g.k),
@@ -2297,6 +2309,12 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
           background:grup===g.k?"#1b1e25":"var(--surf2)",color:grup===g.k?"#fff":"var(--mut)",
           border:"1px solid "+(grup===g.k?"#1b1e25":"var(--line)")}},
         g.ad+" "+g.L.length))):null,
+    (G&&G.k==="hafta")?h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}},
+      [["Üretildi",HU.bittiAdet,"#166534","#dcfce7"],["Basılıyor",HU.basiyorAdet,"#075985","#e0f2fe"],
+       ["Bekliyor",HU.bekliyorAdet,"#92400e","#fef3c7"]].map(([a2,v2,c2,b2])=>
+        h("div",{key:a2,style:{padding:"9px 10px",borderRadius:11,background:b2}},
+          h("div",{style:{fontSize:10.5,fontWeight:800,color:c2,letterSpacing:.4}},a2.toUpperCase()),
+          h("div",{style:{fontSize:17,fontWeight:800,color:c2,marginTop:2}},v2+" ad")))):null,
     G?h("div",{style:{padding:"11px 13px",borderRadius:12,background:"var(--surf2)",marginBottom:12,
       display:"flex",alignItems:"baseline",gap:10}},
       h("div",{style:{flex:1,minWidth:0}},
@@ -2311,7 +2329,9 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
         h("div",{style:{flex:1,minWidth:0}},
           h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
             color:x.urunYok?"var(--red)":"var(--txt)"}},
-            x.urunYok?"Ürünü silinmiş":(x.ad||"?")),
+            x.urunYok?"Ürünü silinmiş":(x.ad||"?"),
+            x.durum?h("span",{style:{marginLeft:7,fontSize:10,fontWeight:800,padding:"2px 6px",borderRadius:5,
+              background:DURUM[x.durum][1],color:DURUM[x.durum][2],verticalAlign:"middle"}},DURUM[x.durum][0]):null),
           h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},
             gun2(x.tarih)+(x.makineAd?(" · "+x.makineAd):""))),
         h("div",{style:{textAlign:"right",flexShrink:0}},
@@ -2324,9 +2344,9 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
         (!x.bos&&!x.urunYok)?h("button",{onClick:()=>onPlanAc&&onPlanAc(x),
           style:{flex:1,padding:"9px 8px",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",
             fontSize:12.5,fontWeight:800,color:"var(--cyan)"}},"İşi aç"):null,
-        h("button",{onClick:()=>onPlanSil&&onPlanSil(x),
+        x.durum!=="bitti"?h("button",{onClick:()=>onPlanSil&&onPlanSil(x),
           style:{flex:1,padding:"9px 8px",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",
-            fontSize:12.5,fontWeight:800,color:"var(--red)"}},"🗑 Plandan sil")))),
+            fontSize:12.5,fontWeight:800,color:"var(--red)"}},x.durum==="basiyor"?"🗑 İptal et":"🗑 Plandan sil"):null))),
     !L.length?h("div",{style:{padding:"26px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},
       "Başlatılmamış iş yok."):null,
     oluSay?h("div",{style:{marginTop:12,padding:"11px 13px",borderRadius:12,background:"#fff7ed",
