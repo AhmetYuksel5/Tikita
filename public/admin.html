@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L5";   // komuta (admin) deneme sürümü
+const SURUM="L6";   // komuta (admin) deneme sürümü
 
 /* ═══ 🗓 HAKEDİŞ DÖNEMİ — Cumartesi 00:00 → Cuma 23:59 (deneme.html ile birebir) ═══ */
 const HAKEDIS_BAS="2026-08-08";
@@ -921,14 +921,31 @@ function StokSheet({u,kullanicilar,hareketler,makineler,montajGorev,onClose,onDu
           h("span",null,p+(gerekenP(u.raw,p)>1?(" ×"+gerekenP(u.raw,p)):"")),h("b",{style:{color:"#6d28d9"}},num(bh.pp[p])+" parça")))
           :h("div",{style:{padding:"14px 0",textAlign:"center",fontSize:15,fontWeight:800,color:"#6d28d9"}},bh.adet+" adet"))
     : nav==="baskilar"
-    ? h(Sheet,{ik:"🖨",hex:"#0e8fce",baslik:"Baskılar",alt:(u.baskilar||[]).length+" kayıt · "+(u.baskilar||[]).reduce((s2,p)=>s2+num(p.adet||1),0)+" adet",onClose:()=>setNav(null),cta:"Kapat",onCta:()=>setNav(null)},
+    ? (()=>{
+        // 🧩 parçalı üründe bir baskı yalnız bazı parçaları basar → takım eşdeğeri
+        const pr=(u.parcalar||[]).filter(Boolean);
+        const setEsd=p=>{ if(!pr.length) return num(p.adet||1);
+          const kk=plParcaKatki(p,u); return pr.reduce((s2,pt)=>s2+num(kk[pt])/gerekenP(u,pt),0)/pr.length; };
+        const parcaYaz=p=>{ if(!pr.length) return ""; const kk=plParcaKatki(p,u);
+          return plParcalari(p,pr).map(pt=>pt+" ×"+Math.round(num(kk[pt]))).join(" · "); };
+        const top=(u.baskilar||[]).reduce((s2,p)=>s2+setEsd(p),0);
+        const bir=pr.length?" takım":" adet";
+        return h(Sheet,{ik:"🖨",hex:"#0e8fce",baslik:"Baskılar",
+          alt:(u.baskilar||[]).length+" kayıt · "+(Math.round(top*10)/10)+bir+(pr.length?(" ("+pr.length+" parçalı)"):""),
+          onClose:()=>setNav(null),cta:"Kapat",onCta:()=>setNav(null)},
         (u.baskilar||[]).map((p,i)=>{ const st=new Date(p.baslangic).getTime(),e2=st+num(p.sureDk)*60000,nw=Date.now();
           const durum=!p.basladi?(st>nw?"planlı":"onay bekliyor"):(e2<=nw?"bitti":"basıyor");
+          const se=setEsd(p), pz=parcaYaz(p);
           return h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",padding:"9px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:12.5}},
             h("div",{style:{minWidth:0}},
-              h("div",{style:{fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},num(p.adet||1)+" × "+(p.ad||"iş")),
+              h("div",{style:{fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},
+                (Math.round(se*10)/10)+(pr.length?" takım":" ×")+" "+(p.ad||"iş")),
+              pz?h("div",{style:{fontSize:10.5,color:"var(--violet)",fontWeight:700}},"🧩 "+pz):null,
               h("div",{style:{fontSize:10.5,color:"var(--mut)"}},fmtS(p.baslangic)+(num(p.gram)?(" · "+num(p.gram)+" gr"):""))),
-            h("span",{style:{fontSize:11,fontWeight:800,flexShrink:0,color:durum==="basıyor"?"var(--cyan)":durum==="bitti"?"var(--green)":durum==="onay bekliyor"?"var(--gold)":"var(--mut)"}},durum)); }))
+            h("span",{style:{fontSize:11,fontWeight:800,flexShrink:0,color:durum==="basıyor"?"var(--cyan)":durum==="bitti"?"var(--green)":durum==="onay bekliyor"?"var(--gold)":"var(--mut)"}},durum)); }),
+        pr.length?h("div",{style:{marginTop:12,padding:"10px 12px",borderRadius:11,background:"#f5f3ff",
+          border:"1px solid #ddd6fe",fontSize:11,fontWeight:700,color:"#5b21b6",lineHeight:1.5}},
+          "Bu ürün "+pr.length+" parçalı. Her baskı yalnız bazı parçaları basar; rakam kaç tam ürünlük iş yapıldığını gösterir."):null); })()
     : null;
   const detSatir=(baslik,deger,fn)=>h(fn?"button":"div",{key:baslik,...(fn?{onClick:fn}:{}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"11px 0",borderTop:"1px solid var(--line)",background:"none"}},
     h("span",{style:{flex:1,minWidth:0,fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},baslik),
