@@ -61,7 +61,19 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v85";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v86";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+
+/* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
+   Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
+   (Buradaki "seri", Üs ekranındaki 🔥 satış serisiyle ilgisizdir.) */
+const seriListe=u=>{ if(!u) return [];
+  const kay=Array.isArray(u.seriler)?u.seriler:[];
+  const L=[]; const gor={};
+  const kat=v=>{ const t=String(v||"").trim(); if(!t) return; const ak=t.toLocaleLowerCase("tr");
+    if(gor[ak]) return; gor[ak]=1; L.push(t); };
+  kay.forEach(kat); kat(u.seri);
+  return L; };
+const seriMetin=u=>seriListe(u).join(" · ");
 
 /* ═══ 🗓 HAKEDİŞ DÖNEMİ — Cumartesi 00:00 → Cuma 23:59 ═══
    Hakediş TAHSİLATA DEĞİL, gerçekleşen SATIŞA bağlıdır.
@@ -347,7 +359,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const gorevler=kaleler.filter(k=>k.durum.key!=="saglam").sort((a,b)=>oncelik[a.durum.key]-oncelik[b.durum.key]||b.guc-a.guc);
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
-  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
+  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",seriler:seriListe(u),stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
     .filter(u=>u.ad!=="?").sort((a,b)=>(b.canta-a.canta)||(b.stokta-a.stokta));
   const cantaTop=cephane.reduce((s,u)=>s+u.canta,0);
   // rozetler (kazanılan başarımlar)
@@ -818,15 +830,29 @@ function Harita({d,openKale,say,adaylar,openAday,onYeniKale,onYeniKaleAt,digerKa
 
 /* ————— CEPHANE ————— */
 function Cephane({d,say,cantaAc,openUrun}){
+  // 🗂 seri süzgeci — komutadan atanan ürün serileri; seri yoksa çubuk hiç çıkmaz
+  const [seri,setSeri]=useState("");
+  const seriAd=(()=>{ const m={}; (d.cephane||[]).forEach(u=>(u.seriler||[]).forEach(sr=>{
+      const t=String(sr||"").trim(); if(t) m[t.toLocaleLowerCase("tr")]=t; }));
+    return Object.keys(m).map(k=>m[k]).sort((a,b)=>a.localeCompare(b,"tr")); })();
+  const uye=u=>(u.seriler||[]).some(x=>String(x).toLocaleLowerCase("tr")===seri.toLocaleLowerCase("tr"));
+  const liste=!seri?(d.cephane||[]):(seri==="_"?(d.cephane||[]).filter(u=>!(u.seriler||[]).length):(d.cephane||[]).filter(uye));
+  const seriCanta=liste.reduce((s,u)=>s+num(u.canta),0);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"🎒 Cephane"),
-      h("div",{style:{fontSize:13,color:"var(--mut)",fontWeight:600}},"çantanda "+d.cantaTop+" varlık")),
+      h("div",{style:{fontSize:13,color:"var(--mut)",fontWeight:600}},
+        seri?(liste.length+" ürün · çantanda "+seriCanta):("çantanda "+d.cantaTop+" varlık"))),
+    seriAd.length?h("div",{style:{display:"flex",gap:7,overflowX:"auto",paddingBottom:8,marginBottom:12}},
+      h(Chip,{on:!seri,onClick:()=>setSeri("")},"Tümü"),
+      seriAd.map(sr=>h(Chip,{key:sr,on:seri===sr,onClick:()=>setSeri(seri===sr?"":sr)},"🗂 "+sr)),
+      (d.cephane||[]).some(u=>!(u.seriler||[]).length)?h(Chip,{on:seri==="_",onClick:()=>setSeri(seri==="_"?"":"_")},"Serisiz"):null):null,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,paddingBottom:84}},
-      d.cephane.map((u,i)=>h("button",{key:i,onClick:()=>openUrun(u),className:"card",style:{padding:"15px 14px",position:"relative",overflow:"hidden",textAlign:"left"}},
+      liste.map((u,i)=>h("button",{key:u.id||i,onClick:()=>openUrun(u),className:"card",style:{padding:"15px 14px",position:"relative",overflow:"hidden",textAlign:"left"}},
         u.canta>0&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"var(--gold)",background:"#d97b1218",padding:"2px 8px",borderRadius:8}},"🎒 "+u.canta),
         h("div",{style:{fontSize:26,marginBottom:8}},"📦"),
         h("div",{style:{fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+        (!seri&&seriMetin(u))?h("div",{style:{fontSize:10,color:"var(--mut2)",fontWeight:700,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🗂 "+seriMetin(u)):null,
         h("div",{style:{display:"flex",gap:10,marginTop:8,fontSize:12,color:"var(--mut)"}},
           h("span",null,h("b",{style:{color:"var(--txt)",fontSize:15}},u.stokta)," atölye"),
           u.fiyat>0&&h("span",{style:{marginLeft:"auto",color:"var(--green)",fontWeight:700}},tl(u.fiyat)))))),
@@ -1867,7 +1893,7 @@ function UrunSheet({u,recs,kaleler,fotolar,kisiler,onClose,onFiyat,onTanitim,onF
     }catch(e){ console.error(e); if(String(e&&e.name)!=="AbortError") say&&say("⚠ Paylaşım olmadı — tekrar dene"); }
     finally{ setPyuk(false); }
   }
-  return h(Sheet,{ik:"📦",hex:"#d97b12",baslik:u.ad,alt:"🎒 çantanda "+u.canta+" · 🏭 atölyede "+u.stokta,onClose,cta:"Kapat",onCta:onClose},
+  return h(Sheet,{ik:"📦",hex:"#d97b12",baslik:u.ad,alt:(seriMetin(u)?("🗂 "+seriMetin(u)+" · "):"")+"🎒 çantanda "+u.canta+" · 🏭 atölyede "+u.stokta,onClose,cta:"Kapat",onCta:onClose},
     // 🖼 foto galerisi — kare, yatay kaydırmalı; + ile ekle
     h("div",{style:{display:"flex",gap:9,overflowX:"auto",paddingBottom:6,marginBottom:12}},
       (fotolar||[]).map(f=>h("div",{key:f.id,style:{position:"relative",flexShrink:0,marginTop:6}},
