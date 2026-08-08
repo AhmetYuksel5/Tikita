@@ -56,7 +56,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L8";   // komuta (admin) deneme sürümü
+const SURUM="L9";   // komuta (admin) deneme sürümü
 
 /* ═══ 🗓 HAKEDİŞ DÖNEMİ — Cumartesi 00:00 → Cuma 23:59 (deneme.html ile birebir) ═══ */
 const HAKEDIS_BAS="2026-08-08";
@@ -535,7 +535,7 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
       const set=parts.length?Math.round(parts.reduce((s,p)=>s+num(pp[p])/gerekenP(u,p),0)/parts.length):0;
       if(Object.values(pp).some(v=>v>0)) buHafta={parcali:true,pp,set}; }
     else { const ad=bhB.reduce((s,p)=>s+num(p.adet||1),0); if(ad>0) buHafta={parcali:false,adet:ad}; }
-    return {id:u.id,ad:u.ad,stokta:num(u.stokta),canta,sahada:num(sahadaU[u.id])+num(sahadaU["a:"+u.ad]),fiyat:num(u.satisFiyat),alis:num(u.pazFiyat),pazFiyatK:u.pazFiyatK||{},
+    return {id:u.id,ad:u.ad,seri:(u.seri||"").trim(),stokta:num(u.stokta),canta,sahada:num(sahadaU[u.id])+num(sahadaU["a:"+u.ad]),fiyat:num(u.satisFiyat),alis:num(u.pazFiyat),pazFiyatK:u.pazFiyatK||{},
       maliyet,tamMaliyet,baskiMaliyet,sarfMaliyet,montajUcret,sarfSat,sarfYeter:isFinite(sarfYeter)?sarfYeter:null,sarfList:u.sarfList||[],maliyetElle:num(u.maliyet)>0,maliyetKaynak,maliyetDetay,basimda:basimEqF(u),montajda:montajdaF(u),satildi:num(u.satildi),hediye:num(u.hediye),konsStok:num(u.konsinye),gram:num(u.gram),
       zayiat:num(u.zayiat),parcalar:parts,parcaAdet:u.parcaAdet||{},parcaBilgi,hazirTakim,buHafta,proj:projF(u),baskilar:(baskiByU[u.id]||[]).slice().sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic)),pazStokK:u.pazStokK||{},raw:u};
   }).sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
@@ -962,7 +962,7 @@ function StokSheet({u,kullanicilar,hareketler,makineler,montajGorev,onClose,onDu
   // aşama pipeline — dokun: komut
   const asama=[["","basımda",u.basimda,"var(--cyan)",null],["","montaj",u.montajda,"#c2410c",()=>setNav("montajda")],["","stok",u.stokta,"var(--txt)",()=>onKomut("stokta")],["","konsinye",sahadaTop,"var(--violet)",()=>setNav("konsAcik")],["","satıldı",satTop,"var(--green)",()=>setNav("satis")]];
   const ekBilgi=[["çanta",u.canta],["hediye",u.hediye],num(u.zayiat)>0?["zayiat",u.zayiat]:null].filter(Boolean);
-  return h(React.Fragment,null,h(Sheet,{ik:foto?h(Foto,{src:foto,s:46,r:12}):IK("stok","#d97b12",24),hex:"#d97b12",baslik:u.ad,alt:"📥 "+u.stokta+" stok · "+u.montajda+" montaj · "+sahadaTop+" konsinye",onClose,cta:"Kapat",onCta:onClose},
+  return h(React.Fragment,null,h(Sheet,{ik:foto?h(Foto,{src:foto,s:46,r:12}):IK("stok","#d97b12",24),hex:"#d97b12",baslik:u.ad,alt:(u.seri?("🗂 "+u.seri+" · "):"")+"📥 "+u.stokta+" stok · "+u.montajda+" montaj · "+sahadaTop+" konsinye",onClose,cta:"Kapat",onCta:onClose},
     h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:8}},
       asama.map((s2,i)=>h(s2[4]?"button":"div",{key:i,onClick:s2[4]||undefined,style:{textAlign:"center",padding:"9px 2px",borderRadius:10,background:s2[4]?"var(--surf2)":"transparent",border:"1px solid "+(s2[4]?"var(--line)":"transparent")}},
         h("div",{style:{fontSize:16,fontWeight:800,color:s2[3],lineHeight:1}},num(s2[2])),
@@ -1562,9 +1562,12 @@ function SarfYonetimSheet({sarflar,stok,giderler,onKaydet,onSil,onAlim,onClose,b
       :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Malzeme yok."));
 }
 // ✏️ ÜRÜN ekle/düzenle — stok düzeltmesi stok_hareket'e 'elle' olarak loglanır (eski panel uyumu)
-function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar}){
+function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar,urunler}){
   const duzen=!!(u&&u.id);
   const [ad,setAd]=useState(duzen?(u.ad||""):"");
+  const [seri,setSeri]=useState(duzen?((u.seri||u.raw&&u.raw.seri||"")+""):"");   // 🗂 ürün serisi (koleksiyon)
+  const seriler=(()=>{ const s={}; (urunler||[]).forEach(x=>{ const v=((x&&(x.seri||(x.raw&&x.raw.seri)))||"").trim(); if(v) s[v]=1; });
+    return Object.keys(s).sort((a2,b2)=>a2.localeCompare(b2,"tr")); })();
   const [satis,setSatis]=useState(duzen?String(u.fiyat||""):"");
   const [alis,setAlis]=useState(duzen?String(u.alis||""):"");
   const [stokta,setStokta]=useState(duzen?String(u.stokta||0):"0");
@@ -1599,7 +1602,7 @@ function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar}){
   return h(Sheet,{ik:duzen?null:"➕",hex:"#d97b12",baslik:duzen?("Düzenle · "+(u.ad||"")):"Yeni ürün",
     alt:"",onClose:()=>onKaydet(null),
     cta:bekle?"⏳…":(duzen?"Kaydet":"Ürünü ekle"),disabled:!ad.trim()||bekle,
-    onCta:()=>onKaydet({id:duzen?u.id:null,ad:ad.trim(),satisFiyat:num(satis),pazFiyat:num(alis),stokta:num(stokta),gram:num(gram),maliyet:num(maliyet),parcalar,
+    onCta:()=>onKaydet({id:duzen?u.id:null,ad:ad.trim(),seri:seri.trim(),satisFiyat:num(satis),pazFiyat:num(alis),stokta:num(stokta),gram:num(gram),maliyet:num(maliyet),parcalar,
       parcaAdet:(()=>{const pa={};parcalar.forEach(p=>pa[p]=Math.max(1,Math.round(num(parcaAdet[p]||1))));return pa;})(),
       pazFiyatK:(()=>{const m={};Object.keys(pazFiyatK).forEach(k=>{const v=num(pazFiyatK[k]);if(v>0)m[k]=v;});return m;})(),
       sarfList:Object.keys(sarfAd).filter(k=>num(sarfAd[k])>0).map(k=>({sarfId:k,adet:num(sarfAd[k])})),
@@ -1607,6 +1610,12 @@ function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar}){
       _eskiStok:duzen?num(u.stokta):0})},
     h("div",{className:"lbl",style:{marginBottom:8}},"Ürün adı *"),
     h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Ahtapot",style:{...inp,marginBottom:14}}),
+    h("div",{className:"lbl",style:{marginBottom:8}},"Seri — boş bırakılabilir"),
+    h("input",{value:seri,onChange:e=>setSeri(e.target.value),placeholder:"örn. Deniz canlıları",style:{...inp,marginBottom:seriler.length?8:14}}),
+    seriler.length?h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}},
+      seriler.map(s2=>h(Chip,{key:s2,on:seri.trim()===s2,onClick:()=>setSeri(seri.trim()===s2?"":s2)},s2)),
+      seri.trim()?h("button",{onClick:()=>setSeri(""),style:{flexShrink:0,padding:"9px 13px",borderRadius:11,background:"var(--surf2)",
+        border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--mut)"}},"Serisiz"):null):null,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Satış ₺"),
         h("input",{type:"number",inputMode:"numeric",value:satis,onChange:e=>setSatis(e.target.value),style:inp})),
@@ -2421,11 +2430,56 @@ function PlanOzetSheet({d,onClose,onPlanSil,onPlanAc}){
       oluSay+" iş ölü: ürünü silinmiş ya da tamamen boş. Başlatılsalar bile stoğa bir şey eklemezler."):null);
 }
 
+/* 🗂 SERİ GRUPLAMA — ürünleri seri adına göre kümeler, her küme için toplamları çıkarır.
+   Serisiz ürünler en sonda "Serisiz" başlığı altında toplanır. */
+function seriGrupla(list){
+  const g={}, sirasiz=[];
+  (list||[]).forEach(u=>{ const s=((u&&u.seri)||"").trim();
+    if(!s){ sirasiz.push(u); return; }
+    (g[s]=g[s]||[]).push(u); });
+  const ozet=arr=>{ const o={urun:arr.length,adet:0,veris:0,etiket:0,maliyet:0,depo:0,canta:0,kons:0,montaj:0,basim:0,satildi:0,azSay:0};
+    arr.forEach(u=>{ const dp=Math.max(0,num(u.stokta)), ct=Math.max(0,num(u.canta)),
+        kn=Math.max(0,num(u.konsStok),num(u.sahada)), mt=Math.max(0,num(u.montajda));
+      const top=dp+ct+kn+mt;
+      o.depo+=dp; o.canta+=ct; o.kons+=kn; o.montaj+=mt; o.adet+=top;
+      o.basim+=Math.max(0,num(u.basimda)); o.satildi+=num(u.satildi);
+      o.veris+=top*num(u.alis); o.etiket+=top*num(u.fiyat); o.maliyet+=top*num(u.maliyet);
+      if(num(u.stokta)<=3) o.azSay++; });
+    return o; };
+  const L=Object.keys(g).sort((a,b)=>a.localeCompare(b,"tr")).map(s=>({seri:s,ad:s,list:g[s],o:ozet(g[s])}));
+  if(sirasiz.length) L.push({seri:"",ad:"Serisiz",list:sirasiz,o:ozet(sirasiz)});
+  return L;
+}
 function Stok({d,ac,fotoMap,onPlanSil}){
   const uEks=d.stok.filter(u=>u.fiyat<=0).length;
   const [degerAcik,setDegerAcik]=useState(false);
   const [planAcik,setPlanAcik]=useState(false);
+  const [grupla,setGrupla]=useState(()=>{ try{ return localStorage.getItem("tk_stok_seri")!=="0"; }catch(e){ return true; } });
+  useEffect(()=>{ try{ localStorage.setItem("tk_stok_seri",grupla?"1":"0"); }catch(e){} },[grupla]);
+  const [kapali,setKapali]=useState({});   // katlanmış seriler
+  const gruplar=useMemo(()=>seriGrupla(d.stok),[d.stok]);
+  const seriliVar=gruplar.some(g=>g.seri);
   const SD=d.stokDetay||{depo:0,canta:0,kons:0,montaj:0,adet:0,etiket:0,malsizAdet:0,malsizUrun:0};
+  const kart=(u,i)=>h("button",{key:u.id||i,onClick:()=>ac({tip:"stok",u}),className:"card",style:{padding:"14px 13px",textAlign:"left",position:"relative",overflow:"hidden"}},
+    u.stokta<=3?h("span",{style:{position:"absolute",top:10,right:10,fontSize:10,fontWeight:800,color:"var(--red)",background:"#e0483c14",padding:"2px 7px",borderRadius:7}},"az"):null,
+    ((fotoMap||{})[u.id]?h("div",{style:{marginBottom:6}},h(Foto,{src:fotoMap[u.id].data,s:38,r:10})):h("div",{style:{marginBottom:6}},IK("stok","var(--mut)",24))),
+    h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+    (!grupla&&u.seri)?h("div",{style:{fontSize:9.5,color:"var(--mut2)",fontWeight:700,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🗂 "+u.seri):null,
+    h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 8px",marginTop:6,fontSize:10.5,color:"var(--mut)",fontWeight:700}},
+      u.basimda>0?h("span",{style:{color:"var(--cyan)"}},"basım "+u.basimda):null,
+      u.montajda>0?h("span",{style:{color:"#c2410c"}},"montaj "+u.montajda):null,
+      h("span",null,"stok "+u.stokta),
+      u.canta>0?h("span",{style:{color:"var(--gold)"}},"🎒 "+u.canta):null,
+      u.sahada>0?h("span",{style:{color:"var(--violet)"}},"🏬 "+u.sahada):null,
+      u.satildi>0?h("span",{style:{color:"var(--green)"}},"✅ "+u.satildi):null,
+      u.hediye>0?h("span",{style:{color:"#db2777"}},"🎁 "+u.hediye):null),
+    (u.hazirTakim>0||u.buHafta||u.proj)?h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 7px",marginTop:4,fontSize:9.5,fontWeight:700}},
+      u.hazirTakim>0?h("span",{style:{color:"#c2410c"}},"🧩 "+u.hazirTakim+" takım"):null,
+      u.buHafta?h("span",{style:{color:"#6d28d9"}},"hafta "+(u.buHafta.parcali?(u.buHafta.set+" set"):(u.buHafta.adet+" ad"))):null,
+      u.proj?h("span",{style:{color:"#0e7490"}},"📦 "+u.proj.enfazla):null):null,
+    h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:6}},
+      h("span",{style:{color:"var(--green)",fontWeight:700}},tl(u.fiyat)),
+      u.maliyet>0?h("span",{style:{color:"var(--mut2)"}}," · mal "+tl(u.maliyet)):null));
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 84px"}},
     h("button",{onClick:()=>ac({tip:"urunDuzen",u:null}),style:{position:"fixed",left:"50%",transform:"translateX(-50%)",zIndex:35,
       bottom:"calc(env(safe-area-inset-bottom,0px) + 104px)",padding:"14px 26px",borderRadius:99,
@@ -2448,26 +2502,32 @@ function Stok({d,ac,fotoMap,onPlanSil}){
       h(Icn,{n:"box",c:"#0f766e",s:19}),h("span",{style:{flex:1,minWidth:0}},"Sarf malzemesi"),
       h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},(d.sarfSay||0)+" kalem ›")),
     uEks?h("div",{style:{padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412",marginBottom:14}},"⚠️ "+uEks+" üründe satış fiyatı tanımlı değil"):null,
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-      d.stok.map((u,i)=>h("button",{key:i,onClick:()=>ac({tip:"stok",u}),className:"card",style:{padding:"14px 13px",textAlign:"left",position:"relative",overflow:"hidden"}},
-        u.stokta<=3?h("span",{style:{position:"absolute",top:10,right:10,fontSize:10,fontWeight:800,color:"var(--red)",background:"#e0483c14",padding:"2px 7px",borderRadius:7}},"az"):null,
-        ((fotoMap||{})[u.id]?h("div",{style:{marginBottom:6}},h(Foto,{src:fotoMap[u.id].data,s:38,r:10})):h("div",{style:{marginBottom:6}},IK("stok","var(--mut)",24))),
-        h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
-        h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 8px",marginTop:6,fontSize:10.5,color:"var(--mut)",fontWeight:700}},
-          u.basimda>0?h("span",{style:{color:"var(--cyan)"}},"basım "+u.basimda):null,
-          u.montajda>0?h("span",{style:{color:"#c2410c"}},"montaj "+u.montajda):null,
-          h("span",null,"stok "+u.stokta),
-          u.canta>0?h("span",{style:{color:"var(--gold)"}},"🎒 "+u.canta):null,
-          u.sahada>0?h("span",{style:{color:"var(--violet)"}},"🏬 "+u.sahada):null,
-          u.satildi>0?h("span",{style:{color:"var(--green)"}},"✅ "+u.satildi):null,
-          u.hediye>0?h("span",{style:{color:"#db2777"}},"🎁 "+u.hediye):null),
-        (u.hazirTakim>0||u.buHafta||u.proj)?h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 7px",marginTop:4,fontSize:9.5,fontWeight:700}},
-          u.hazirTakim>0?h("span",{style:{color:"#c2410c"}},"🧩 "+u.hazirTakim+" takım"):null,
-          u.buHafta?h("span",{style:{color:"#6d28d9"}},"hafta "+(u.buHafta.parcali?(u.buHafta.set+" set"):(u.buHafta.adet+" ad"))):null,
-          u.proj?h("span",{style:{color:"#0e7490"}},"📦 "+u.proj.enfazla):null):null,
-        h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:6}},
-          h("span",{style:{color:"var(--green)",fontWeight:700}},tl(u.fiyat)),
-          u.maliyet>0?h("span",{style:{color:"var(--mut2)"}}," · mal "+tl(u.maliyet)):null)))));
+    seriliVar?h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:12}},
+      h(Chip,{on:grupla,onClick:()=>setGrupla(true)},"Seriye göre"),
+      h(Chip,{on:!grupla,onClick:()=>setGrupla(false)},"Tek liste"),
+      grupla?h("button",{onClick:()=>setKapali(k=>{ const hepsiKapali=gruplar.every(g=>k[g.seri||"_"]);
+          const y={}; if(!hepsiKapali) gruplar.forEach(g=>y[g.seri||"_"]=1); return y; }),
+        style:{marginLeft:"auto",padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",
+          fontSize:12,fontWeight:800,color:"var(--mut)"}},
+        gruplar.every(g=>kapali[g.seri||"_"])?"Hepsini aç":"Hepsini kapat"):null):null,
+    (grupla&&seriliVar)
+      ? h("div",{style:{display:"grid",gap:14}},
+          gruplar.map(g=>{ const anh=g.seri||"_"; const kap=!!kapali[anh];
+            return h("div",{key:anh},
+              h("button",{onClick:()=>setKapali(k=>({...k,[anh]:!kap})),
+                style:{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"10px 12px",borderRadius:13,marginBottom:kap?0:10,
+                  background:g.seri?"var(--surf2)":"var(--surf)",border:"1px solid "+(g.seri?"var(--line)":"var(--line)"),textAlign:"left"}},
+                h("span",{style:{fontSize:13,color:"var(--mut)",width:12,flexShrink:0,transition:"transform .18s",display:"inline-block",
+                  transform:kap?"rotate(-90deg)":"none"}},"▾"),
+                h("span",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontSize:14,fontWeight:800,color:g.seri?"var(--txt)":"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.ad),
+                  h("div",{style:{fontSize:10.5,color:"var(--mut)",fontWeight:700,marginTop:2}},
+                    g.o.urun+" ürün · "+g.o.adet+" adet"
+                    +(g.o.basim>0?(" · basımda "+g.o.basim):"")
+                    +(g.o.azSay>0?(" · "+g.o.azSay+" az"):""))),
+                h("span",{style:{fontSize:13,fontWeight:800,color:"var(--green)",flexShrink:0}},tl(g.o.veris))),
+              kap?null:h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},g.list.map(kart))); }))
+      : h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},d.stok.map(kart)));
 }
 function Ekip({d,ac,kullanicilar,hareketler,talepler}){
   const hepsi=(kullanicilar||[]).filter(u=>u&&u.id&&(u.ad||"").trim())
@@ -3403,7 +3463,7 @@ function App(){
       if(p2.id){ const esk=(urunler||[]).find(x=>x.id===p2.id);
         if(esk && (num(esk.satisFiyat)!==num(p2.satisFiyat)||num(esk.pazFiyat)!==num(p2.pazFiyat)))
           try{ await save("fiyat_gecmisi",{urunId:p2.id,urunAd:p2.ad||esk.ad||"",satis:num(esk.satisFiyat),veris:num(esk.pazFiyat),gecerliBit:new Date().toISOString()}); }catch(e){ console.error(e); } }
-      const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},pazFiyatK:p2.pazFiyatK||{},sarfList:p2.sarfList||[],iscilik:num(p2.iscilik),maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
+      const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,seri:(p2.seri||""),satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},pazFiyatK:p2.pazFiyatK||{},sarfList:p2.sarfList||[],iscilik:num(p2.iscilik),maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
       const delta=p2.stokta-(p2._eskiStok||0);
       if(delta) await stokLogla({id,ad:p2.ad},delta,"elle");   // elle düzeltme logu — eski panel uyumu
       setModal(null); say((p2.id?"Güncellendi":"Ürün eklendi")+" · "+p2.ad); }
@@ -3754,7 +3814,7 @@ function App(){
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onSil:async(id)=>{ if(isBekle) return; setIsBekle(true);
         try{ await remove("sarf",id); say("Silindi"); }catch(e){ console.error(e); say("Silinemedi"); } finally{ setIsBekle(false); } }}),
-    modal&&modal.tip==="urunDuzen"&&h(UrunDuzenSheet,{u:modal.u,bekle:isBekle,onKaydet:urunKaydet,kullanicilar,sarflar}),
+    modal&&modal.tip==="urunDuzen"&&h(UrunDuzenSheet,{u:modal.u,bekle:isBekle,onKaydet:urunKaydet,kullanicilar,sarflar,urunler}),
     modal&&modal.tip==="kullanici"&&h(KullaniciSheet,{u:modal.u,bekle:isBekle,onKaydet:kullaniciKaydet}),
     modal&&modal.tip==="ekip"&&(()=>{ const cu=(kullanicilar||[]).find(x=>x.id===modal.e.u.id)||modal.e.u;   // canlı kayıt (şifre kaydedince tazelensin)
       const kt=(talepler||[]).filter(x=>(x.kullaniciId||"")===cu.id).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
