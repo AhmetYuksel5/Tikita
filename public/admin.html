@@ -2763,7 +2763,7 @@ function HakedisDonemSheet({list,onOnay,onOde,onGeriAl,onClose}){
       filtre==="acik"?"Bekleyen hakediş yok.":"Henüz hakediş dönemi gönderilmemiş."));
 }
 
-function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil,talepler,onTablaEmri,onTablaIptal,hakedisDonem,onHakOnay,onHakOde,onHakGeriAl,onNakitOnay,onNakitGeriAl}){
+function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet,onGorevSil,odak,onHakedisKaydet,onAlacakKapat,onAlacakSil,talepler,onTablaEmri,onTablaIptal,hakedisDonem,onHakOnay,onHakOde,onHakGeriAl,onNakitOnay,onNakitGeriAl,montajGorev}){
   const [bol,setBol]=useState("paz");   // 🏢 üst bölüm: paz (pazarlama takip) / tikita (Tikita hesabı)
   const [alt,setAlt]=useState(odak?"hedef":"ozet");   // ozet/paz/kons/alacak/mus/hareket/hedef
   const [kod,setKod]=useState("hafta");
@@ -2831,6 +2831,10 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
       .filter(x=>x.toplanan>0.5||x.teslim>0.5||x.bekleyen>0.5).sort((a,b)=>b.kalan-a.kalan);
     return {list:L, kalanTop:L.reduce((s,x)=>s+x.kalan,0), bekleyenTop:L.reduce((s,x)=>s+x.bekleyen,0)}; })();
   const nakitBildirim=(hareketler||[]).filter(x=>x.tip==="nakitTeslim").sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+  // 🔧 montaj hakedişi — teslim edilmiş ama ödenmemiş görevler
+  const mTeslim=(montajGorev||[]).filter(g=>g.durum==="teslim");
+  const montajBorc=mTeslim.filter(g=>!g.odendi).reduce((s2,g)=>s2+num(g.teslimAdet)*num(g.birimUcret),0);
+  const montajBekSay=mTeslim.filter(g=>!g.odendi).length;
   const acikOdeme=(talepler||[]).filter(t=>t.tip==="tabla-ödeme"&&t.durum!=="kapandi");
   const tablaOdemeList=(hareketler||[]).filter(x=>x.tip==="tablaOde").sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
   // açık konsinye (tüm zaman) — mekana ve ürüne göre (canlı snapshot)
@@ -3057,6 +3061,9 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         h(KStat,{ik:h(Icn,{n:"coins",c:sahaNakit.kalanTop>0.5?"var(--cyan)":"var(--green)"}),l:"Saha nakdi",
           v:tl(sahaNakit.kalanTop),s:(sahaNakit.bekleyenTop>0.5?(tl(sahaNakit.bekleyenTop)+" onay bekliyor"):"pazarlamacıda")+" ›",
           renk:sahaNakit.kalanTop>0.5?"var(--cyan)":"var(--green)",onClick:()=>setNakitAcik(true)}),
+        h(KStat,{ik:h(Icn,{n:"box",c:montajBorc>0.5?"var(--gold)":"var(--green)"}),l:"Montaj hakedişi",
+          v:tlk(montajBorc),s:montajBekSay?(montajBekSay+" teslim ödenmedi ›"):"ödenecek yok",
+          renk:montajBorc>0.5?"var(--gold)":"var(--green)",onClick:()=>ac&&ac({tip:"montajYonet"})}),
         h(KStat,{ik:h(Icn,{n:"wallet",c:hakBekleyen>0.5?"var(--gold)":"var(--green)"}),l:"Pazarlamacı hakedişi",
           v:tl(hakBekleyen),s:(hakOnayBek.length?(hakOnayBek.length+" onay bekliyor · "):"")+"haftalık ›",
           renk:hakBekleyen>0.5?"var(--gold)":"var(--green)",onClick:()=>setHakDonemAcik(true)}),
@@ -3666,7 +3673,7 @@ function App(){
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler});
   else ekran=h(RaporA,{d,ac:setModal,giderler,sabitGider,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal,
     hakedisDonem,onHakOnay:hakedisOnay,onHakOde:hakedisOde,onHakGeriAl:hakedisGeriAl,
-    onNakitOnay:nakitOnay,onNakitGeriAl:nakitGeriAl});
+    onNakitOnay:nakitOnay,onNakitGeriAl:nakitGeriAl,montajGorev});
   return h("div",null,
     h(KomutaBar,{gorunum,yan:yanMenu,onGorunum:gorunumTog,onAyar:()=>setModal({tip:"komutaAyar"}),onTema:()=>setModal({tip:"tema"}),onCikis:cikisYap}),
     h("div",{className:"tk-barbosluk"}),
