@@ -31,6 +31,41 @@
 </head>
 <body>
 <div id="root"></div>
+<script>
+/* 🩺 BEYAZ SAYFA NÖBETÇİSİ — modül hiç çalışmazsa (CDN gitmedi, sözdizimi hatası,
+   eski önbellek) ekran bomboş kalıyordu. Burası klasik <script>: modül yüklenemese
+   bile çalışır, 9 saniye sonra kök hâlâ boşsa sebebi ekrana yazar. */
+(function(){
+  var HATA=null;
+  window.addEventListener("error",function(e){
+    if(!HATA) HATA=(e&&e.message||"")+((e&&e.filename)?("\n"+e.filename+":"+(e.lineno||0)):""); },true);
+  window.addEventListener("unhandledrejection",function(e){
+    if(!HATA) HATA="İstek başarısız: "+String((e&&e.reason&&e.reason.message)||e.reason||""); });
+  function goster(){
+    var r=document.getElementById("root");
+    if(!r||r.childNodes.length) return;
+    r.innerHTML='<div style="padding:26px 20px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;'
+      +'max-width:520px;margin:0 auto;color:#1b1e25">'
+      +'<div style="font-size:40px;margin-bottom:10px">📡</div>'
+      +'<div style="font-size:19px;font-weight:800;margin-bottom:8px">Uygulama yüklenemedi</div>'
+      +'<div style="font-size:13.5px;line-height:1.6;color:#5b616e;margin-bottom:16px">'
+      +'Sayfa açıldı ama ekran çizilemedi. En sık sebebi bağlantının kesik olması '
+      +'(uygulama açılışta internetten kütüphane çekiyor).</div>'
+      +(HATA?('<pre style="font-size:11px;background:#f4f5f7;border:1px solid #e3e5e9;border-radius:10px;'
+      +'padding:11px;white-space:pre-wrap;word-break:break-word;color:#9a3412;margin-bottom:16px">'
+      +String(HATA).replace(/[<>&]/g,"")+'</pre>'):'')
+      +'<button id="tk-nobet-yenile" style="width:100%;padding:14px;border:0;border-radius:14px;'
+      +'background:#1b1e25;color:#fff;font-size:15px;font-weight:800">Yeniden dene</button>'
+      +'<button id="tk-nobet-sifirla" style="width:100%;padding:12px;margin-top:9px;border:1px solid #e3e5e9;'
+      +'border-radius:14px;background:#fff;color:#5b616e;font-size:13px;font-weight:700">Ekranı sıfırla ve yenile</button>'
+      +'</div>';
+    var a=document.getElementById("tk-nobet-yenile"); if(a) a.onclick=function(){ location.reload(); };
+    var b=document.getElementById("tk-nobet-sifirla"); if(b) b.onclick=function(){
+      try{ sessionStorage.clear(); }catch(e){} location.reload(); };
+  }
+  setTimeout(goster,9000);
+})();
+</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -39,7 +74,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="M3";
+const SURUM="M4";
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // 👁 yönetici görünümü
 let BEN_ID=AS_ID||REAL_ID;
@@ -259,7 +294,32 @@ function App(){
     sheet&&sheet.tip==="et"?h(TeslimSheet,{g:sheet.g,bekle,onClose:()=>setSheet(null),onOk:p=>teslimEt(sheet.g,p)}):null,
     h(Toast,{msg:toastMsg})));
 }
-ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+/* 🛡 HATA KALKANI — bir ekran çizilirken hata verirse React bütün ağacı söküyor
+   ve geriye bomboş sayfa kalıyordu. Kalkan hatayı yakalar, sebebini ve sürümü
+   yazar; "Ekranı sıfırla" son açık sekmeyi unutup baştan açar. */
+class HataKalkani extends React.Component{
+  constructor(p){ super(p); this.state={hata:null}; }
+  static getDerivedStateFromError(e){ return {hata:e}; }
+  componentDidCatch(e,bilgi){ console.error("EKRAN HATASI",e,bilgi); }
+  render(){
+    if(!this.state.hata) return this.props.children;
+    const e=this.state.hata;
+    const yz={fontFamily:"-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif"};
+    return h("div",{style:{...yz,padding:"26px 20px",maxWidth:520,margin:"0 auto",color:"var(--txt,#1b1e25)"}},
+      h("div",{style:{fontSize:40,marginBottom:10}},"🛠"),
+      h("div",{style:{fontSize:19,fontWeight:800,marginBottom:8}},"Bu ekran çizilemedi"),
+      h("div",{style:{fontSize:13.5,lineHeight:1.6,color:"var(--mut,#5b616e)",marginBottom:16}},
+        "Uygulama açık, sorun tek bir ekranda. Aşağıdaki satırı komutaya ilet — nerede takıldığı oradan anlaşılır."),
+      h("pre",{style:{fontSize:11,background:"var(--surf2,#f4f5f7)",border:"1px solid var(--line,#e3e5e9)",
+        borderRadius:10,padding:11,whiteSpace:"pre-wrap",wordBreak:"break-word",color:"#9a3412",marginBottom:16}},
+        String((e&&e.message)||e)+"\n"+String((e&&e.stack)||"").split("\n").slice(1,4).join("\n")),
+      h("button",{onClick:()=>{ try{ sessionStorage.clear(); }catch(_){} location.reload(); },
+        style:{width:"100%",padding:14,border:0,borderRadius:14,background:"#1b1e25",color:"#fff",fontSize:15,fontWeight:800}},
+        "Ekranı sıfırla ve yenile"),
+      h("div",{style:{fontSize:11,color:"var(--mut2,#9aa0ac)",textAlign:"center",marginTop:12,fontWeight:700}},"sürüm "+SURUM));
+  }
+}
+ReactDOM.createRoot(document.getElementById("root")).render(h(HataKalkani,null,h(App)));
 </script>
 </body>
 </html>
