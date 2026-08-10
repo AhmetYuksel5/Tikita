@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v87";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v88";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -346,6 +346,9 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
     if(!k.ad&&x.yer)k.ad=x.yer; if(!k.bolge&&x.bolge)k.bolge=x.bolge; });
   const avansK={};   // sayıma mahsup edilmemiş tahsilat
   const acikK={},borcK={},sonK={},ovTah={},ovCoz={},ovCozList={},marjK={},tahByK={};
+  // 🗓 kesme tarihi ayrımı: ÖNCESİ eski model (hakediş tahsilata bağlı, önce üretici),
+  //    SONRASI yeni model (hakediş satış anında doğar, haftalık dönemde ödenir)
+  const marjEskiK={},marjYeniK={},ciroEskiK={},borcYeniK={};
   (hareketler||[]).forEach(x=>{ if(x.gerilla) return; const k=kk(x); const t=new Date(x.tarih).getTime()||0;
     if(["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi"].includes(x.tip)) sonK[k]=Math.max(sonK[k]||0,t);
     // deneme (overlay) yazımları: gerçek kayda dokunmadan borç/konsinyeyi düzelt
@@ -358,7 +361,10 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
       if(kM[k]){const ad=x.urunAd||"?"; const o=kM[k].konsList[ad]||(kM[k].konsList[ad]={adet:0,birim:0,alis:0,t:Infinity});
         o.adet+=num(x.kalan); if(t<o.t){ o.t=t; o.birim=num(x.satisFiyat); o.alis=num(x.alisFiyat); } } }
     else if(x.tip==="satis"){const bek=num(x.adet)*num(x.satisFiyat);const th=x.tahsil==null?bek:num(x.tahsil);const b=Math.max(0,bek-th);if(b>0)borcK[k]=(borcK[k]||0)+b;
-      marjK[k]=(marjK[k]||0)+(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet);} });
+      const mj=(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet);
+      marjK[k]=(marjK[k]||0)+mj;
+      if(t>=HAKEDIS_BAS_MS){ marjYeniK[k]=(marjYeniK[k]||0)+mj; if(b>0) borcYeniK[k]=(borcYeniK[k]||0)+b; }
+      else { marjEskiK[k]=(marjEskiK[k]||0)+mj; ciroEskiK[k]=(ciroEskiK[k]||0)+bek; } } });
   let kaleler=Object.values(kM).map(k=>{ const m=k.musteriId&&musById[k.musteriId];
     if(m){k.ad=m.ad||k.ad;k.bolge=m.bolge||k.bolge;if(!k.lat&&m.lat){k.lat=m.lat;k.lng=m.lng;}
       k.telefon=(m.telefon||"").trim(); k.not=m.not||""; k.arsiv=!!m.arsiv;}
@@ -370,11 +376,23 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
     k.borc=Math.max(0,(borcK[k.key]||0)-(ovTah[k.key]||0)); k.son=sonK[k.key]||0; k.gunGecti=k.son?gunFark(k.son):999;
     const coz=ovCozList[k.key]||{};
     k.konsKalem=Object.entries(k.konsList).map(([ad,o])=>({ad,adet:Math.max(0,num(o.adet)-(coz[ad]||0)),birim:num(o.birim),alis:num(o.alis)})).filter(c=>c.adet>0).sort((a,b)=>b.adet-a.adet);
-    // pazarlamacı hakedişi: tahsil edilen paradan düşen marj payı (önce üretici) — canlı marj oranına bağlı
-    //  (admin veriliş fiyatını güncellerse marjTop değişir → hakediş anında güncellenir; frozen pazPay kullanılmaz)
-    k.marjTop=Math.max(0,marjK[k.key]||0); const orn=k.ciro>0?Math.min(1,k.marjTop/k.ciro):0;
-    k.hakedisAlinan=(tahByK[k.key]||[]).reduce((s,x)=>s+num(x.tutar)*orn,0);
-    k.hakedisBekleyen=Math.max(0,k.marjTop-k.hakedisAlinan);
+    /* 🫰 PAZARLAMACI HAKEDİŞİ — kesme tarihinden itibaren SATIŞA bağlı.
+       Yeni dönem: satış gerçekleştiği anda hakediş doğar; tahsil edilip edilmemesi
+       hakedişi geciktirmez (tahsil edilmeyen tutar kalenin borcudur), ödeme haftalık
+       dönemde yapılır. Eski dönem: tahsil edildikçe oransal doğuyordu (önce üretici);
+       o kayıtlar zaten o mantıkla kapandığı için geçmişe dokunulmuyor.
+       (admin veriliş fiyatını güncellerse marj değişir → hakediş anında güncellenir) */
+    k.marjTop=Math.max(0,marjK[k.key]||0);
+    k.marjYeni=Math.max(0,marjYeniK[k.key]||0);      // satışta doğan (yeni model)
+    k.marjEski=Math.max(0,marjEskiK[k.key]||0);      // kesme öncesi satışların marjı
+    const ornE=(ciroEskiK[k.key]||0)>0?Math.min(1,k.marjEski/ciroEskiK[k.key]):0;
+    k.eskiAlinan=Math.min(k.marjEski,(tahByK[k.key]||[])
+      .filter(x=>new Date(x.tarih).getTime()<HAKEDIS_BAS_MS).reduce((s,x)=>s+num(x.tutar)*ornE,0));
+    k.eskiBekleyen=Math.max(0,k.marjEski-k.eskiAlinan);
+    k.hakedis=k.marjYeni+k.eskiAlinan;               // bugün itibarıyla hak edilmiş toplam
+    k.yeniBorc=Math.max(0,borcYeniK[k.key]||0);      // yeni dönem satışlarından tahsil edilmemiş
+    // eski adlar — geriye dönük uyum
+    k.hakedisAlinan=k.hakedis; k.hakedisBekleyen=k.eskiBekleyen;
     k.durum=kaleDurum(k); return k; }).filter(k=>k.ad&&!k.arsiv).sort((a,b)=>b.guc-a.guc);
   const toplamGuc=kaleler.reduce((s,k)=>s+k.guc,0);
   const komutan=katOf(KOMUTAN,toplamGuc); const sonraki=KOMUTAN.find(x=>x[0]>toplamGuc)||null;
@@ -408,7 +426,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const emirSira=lider.findIndex(x=>x.uid===emir.id);
   // dashboard genel toplamları + bugün
   const toplamCiro=kaleler.reduce((s,k)=>s+k.ciro,0);
-  const hakedisTop=kaleler.reduce((s,k)=>s+k.hakedisAlinan,0);
+  const hakedisTop=kaleler.reduce((s,k)=>s+k.hakedis,0);
   const vurkac=gerillaGanimet>0&&gerillaGanimet>toplamCiro*0.5;   // gelirin çoğu seyyar — kale kur uyarısı
   const bg=(()=>{const t=new Date();t.setHours(0,0,0,0);return t.getTime();})();
   const bgSat=(hareketler||[]).filter(x=>x.tip==="satis"&&!x.gerilla&&new Date(x.tarih).getTime()>=bg);
@@ -765,8 +783,8 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ cons
       h("button",{onClick:()=>setPanel("hakedis"),style:{width:"100%",marginTop:14,padding:"16px 18px",borderRadius:18,textAlign:"center",
         background:"linear-gradient(120deg,#fff8ee,#fff)",border:"1px solid var(--line)",position:"relative"}},
         h("div",{style:{fontSize:11,fontWeight:800,letterSpacing:1,color:"var(--mut)",textTransform:"uppercase"}},"🫰 Bu kaleden kazandığın"),
-        h("div",{style:{fontSize:27,fontWeight:800,color:"var(--gold)",lineHeight:1.15,marginTop:3}},tl(k.hakedisAlinan)),
-        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:3}},(k.hakedisBekleyen>0.5?("+ "+tl(k.hakedisBekleyen)+" bekleyen · "):"")+"ayrıntı için dokun ›")),
+        h("div",{style:{fontSize:27,fontWeight:800,color:"var(--gold)",lineHeight:1.15,marginTop:3}},tl(k.hakedis)),
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:3}},(k.eskiBekleyen>0.5?("+ "+tl(k.eskiBekleyen)+" eski dönem bekliyor · "):"")+"ayrıntı için dokun ›")),
       h("button",{onClick:()=>openSheet("gecmis",k),style:{width:"100%",padding:"12px 0 2px",fontSize:12.5,fontWeight:700,color:"var(--mut2)"}},"📅 Geçmiş tarihli işlem ekle →"),
       (ovList&&ovList.length>0)&&h("div",{className:"card",style:{padding:"14px 16px",margin:"14px 0 8px",boxShadow:"none",background:"var(--surf2)"}},
         h("div",{className:"lbl",style:{marginBottom:2,display:"flex",alignItems:"center",gap:6}},"🕘 Bu kaledeki son işlemlerin"),
@@ -807,9 +825,17 @@ function HakedisPanel({k,kaleHar,onClose}){
     h("span",{style:{fontSize:14}},baslik+"  ",h("span",{style:{color:"var(--mut)",fontSize:12}},alt)),
     h("span",{style:{fontWeight:800,color:"var(--gold)"}},tl(deger)));
   return h(Sheet,{ik:"🫰",hex:"#d97b12",baslik:k.ad+" · hakediş",alt:"pazarlamacı kazancı",onClose,cta:"Kapat",onCta:onClose},
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
-      h(Stat,{ik:"✅",v:tl(k.hakedisAlinan),l:"Kazandığın (tahsil edilen)",renk:"var(--green)"}),
-      h(Stat,{ik:"⏳",v:tl(k.hakedisBekleyen),l:"Bekleyen (tahsil edilince)",renk:k.hakedisBekleyen>0.5?"var(--gold)":"var(--mut)"})),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
+      h(Stat,{ik:"🫰",v:tl(k.hakedis),l:"Hakedişin (hak ettiğin)",renk:"var(--green)"}),
+      h(Stat,{ik:"🧾",v:tl(k.borc),l:"Kalenin borcu",renk:k.borc>0.5?"var(--red)":"var(--mut)"})),
+    k.yeniBorc>0.5?h("div",{style:{padding:"10px 12px",borderRadius:12,marginBottom:12,
+      background:"#f0fdf4",border:"1px solid #86efac",fontSize:11.5,fontWeight:700,color:"#166534",lineHeight:1.5}},
+      "Bu kalenin "+tl(k.yeniBorc)+" borcu var ama hakedişini geciktirmez — satış gerçekleştiği için "
+      +"hakedişin doğdu, haftalık dönemde ödenir."):null,
+    k.eskiBekleyen>0.5?h("div",{style:{padding:"10px 12px",borderRadius:12,marginBottom:12,
+      background:"var(--surf2)",border:"1px solid var(--line)",fontSize:11.5,fontWeight:700,color:"var(--mut)",lineHeight:1.5}},
+      "⏳ "+tl(k.eskiBekleyen)+" · "+gunKisa(HAKEDIS_BAS_MS)+" öncesi satışlardan. O dönemde hakediş tahsilata bağlıydı; "
+      +"bu tutar ancak tahsil edilirse hakedişine eklenir."):null,
     h("div",{style:{display:"flex",gap:8,marginBottom:6}},
       h(Chip,{on:mod==="urun",onClick:()=>setMod("urun")},"📦 Ürüne göre"),
       h(Chip,{on:mod==="gun",onClick:()=>setMod("gun")},"📅 Güne göre")),
