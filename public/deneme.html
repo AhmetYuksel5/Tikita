@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v88";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v89";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -405,6 +405,8 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const hafKar=hs.reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);
   const hafSatAd=hs.reduce((s,x)=>s+num(x.adet),0);
   const hafKons=(hareketler||[]).filter(x=>x.tip==="konsinye"&&!x.gerilla&&new Date(x.tarih).getTime()>=haf).reduce((s,x)=>s+num(x.adet),0);
+  // ⚡ bu haftanın gerilla ganimeti — Rapor kartı bunu gösterir (gerillaGanimet tüm zamanlar, Üs rozeti orada)
+  const hafGanimet=hs.filter(x=>x.gerilla).reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
   const gorevHaf=[
     {ad:"Bu hafta 20 satış",deg:hafSatAd,hedef:20,renk:"var(--green)"},
     {ad:"Bu hafta 5.000 ₺ ciro",deg:Math.round(hafCiro),hedef:5000,renk:"var(--gold)",birim:"tl"},
@@ -443,7 +445,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const tablaKazTop=(hareketler||[]).filter(x=>x.tip==="tabla").reduce((s,x)=>s+num(x.tutar),0);
   const tablaOdenenTop=(hareketler||[]).filter(x=>x.tip==="tablaOde").reduce((s,x)=>s+num(x.tutar),0);
   const tablaKalanTop=Math.max(0,tablaKazTop-tablaOdenenTop);
-  return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
+  return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,hafGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
     gorevHaf,rozetler,lider,emirSira,toplamCiro,hakedisTop,tablaKazTop,tablaOdenenTop,tablaKalanTop,bugunSat,bugunCiro,bugunTah,vurkac,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
     borcTop:kaleler.reduce((s,k)=>s+k.borc,0)};
@@ -487,7 +489,7 @@ function Hud({d,onBell,openBilgi,goView,onSeri}){ const {emir,komutan,sonraki,to
     h("div",{style:{display:"flex",gap:9,marginTop:14}},
       h(HudChip,{ik:"🏰",val:kaleler.length,sub:"KALE",onClick:()=>goView&&goView("kaleler")}),
       h(HudChip,{ik:"🔥",val:streak+" gün",sub:"SERİ",renk:streak>0?"#ffd479":"#fff",onClick:()=>onSeri&&onSeri()}),
-      h(HudChip,{ik:"⚡",val:tl(gerillaGanimet),sub:"GANİMET",onClick:()=>openBilgi&&openBilgi({ik:"⚡",hex:"#0e8fce",baslik:tl(gerillaGanimet),alt:"gerilla (seyyar) ganimet",govde:["Vur-kaç / seyyar satışlardan gelen anlık nakit.","Kalıcı kale kurmaz ama hızlı ganimettir.","Cephane ekranından '⚡ Gerilla satış' ile ekleyebilirsin."]})}))); }
+      h(HudChip,{ik:"⚡",val:tl(gerillaGanimet),sub:"TÜM GANİMET",onClick:()=>openBilgi&&openBilgi({ik:"⚡",hex:"#0e8fce",baslik:tl(gerillaGanimet),alt:"gerilla (seyyar) ganimet · tüm zamanlar",govde:["Vur-kaç / seyyar satışlardan gelen anlık nakit.","Kalıcı kale kurmaz ama hızlı ganimettir.","Buradaki rakam ilk günden bugüne toplamdır; bu haftanınkini Rapor ekranında görürsün.","Cephane ekranından '⚡ Gerilla satış' ile ekleyebilirsin."]})}))); }
 
 /* ————— 🔥 SERİ TAKVİMİ — satış yapılan günler işaretli aylık görünüm ————— */
 function SeriTakvimSheet({streak,satisGun,onClose}){
@@ -937,8 +939,9 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
     const ciroRows=hs.map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),alt:(x.yer||"—")+" · "+fmt2(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}));
     const hakRows2=hs.map(x=>{const m2=num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat));
       return {t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),alt:tl(num(x.adet)*num(x.satisFiyat))+" satış − "+tl(num(x.adet)*num(x.alisFiyat))+" alış · "+fmt2(x.tarih),v:"+"+tl(m2),renk:"var(--gold)"};});
-    const gerAll=(hareketler||[]).filter(x=>x.tip==="satis"&&x.gerilla).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,30);
-    const ganimetRows=gerAll.map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+(x.toptan?" 📦":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmt2(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
+    /* ⚡ ganimet listesi de bu haftayla sınırlı — kart haftalık gösteriyor,
+       satırların toplamı kartla birebir tutsun diye tutar aynı formülle (adet × fiyat). */
+    const ganimetRows=hs.filter(x=>x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+(x.toptan?" 📦":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmt2(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
     const alacakRows=d.kaleler.filter(k=>k.borc>0.5).sort((a,b)=>b.borc-a.borc).map(k=>({t:k.ad,alt:(k.bolge?("📍 "+k.bolge+" · "):"")+(k.acikKons>0?("🏬 "+k.acikKons+" ürün sahada"):"açık borç"),v:tl(k.borc),renk:"var(--red)"}));
     const tablaRows=(hareketler||[]).filter(x=>x.tip==="tabla"||x.tip==="tablaOde").sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).map(x=>x.tip==="tabla"
       ?{t:"🧹 Tabla toplama",alt:(x.yer||"Atölye")+" · "+fmt2(x.tarih),v:"+"+tl(x.tutar),renk:"var(--violet)"}
@@ -994,7 +997,8 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
       h(Stat,{ik:"💰",v:tl(d.hafCiro),l:"Bu hafta ciro ›",renk:"var(--green)",onClick:()=>setDet({ik:"💰",hex:"#16a34a",baslik:"Bu hafta satışlar",alt:ciroRows.length+" satış · "+haftaEtiket(Date.now()),rows:ciroRows})}),
       h(Stat,{ik:"🫰",v:tl(d.hafKar),l:"Bu hafta hakediş ›",renk:"var(--gold)",onClick:()=>setDet({ik:"🫰",hex:"#d97b12",baslik:"Bu hafta hakediş (satış − alış)",alt:haftaEtiket(Date.now()),rows:hakRows2})}),
-      h(Stat,{ik:"⚡",v:tl(d.gerillaGanimet),l:"Gerilla ganimet ›",renk:"var(--cyan)",onClick:()=>setDet({ik:"⚡",hex:"#0e8fce",baslik:"Gerilla satışları",alt:"son "+ganimetRows.length+" kayıt",rows:ganimetRows})}),
+      h(Stat,{ik:"⚡",v:tl(d.hafGanimet),l:"Bu hafta ganimet ›",renk:"var(--cyan)",onClick:()=>setDet({ik:"⚡",hex:"#0e8fce",baslik:"Bu hafta gerilla satışları",
+        alt:haftaEtiket(Date.now())+" · "+ganimetRows.length+" satış · tüm zamanlar "+tl(d.gerillaGanimet),rows:ganimetRows})}),
       h(Stat,{ik:"🧾",v:tl(d.borcTop),l:"Toplam açık alacak ›",renk:d.borcTop>0.5?"var(--red)":"var(--green)",onClick:()=>setDet({ik:"🧾",hex:"#e0483c",baslik:"Kale kale açık alacak",alt:alacakRows.length+" kalede borç",rows:alacakRows})})),
     det?h(DetayListSheet,{...det,onClose:()=>setDet(null)}):null,
     // 👑 komuta tabla hakedişi ödeme emri — onayladıysa burada teslim al
