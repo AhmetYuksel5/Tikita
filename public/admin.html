@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L13";   // komuta (admin) deneme sürümü
+const SURUM="L14";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -2529,6 +2529,8 @@ function SeriYonetSheet({stok,onAta,onClose,bekle}){
   const [sur,setSur]=useState(null);            // sürüklenen: {u,x,y}
   const [hedef,setHedef]=useState(null);        // üzerinde durulan kutunun anahtarı
   const kutuRef=useRef({}); const alan=useRef([]); const basla=useRef(null); const zaman=useRef(null);
+  const kaydirEl=useRef(null); const parmak=useRef({x:0,y:0}); const rafId=useRef(0);
+  const [kenar,setKenar]=useState(0);   // -1 yukarı kayıyor · +1 aşağı · 0 dur
   const G=seriGrupla(stok);
   const bosOzet={urun:0,adet:0,veris:0,etiket:0,maliyet:0,depo:0,canta:0,kons:0,montaj:0,basim:0,satildi:0,azSay:0};
   const kutular=G.filter(g=>g.seri)
@@ -2541,6 +2543,30 @@ function SeriYonetSheet({stok,onAta,onClose,bekle}){
       const r=(el&&el.getBoundingClientRect)?el.getBoundingClientRect():null;
       return r?{k:anh(g),r}:null; }).filter(Boolean); };
   const noktada=(x,y)=>{ const a=alan.current.find(z=>x>=z.r.left&&x<=z.r.right&&y>=z.r.top&&y<=z.r.bottom); return a?a.k:null; };
+  /* 📜 SÜRÜKLERKEN KENDİ KENDİNE KAYDIRMA — pencerenin kaydırılabilir gövdesini bul.
+     Etiketi tutup ekranın üst/alt şeridine götürünce liste o yöne akar, böylece
+     görünmeyen bir seri kutusuna da ulaşılır. */
+  const kaydirBul=()=>{ let el=kutuRef.current[anh(kutular[0]||{})];
+    while(el&&el!==document.body){
+      const st=(window.getComputedStyle?window.getComputedStyle(el):null);
+      const kay=st&&/(auto|scroll)/.test(st.overflowY);
+      if(kay&&el.scrollHeight>el.clientHeight+4){ kaydirEl.current=el; return el; }
+      el=el.parentElement; }
+    kaydirEl.current=null; return null; };
+  const ESIK=88, HIZ=15;   // kenardan kaç px'te başlar · kare başına en çok kaç px
+  const kaydirAdim=()=>{
+    rafId.current=0;
+    const el=kaydirEl.current; if(!el){ setKenar(0); return; }
+    const r=el.getBoundingClientRect(); const y=parmak.current.y;
+    const ust=y-r.top, alt=r.bottom-y;
+    let d=0;
+    if(ust<ESIK&&el.scrollTop>0) d=-Math.ceil(HIZ*Math.min(1,(ESIK-ust)/ESIK));
+    else if(alt<ESIK&&el.scrollTop<el.scrollHeight-el.clientHeight-1) d=Math.ceil(HIZ*Math.min(1,(ESIK-alt)/ESIK));
+    setKenar(d<0?-1:(d>0?1:0));
+    if(d){ el.scrollTop+=d; olc(); setHedef(noktada(parmak.current.x,parmak.current.y)); }
+    rafId.current=requestAnimationFrame(kaydirAdim); };
+  const kaydirDur=()=>{ if(rafId.current) cancelAnimationFrame(rafId.current);
+    rafId.current=0; kaydirEl.current=null; setKenar(0); };
   // 🎯 bırakma: seri kutusu → ekle · Serisiz kutusu → tüm serilerden çıkar
   const birak=(u,k)=>{ const S=seriListe(u);
     if(k==="_") return S.length?[{...u,seriler:[]}]:null;
@@ -2551,15 +2577,19 @@ function SeriYonetSheet({stok,onAta,onClose,bekle}){
   const tut=(e,u)=>{ const p=e.touches?e.touches[0]:e; if(!p) return;
     basla.current={x:p.clientX,y:p.clientY,u};
     clearTimeout(zaman.current);
-    zaman.current=setTimeout(()=>{ olc(); setSur({u,x:p.clientX,y:p.clientY});
+    parmak.current={x:p.clientX,y:p.clientY};
+    zaman.current=setTimeout(()=>{ olc(); kaydirBul(); setSur({u,x:p.clientX,y:p.clientY});
+      if(!rafId.current) rafId.current=requestAnimationFrame(kaydirAdim);
       try{ navigator.vibrate&&navigator.vibrate(14); }catch(_){} },190); };
   useEffect(()=>{
     const hareket=e=>{ const p=e.touches?e.touches[0]:e; if(!p) return;
       if(sur){ if(e.cancelable) e.preventDefault();
+        parmak.current={x:p.clientX,y:p.clientY};
+        if(!rafId.current&&kaydirEl.current) rafId.current=requestAnimationFrame(kaydirAdim);
         setSur(s=>s?{...s,x:p.clientX,y:p.clientY}:s); setHedef(noktada(p.clientX,p.clientY)); return; }
       const b=basla.current;   // henüz kalkmadıysa ve parmak kaydıysa: bu bir kaydırma, sürükleme değil
       if(b&&(Math.abs(p.clientX-b.x)>9||Math.abs(p.clientY-b.y)>9)){ clearTimeout(zaman.current); basla.current=null; } };
-    const kaldir=()=>{ clearTimeout(zaman.current);
+    const kaldir=()=>{ clearTimeout(zaman.current); kaydirDur();
       if(sur){ const k=hedef, u=sur.u; setSur(null); setHedef(null);
         if(k!=null){ const y=birak(u,k); if(y) onAta(y); } }
       basla.current=null; };
@@ -2572,6 +2602,9 @@ function SeriYonetSheet({stok,onAta,onClose,bekle}){
       window.removeEventListener("touchend",kaldir); window.removeEventListener("touchcancel",kaldir);
       window.removeEventListener("mouseup",kaldir); };
   },[sur,hedef,stok,ekSeri.length]);
+  // ⚠️ rAF iptali AYRI efektte: yukarıdaki efekt sur/hedef her değişince koşuyor,
+  //    temizliğine konsaydı ilk parmak hareketinde kaydırma döngüsü ölürdü.
+  useEffect(()=>()=>{ if(rafId.current) cancelAnimationFrame(rafId.current); rafId.current=0; kaydirEl.current=null; },[]);
   const seriEkle=()=>{ const t=yeniAd.trim();
     if(!t) return;
     if(kutular.some(g=>g.seri&&g.seri.toLocaleLowerCase("tr")===t.toLocaleLowerCase("tr"))) return alert("Bu seri zaten var.");
@@ -2640,6 +2673,11 @@ function SeriYonetSheet({stok,onAta,onClose,bekle}){
         h("div",{className:"lbl",style:{marginBottom:8}},"Tüm ürünler — buradan bir seriye sürükle"),
         h("div",{style:{display:"flex",flexWrap:"wrap",gap:7}},stok.map(u=>cip(u,null)))):null,
       bekle?h("div",{style:{fontSize:11.5,color:"var(--mut)",fontWeight:700,textAlign:"center",marginTop:8}},"⏳ kaydediliyor…"):null),
+    (sur&&kenar)?h("div",{style:{position:"fixed",left:0,right:0,zIndex:190,height:64,pointerEvents:"none",
+      ...(kenar<0?{top:0,background:"linear-gradient(180deg,rgba(217,123,18,.28),transparent)"}
+                 :{bottom:0,background:"linear-gradient(0deg,rgba(217,123,18,.28),transparent)"}),
+      display:"flex",alignItems:kenar<0?"flex-start":"flex-end",justifyContent:"center",padding:"8px 0"}},
+      h("span",{style:{fontSize:18,color:"#d97b12"}},kenar<0?"▲":"▼")):null,
     sur?h("div",{style:{position:"fixed",left:sur.x,top:sur.y,transform:"translate(-50%,-160%)",zIndex:200,
       pointerEvents:"none",padding:"9px 13px",borderRadius:12,background:"var(--surf)",border:"2px solid #d97b12",
       boxShadow:"0 14px 34px rgba(0,0,0,.35)",fontSize:13,fontWeight:800,whiteSpace:"nowrap"}},sur.u.ad):null);
