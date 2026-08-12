@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L18";   // komuta (admin) deneme sürümü
+const SURUM="L19";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1078,7 +1078,8 @@ function StokKomutSheet({cfg,onClose}){
 // 📦 stok hareketi (üret/sat/konsinye) — adet gir
 // 🕘 stok geçmişi — stok_hareket
 function StokGecmisSheet({u,stokHareket,onClose}){
-  const SEB={uretim:"üretim",uret:"üretim",cikis:"çıkış",satis:"satış",konsinye:"konsinye",iade:"iade",elle:"elle düzeltme",baslangic:"başlangıç",zayiat:"zayiat",donus:"dönüş"};
+  const SEB={uretim:"üretim",uret:"üretim",cikis:"çıkış",satis:"satış",konsinye:"konsinye",iade:"iade",elle:"elle düzeltme",baslangic:"başlangıç",zayiat:"zayiat",donus:"dönüş",
+    montajCikis:"🔧 montaja verildi",montaj:"🔧 montajdan geldi",montajZayiat:"🔧 montaj zayiatı"};
   const rows=(stokHareket||[]).filter(x=>x.urunId===u.id).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,100);
   return h(Sheet,{ik:"🕘",hex:"#334155",baslik:"Stok geçmişi",alt:(u.ad||"")+" · "+rows.length+" hareket",onClose,cta:"Kapat",onCta:onClose},
     rows.length?rows.map((x,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
@@ -3998,6 +3999,9 @@ function App(){
           Object.keys(pt).forEach(k=>{ tk[k]=Math.max(0,num(tk[k])-num(pt[k])); }); patch.parcaTuket=tk; }
         if(Object.keys(patch).length>1) await save("stok_urun",patch); }
       if(e0.hareketId){ try{ await remove("stok_hareket",e0.hareketId); }catch(e){} }
+      if(e0.zayiatHareketId){ try{ await remove("stok_hareket",e0.zayiatHareketId); }catch(e){} }
+      // görev tamamen siliniyorsa "montaja verildi" hareketi de kalkmalı, yoksa geçmişte öksüz kalır
+      if(sil&&g.alimHareketId){ try{ await remove("stok_hareket",g.alimHareketId); }catch(e){} }
       if(g.giderId){ try{ await remove("gider",g.giderId); }catch(e){} }   // ödeme gideri de geri alınır
       if(g.kalanGorevId){ const kg=(montajGorev||[]).find(x=>x.id===g.kalanGorevId);
         if(kg&&kg.durum!=="teslim"){ try{ await remove("montaj_gorev",g.kalanGorevId); }catch(e){} } }
@@ -4204,7 +4208,8 @@ function App(){
       onSil:async(g)=>{ if(!g||!g.id||isBekle) return;
         if(g.durum==="teslim"){ await montajGeriAl(g,{sil:true}); return; }
         if(!confirm("Bu montaj görevi silinsin mi?")) return;
-        try{ await remove("montaj_gorev",g.id); say("Görev silindi"); }catch(e){ console.error(e); say("Silinemedi"); } },
+        try{ if(g.alimHareketId){ try{ await remove("stok_hareket",g.alimHareketId); }catch(e2){} }
+          await remove("montaj_gorev",g.id); say("Görev silindi"); }catch(e){ console.error(e); say("Silinemedi"); } },
       onOde:async(g)=>{ if(!g||!g.id||isBekle) return; setIsBekle(true);
         try{ const tutar=num(g.teslimAdet)*num(g.birimUcret); const gid=uid(); const now=new Date().toISOString();
           if(tutar>0) await save("gider",{id:gid,tur:"Montaj işçiliği",tutar,tarih:now,oto:true,ref:g.id,

@@ -131,7 +131,7 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek — okuma kotasını ve açılış süresini düşürür
 
 const { useState, useEffect, useMemo, useRef } = React;
-const SURUM="G1";   // giriş kapısı sürümü — hata kalkanı bunu yazar
+const SURUM="G2";   // giriş kapısı sürümü — hata kalkanı bunu yazar
 const h = React.createElement;
 
 /* ---------- DEMO MODU — demo hesabı aktifken oyun koleksiyonları 'demo_' önekine gider,
@@ -922,11 +922,16 @@ function UrunGecmisModal({ urun, stokHareket, onKapat }){
   const SEB={ uretim:{ik:"🖨",ad:"Üretildi (montajdan)",renk:"#0369a1"}, cikis:{ik:"🎒",ad:"Pazarlamacıya çıktı",renk:"#0e7490"},
     donus:{ik:"↩",ad:"Atölyeye döndü",renk:"#16a34a"}, satis:{ik:"💰",ad:"Stoktan satıldı",renk:"#047857"},
     konsinye:{ik:"🏬",ad:"Konsinyeye verildi",renk:"#7c3aed"}, iade:{ik:"↩",ad:"Stoğa iade",renk:"#16a34a"},
-    elle:{ik:"✏️",ad:"Elle düzeltildi",renk:"#64748b"}, baslangic:{ik:"🆕",ad:"Başlangıç stoğu",renk:"#334155"} };
+    elle:{ik:"✏️",ad:"Elle düzeltildi",renk:"#64748b"}, baslangic:{ik:"🆕",ad:"Başlangıç stoğu",renk:"#334155"},
+    montajCikis:{ik:"🔧",ad:"Montaja verildi",renk:"#c2410c"}, montaj:{ik:"🔧",ad:"Montajdan geldi",renk:"#16a34a"},
+    montajZayiat:{ik:"🔧",ad:"Montaj zayiatı",renk:"#dc2626"} };
   const seb=k=>SEB[k]||{ik:"•",ad:k,renk:"#64748b"};
   // en yeni → en eski; şu anki bakiyeden geriye running balance
   const kayit=(stokHareket||[]).filter(x=>x.urunId===urun.id).slice().sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
-  let bal=num(urun.stokta); const satir=kayit.map(x=>{ const sonra=bal, once=bal-num(x.delta); bal=once; return {x,once,sonra}; });
+  /* ⚖️ bakiye:false olan hareketler atölye stoğunu DEĞİŞTİRMEZ (montaja verilen mal
+     zaten stokta sayılmıyordu). Görünür ama geriye doğru bakiye hesabına katılmaz. */
+  let bal=num(urun.stokta); const satir=kayit.map(x=>{ const ntr=x.bakiye===false;
+    const sonra=bal, once=ntr?bal:(bal-num(x.delta)); bal=once; return {x,once,sonra,ntr}; });
   const enEski=satir.length?satir[satir.length-1].once:num(urun.stokta);
   return h(Modal,{ baslik:"🕘 Stok geçmişi · "+(urun.ad||""), onKapat, alt:h("button",{style:{...S.btn("p"),flex:1},onClick:onKapat},"Kapat") },
     h("div",{style:{display:"flex",alignItems:"baseline",gap:10,marginBottom:4,padding:"10px 12px",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10}},
@@ -935,7 +940,7 @@ function UrunGecmisModal({ urun, stokHareket, onKapat }){
     h("div",{style:{fontSize:11,color:C.mut,margin:"8px 2px 12px"}},"En üstte en güncel olay. Her satırda o hareketten sonra atölyede kalan miktar gösterilir."),
     !satir.length ? h("div",{style:{...S.card,padding:20,textAlign:"center",color:C.mut}},"Bu ürün için henüz stok hareketi kaydı yok.\n(Kayıtlar bu sürümden itibaren tutuluyor.)")
     : h("div",{style:{display:"grid",gap:7,maxHeight:"56vh",overflowY:"auto"}},
-        satir.map(({x,once,sonra},i)=>{ const s=seb(x.sebep), art=num(x.delta)>0;
+        satir.map(({x,once,sonra,ntr},i)=>{ const s=seb(x.sebep), art=num(x.delta)>0;
           return h("div",{key:x.id||i,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 11px",border:"1px solid "+C.line,borderLeft:"3px solid "+s.renk,borderRadius:9,background:"#fff"}},
             h("span",{style:{fontSize:18,flexShrink:0}},s.ik),
             h("div",{style:{flex:1,minWidth:0}},
@@ -943,8 +948,8 @@ function UrunGecmisModal({ urun, stokHareket, onKapat }){
               h("div",{style:{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
                 fmtTarihSaat(new Date(x.tarih).getTime())+(x.kullaniciAd?(" · 👤 "+x.kullaniciAd):""))),
             h("div",{style:{flexShrink:0,textAlign:"right"}},
-              h("div",{style:{fontSize:14,fontWeight:800,color:art?"#16a34a":C.kirmiziB}}, (art?"+":"")+num(x.delta)),
-              h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}}, once+" → "+sonra))); })),
+              h("div",{style:{fontSize:14,fontWeight:800,color:ntr?C.mut:(art?"#16a34a":C.kirmiziB)}}, (art?"+":"")+num(x.delta)),
+              h("div",{style:{fontSize:11,color:C.mut,fontWeight:700}}, ntr?"atölye stoğu değişmez":(once+" → "+sonra)))); })),
     satir.length>0 && h("div",{style:{fontSize:11.5,color:C.mut,marginTop:10,textAlign:"center"}},"En eski kayıttan önce: "+enEski+" adet"));
 }
 
