@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L17";   // komuta (admin) deneme sürümü
+const SURUM="L18";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -2816,7 +2816,46 @@ function FiyatSheet({list,bekle,onKaydet,onClose}){
           h("div",null,h("div",{className:"lbl",style:{marginBottom:5}},"Veriliş (pazarlamacı) ₺"),kutu(u.id,"v"))));
     })));
 }
-function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat}){
+/* 🤝 ANLAŞMALI FİYATLAR — bir müşteriye özel, ürün bazında satış+veriliş çifti.
+   Pazarlamacı satışta "bu fiyat bu müşteride kalsın" derse müşteri kartına yazılır.
+   Burada hepsi tek ekranda; genel fiyattan sapma görünür, istenen kaldırılır. */
+function anlasmaListe(musteriler,stok){
+  const uById={}; (stok||[]).forEach(u=>uById[u.id]=u);
+  const L=[];
+  (musteriler||[]).forEach(m=>{ const f=(m&&m.fiyat&&typeof m.fiyat==="object")?m.fiyat:{};
+    Object.keys(f).forEach(uid2=>{ const a=f[uid2]; if(!a||num(a.satis)<=0) return;
+      const u=uById[uid2]||{};
+      L.push({musteriId:m.id,musteriAd:m.ad||"?",bolge:m.bolge||"",urunId:uid2,
+        urunAd:a.urunAd||u.ad||"?",satis:num(a.satis),veris:num(a.veris),tarih:a.tarih||"",
+        listeSatis:num(u.fiyat),listeVeris:num(u.alis),
+        sapSatis:num(u.fiyat)>0?num(a.satis)-num(u.fiyat):0,
+        sapVeris:num(u.alis)>0?num(a.veris)-num(u.alis):0}); }); });
+  return L.sort((a,b)=>(a.musteriAd||"").localeCompare(b.musteriAd||"","tr")||(a.urunAd||"").localeCompare(b.urunAd||"","tr"));
+}
+function AnlasmaSheet({list,bekle,onKaldir,onClose}){
+  const L=list||[];
+  const grup={}; L.forEach(x=>{ (grup[x.musteriId]=grup[x.musteriId]||{ad:x.musteriAd,bolge:x.bolge,sat:[]}).sat.push(x); });
+  const G=Object.keys(grup).map(k=>({id:k,...grup[k]}));
+  return h(Sheet,{ik:"🤝",hex:"#1d4ed8",baslik:"Anlaşmalı fiyatlar",
+    alt:L.length?(G.length+" müşteri · "+L.length+" ürün"):"",onClose,cta:"Kapat",onCta:onClose},
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",fontWeight:700,marginBottom:14,lineHeight:1.5}},
+      "Bu fiyatlar yalnız o müşteride geçerli, ürünün genel fiyatını değiştirmez. Konsinyede fiyat bırakma anında donduğu için raftaki mevcut mallar eski fiyatla sayılmaya devam eder."),
+    G.length?G.map((g,i)=>h("div",{key:g.id||i,style:{marginBottom:16}},
+      h("div",{style:{fontSize:14,fontWeight:800,marginBottom:2}},g.ad),
+      g.bolge?h("div",{style:{fontSize:11,color:"var(--mut2)",fontWeight:700,marginBottom:6}},"📍 "+g.bolge):null,
+      g.sat.map((x,j)=>h("div",{key:j,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:"1px solid var(--line)"}},
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},x.urunAd),
+          h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 9px",fontSize:11,color:"var(--mut)",fontWeight:700,marginTop:2}},
+            h("span",null,"satış "+tlk(x.satis)+(x.sapSatis?(" ("+(x.sapSatis>0?"+":"")+tlk(x.sapSatis)+")"):"")),
+            h("span",null,"veriliş "+tlk(x.veris)+(x.sapVeris?(" ("+(x.sapVeris>0?"+":"")+tlk(x.sapVeris)+")"):"")),
+            h("span",{style:{color:"var(--gold)"}},"marj "+tlk(x.satis-x.veris)))),
+        h("button",{onClick:()=>onKaldir(x),disabled:bekle,
+          style:{flexShrink:0,padding:"7px 11px",borderRadius:10,background:"var(--surf2)",border:"1px solid var(--line)",
+            fontSize:11.5,fontWeight:800,color:"var(--red)"}},"Kaldır")))))
+      :h("div",{style:{padding:"24px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Anlaşmalı fiyat yok."));
+}
+function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat,anlasmaSay}){
   const fiyatsiz=useMemo(()=>d.stok.filter(u=>u.fiyat<=0),[d.stok]);
   const uEks=fiyatsiz.length;
   const [degerAcik,setDegerAcik]=useState(false);
@@ -2868,6 +2907,9 @@ function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat}){
     h("button",{onClick:()=>ac({tip:"seriler"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:14,borderRadius:14,marginBottom:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
       h("span",{style:{fontSize:19,flexShrink:0}},"🗂"),h("span",{style:{flex:1,minWidth:0}},"Seriler"),
       h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},(seriSay?(seriSay+" seri"):"düzenle")+" ›")),
+    h("button",{onClick:()=>ac({tip:"anlasma"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:14,borderRadius:14,marginBottom:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
+      h("span",{style:{fontSize:19,flexShrink:0}},"🤝"),h("span",{style:{flex:1,minWidth:0}},"Anlaşmalı fiyatlar"),
+      h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},(num(anlasmaSay)>0?(anlasmaSay+" kayıt"):"yok")+" ›")),
     uEks?h("button",{onClick:()=>setFiyatAcik(true),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412",marginBottom:14}},"⚠️ "+uEks+" üründe satış fiyatı tanımlı değil — hangileri, gir ›"):null,
     fiyatAcik&&uEks?h(FiyatSheet,{list:fiyatsiz,bekle,onKaydet:onFiyat,onClose:()=>setFiyatAcik(false)}):null,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},d.stok.map(kart)));
@@ -3753,6 +3795,7 @@ function App(){
   const veriHata=useVeriHata();
   const yuk=[plan,makineler,urunler,hareketler,kullanicilar,musteriler].some(x=>x===null);
   const d=useMemo(()=>yuk?null:hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filamentler,sarflar),[plan,makineler,urunler,hareketler,kullanicilar,musteriler,filamentler,sarflar,yuk]);
+  const anlasmalar=useMemo(()=>anlasmaListe(musteriler,(d&&d.stok)||[]),[musteriler,d]);   // 🤝 müşteriye özel fiyatlar
   // 🧵 biten baskıların filamentini stoktan düş — kayda damga bırakır, iki kez düşmez
   useEffect(()=>{ if(!plan||!filamentler) return;
     const t=setTimeout(async()=>{ const now2=Date.now();
@@ -3822,6 +3865,14 @@ function App(){
       say(L.length===1?(L[0].ad+" · fiyat girildi"):(L.length+" ürünün fiyatı girildi")); }
     catch(e){ console.error(e); say("Fiyat kaydedilemedi"); } finally{ setIsBekle(false); } }
   // 🗂 seri ataması — yalnız "seri" alanı yazılır, başka hiçbir alan dokunulmaz
+  /* 🤝 anlaşmalı fiyatı kaldır — satis:0 yazılır; okuyucular 0'ı "anlaşma yok" sayar.
+     (Alanı tamamen silmek deleteField gerektirir, merge yazma bunu yapamaz.) */
+  async function anlasmaKaldir(x){ if(!x||!x.musteriId||!x.urunId||isBekle) return;
+    if(!confirm("🤝 "+x.musteriAd+" · "+x.urunAd+"\nAnlaşmalı fiyat kaldırılsın mı?\nBundan sonra genel fiyat geçerli olur.")) return;
+    setIsBekle(true);
+    try{ await save("musteri",{id:x.musteriId,fiyat:{[x.urunId]:{satis:0,veris:0,urunAd:x.urunAd||"",tarih:new Date().toISOString()}}});
+      say("Anlaşma kaldırıldı · "+x.urunAd); }
+    catch(e){ console.error(e); say("Kaldırılamadı"); } finally{ setIsBekle(false); } }
   async function seriAta(list){ const L=(list||[]).filter(x=>x&&x.id); if(!L.length||isBekle) return; setIsBekle(true);
     try{ for(const u of L){ const dz=(Array.isArray(u.seriler)?u.seriler:[]).map(x=>String(x||"").trim()).filter(Boolean);
         await save("stok_urun",{id:u.id,seriler:dz,seri:(dz[0]||"")}); }
@@ -4089,7 +4140,7 @@ function App(){
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,filamentler,ac:setModal,onTabla:tablaTopla,fotoMap,
     onFilAta:async(ids,fid)=>{ for(const id of ids){ await save("plan",{id,filamentId:fid}); }
       say(ids.length+" baskıya filament atandı"); }});
-  else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap,onPlanSil:x=>isSil({p:x.p,durum:"bekliyor"}),bekle:isBekle,onFiyat:fiyatKaydet});
+  else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap,onPlanSil:x=>isSil({p:x.p,durum:"bekliyor"}),bekle:isBekle,onFiyat:fiyatKaydet,anlasmaSay:anlasmalar.length});
   else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler});
   else ekran=h(RaporA,{d,ac:setModal,giderler,sabitGider,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal,
     hakedisDonem,onHakOnay:hakedisOnay,onHakOde:hakedisOde,onHakGeriAl:hakedisGeriAl,
@@ -4163,6 +4214,7 @@ function App(){
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onGeri:async(g)=>{ if(!g||!g.id||isBekle) return; await montajGeriAl(g); }}),
     modal&&modal.tip==="seriler"&&h(SeriYonetSheet,{stok:d.stok,bekle:isBekle,onAta:seriAta,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="anlasma"&&h(AnlasmaSheet,{list:anlasmalar,bekle:isBekle,onKaldir:anlasmaKaldir,onClose:()=>setModal(null)}),
     modal&&modal.tip==="sarfYonet"&&h(SarfYonetimSheet,{sarflar,stok:d.stok,giderler,bekle:isBekle,onClose:()=>setModal(null),
       onAlim:async(a)=>{ if(isBekle) return; setIsBekle(true);
         try{ await save("sarf",{id:a.sarfId,stokta:increment(a.adet),birimFiyat:a.yeniBirim});
