@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L16";   // komuta (admin) deneme sürümü
+const SURUM="L17";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1478,13 +1478,19 @@ function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet
 /* 🔢 Bir montaj görevinin "şu an geçerli" adedi — özet kutusundaki sayıyla birebir:
    teslim edildiyse teslim adedi, montajdaysa alınan adet, henüz alınmadıysa istenen. */
 const montajAdet=g=>num(g&&g.durum==="teslim"?g.teslimAdet:(g&&g.durum==="alindi"?g.alinanAdet:(g||{}).adet));
+/* ⚠️ İSTENEN İLE ALINAN TUTMUYORSA görünür olsun. Montajcı ekranında alınan adet
+   serbest yazılıyor: istenenden az alınırsa kalan hiçbir yere kaydedilmiyor (kayıp),
+   fazla alınırsa da uyarı yoktu. İkisini de satırda gösteriyoruz. */
+const montajFark=g=>{ if(!g||g.durum!=="alindi") return {alinmadi:0,fazla:0};
+  const d=num(g.alinanAdet)-num(g.adet);
+  return {alinmadi:d<0?-d:0,fazla:d>0?d:0}; };
 /* 👥 görevleri kişiye göre topla — kimde ne kadar ürün var, ne kadar ücret birikti.
    Aynı kişinin ürün kırılımı ve görev listesi de içinde gelir. */
 function montajKisiKirilim(liste,kad){ const m={}; kad=kad||{};
   (liste||[]).forEach(g=>{ if(!g) return; const id=g.kullaniciId||"?";
-    const o=m[id]||(m[id]={id,ad:g.kullaniciAd||kad[id]||"?",adet:0,tutar:0,gorev:0,bekleyen:0,montajda:0,teslim:0,odenmemis:0,urun:{},list:[]});
-    const a=montajAdet(g), t=a*num(g.birimUcret);
-    o.adet+=a; o.tutar+=t; o.gorev++; o.list.push(g);
+    const o=m[id]||(m[id]={id,ad:g.kullaniciAd||kad[id]||"?",adet:0,tutar:0,gorev:0,bekleyen:0,montajda:0,teslim:0,odenmemis:0,alinmadi:0,fazla:0,urun:{},list:[]});
+    const a=montajAdet(g), t=a*num(g.birimUcret), f=montajFark(g);
+    o.adet+=a; o.tutar+=t; o.gorev++; o.list.push(g); o.alinmadi+=f.alinmadi; o.fazla+=f.fazla;
     if(g.durum==="teslim"){ o.teslim+=a; if(!g.odendi) o.odenmemis+=t; }
     else if(g.durum==="alindi") o.montajda+=a; else o.bekleyen+=a;
     const uk=g.urunAd||"?"; const u=o.urun[uk]||(o.urun[uk]={ad:uk,adet:0,tutar:0});
@@ -1554,6 +1560,7 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
         h("div",{className:"lbl",style:{marginBottom:8}},"GÖREVLER"),
         k1.list.map((g,i)=>{
           const dur=g.durum==="teslim"?["Teslim edildi","var(--green)"]:g.durum==="alindi"?["Montajda","var(--cyan)"]:["Bekliyor","var(--gold)"];
+          const fark=montajFark(g);
           return h("div",{key:g.id||i,style:{padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
             h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:3}},
               h("div",{style:{flex:1,minWidth:0,fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.urunAd||"?"),
@@ -1561,6 +1568,8 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
             h("div",{style:{display:"flex",flexWrap:"wrap",gap:"2px 10px",fontSize:11.5,color:"var(--mut)",fontWeight:700}},
               h("span",null,"istenen "+num(g.adet)),
               num(g.alinanAdet)>0?h("span",null,"alınan "+num(g.alinanAdet)):null,
+              fark.alinmadi>0?h("span",{style:{color:"var(--mut2)"}},"alınmadı "+fark.alinmadi):null,
+              fark.fazla>0?h("span",{style:{color:"var(--red)"}},"⚠ fazla alınmış "+fark.fazla):null,
               num(g.teslimAdet)>0?h("span",{style:{color:"var(--green)"}},"teslim "+num(g.teslimAdet)):null,
               h("span",{style:{color:"var(--gold)"}},tlk(adOf(g)*num(g.birimUcret))),
               (g.durum==="teslim"&&g.odendi)?h("span",{style:{color:"var(--green)"}},"ödendi"):null,
@@ -1581,7 +1590,9 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
             rozet(x.montajda,"montajda","var(--cyan)"),
             rozet(x.teslim,"teslim","var(--green)"),
             h("span",{style:{fontSize:11,fontWeight:700,color:"var(--mut)"}},x.gorev+" görev"),
-            x.odenmemis>0?h("span",{style:{fontSize:11,fontWeight:800,color:"var(--red)"}},"ödenecek "+tlk(x.odenmemis)):null)),
+            x.odenmemis>0?h("span",{style:{fontSize:11,fontWeight:800,color:"var(--red)"}},"ödenecek "+tlk(x.odenmemis)):null,
+            x.alinmadi>0?h("span",{style:{fontSize:11,fontWeight:800,color:"var(--mut2)"}},x.alinmadi+" alınmadı"):null,
+            x.fazla>0?h("span",{style:{fontSize:11,fontWeight:800,color:"var(--red)"}},"⚠ "+x.fazla+" fazla"):null)),
         h("div",{style:{textAlign:"right",flexShrink:0}},
           h("div",{style:{fontSize:16,fontWeight:800}},x.adet+" ad"),
           h("div",{style:{fontSize:11.5,fontWeight:800,color:"var(--gold)",marginTop:2}},tlk(x.tutar))),
@@ -1609,7 +1620,10 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
           background:sekme===k?"#1b1e25":"var(--surf2)",color:sekme===k?"#fff":"var(--mut)",border:"1px solid "+(sekme===k?"#1b1e25":"var(--line)")}},lbl+" "+n))),
     liste.length?liste.map((g,i)=>{
       const dur=g.durum==="teslim"?["Teslim edildi","var(--green)"]:g.durum==="alindi"?["Montajda","var(--cyan)"]:["Bekliyor","var(--gold)"];
-      const tutar=(g.durum==="teslim"?num(g.teslimAdet):num(g.adet))*num(g.birimUcret);
+      // 🔢 tutar özet kutusuyla AYNI adetten — eskiden montajdaki iş için "istenen" ile
+      //    çarpılıyordu, kısmi alımda satır ile kutu farklı rakam gösteriyordu
+      const tutar=montajAdet(g)*num(g.birimUcret);
+      const fark=montajFark(g);
       return h("div",{key:g.id||i,style:{padding:"11px 0",borderTop:i?"1px solid var(--line)":"none"}},
         h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}},
           h("div",{style:{flex:1,minWidth:0,fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.urunAd||"?"),
@@ -1618,6 +1632,8 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
           h("span",null,g.kullaniciAd||kad[g.kullaniciId]||"?"),
           h("span",null,"istenen "+num(g.adet)),
           num(g.alinanAdet)>0?h("span",null,"alınan "+num(g.alinanAdet)):null,
+          fark.alinmadi>0?h("span",{style:{color:"var(--mut2)"}},"alınmadı "+fark.alinmadi):null,
+          fark.fazla>0?h("span",{style:{color:"var(--red)"}},"⚠ fazla alınmış "+fark.fazla):null,
           num(g.teslimAdet)>0?h("span",{style:{color:"var(--green)"}},"teslim "+num(g.teslimAdet)):null,
           h("span",{style:{color:"var(--gold)"}},tlk(tutar)),
           h("span",null,fmtS(g.tarih))),

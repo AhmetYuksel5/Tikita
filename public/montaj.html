@@ -74,7 +74,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="M4";
+const SURUM="M5";
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // 👁 yönetici görünümü
 let BEN_ID=AS_ID||REAL_ID;
@@ -263,7 +263,12 @@ function App(){
     liste.length?h("div",{style:{display:"grid",gap:10}},liste.map(g=>{
       const d=DURUM[g.durum||"acik"]||DURUM.acik;
       const istenen=num(g.adet), alinan=num(g.alinanAdet), teslim=num(g.teslimAdet);
-      const tutar=(g.durum==="teslim"?teslim:istenen)*num(g.birimUcret);
+      /* 💰 tutar elindeki adetten: teslim ettiysen teslim, montajdaysan ALDIĞIN kadar.
+         Eskiden montajdaki iş için "istenen" ile çarpılıyordu — 120 istenip 50 alındığında
+         ekranda 120 ₺ yazıp komuta panelinde 50 ₺ görünüyordu. */
+      const tutar=(g.durum==="teslim"?teslim:(g.durum==="alindi"?alinan:istenen))*num(g.birimUcret);
+      const alinmadi=g.durum==="alindi"?Math.max(0,istenen-alinan):0;
+      const fazla=g.durum==="alindi"?Math.max(0,alinan-istenen):0;
       return h("div",{key:g.id,className:"card",style:{padding:"14px 15px"}},
         h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}},
           h("div",{style:{flex:1,minWidth:0,fontSize:16,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.urunAd||"?"),
@@ -271,6 +276,8 @@ function App(){
         h("div",{style:{display:"flex",flexWrap:"wrap",gap:"3px 12px",fontSize:12,color:"var(--mut)",fontWeight:700,marginBottom:10}},
           h("span",null,"istenen "+istenen+" ad"),
           alinan>0?h("span",null,"alınan "+alinan+" ad"):null,
+          alinmadi>0?h("span",{style:{color:"var(--mut2)"}},"almadığın "+alinmadi+" ad"):null,
+          fazla>0?h("span",{style:{color:"var(--red)"}},"⚠ fazla aldığın "+fazla+" ad"):null,
           teslim>0?h("span",{style:{color:"var(--green)"}},"teslim "+teslim+" ad"):null,
           num(g.kusurAdet)>0?h("span",{style:{color:"var(--red)"}},"kusurlu "+num(g.kusurAdet)):null,
           h("span",null,tlk(g.birimUcret)+"/ad"),
