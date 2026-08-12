@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v91";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v92";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -1235,20 +1235,33 @@ const BEDAVA_ESIK=1;   // ₺/adet — bu ve altı sembolik fiyat: ürün fiilen
    raporunda elle hediyeye çevriliyordu — rapor verilmediği sürece kalede 1 ₺ ciro
    ve 1 ₺ borç olarak duruyordu. */
 const sembolik=f=>num(f)<=BEDAVA_ESIK;
-function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,hak=0,ganimet=0,iade=0,hediyeAd=0;
+/* 🧾 DÖNEM RAPORU — hakediş kesme tarihinden SONRA satışta doğar, tahsilatta değil.
+   Eskiden tahsilatın içinden "pazarlamacı payı" ayrılıyordu (ureticiPay/pazPay).
+   Yeni modelde tahsil edilen paranın TAMAMI Tikita'ya teslim edilir; hakediş
+   haftalık dönemde ayrıca ödenir. İkisi birlikte sayılırsa pazarlamacının payı
+   iki kez görünür ve müşteriden alınan para eksik gösterilir. */
+function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,ganimet=0,iade=0,hediyeAd=0;
+  let hakYeni=0,hakEski=0,tabla=0,nakitEski=0;
   (recs||[]).forEach(x=>{
+    const yeni=(new Date(x.tarih).getTime()||0)>=HAKEDIS_BAS_MS;
     if(x.tip==="satis"){
       satAd+=num(x.adet); ciro+=num(x.adet)*num(x.satisFiyat);   // gerilla dahil — hepsi satıştır
-      if(x.gerilla){ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat);
-        ganimet+=th; hak+=(th-K); } }   // peşin: önce üretici maliyeti; maliyetin altında satıldıysa fark eksi hakediştir
-    else if(x.tip==="tahsilat"){ tah+=num(x.tutar); hak+=(x.pazPay!=null?num(x.pazPay):0); }
-    else if(x.tip==="tabla"){ hak+=num(x.tutar); }   // tabla ücreti de kazançtır
+      const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat);
+      const K=num(x.adet)*num(x.alisFiyat);
+      if(x.gerilla){ ganimet+=th; if(!yeni){ hakEski+=(th-K); nakitEski+=th; } }
+      // yeni model: hakediş satışta doğar — kale satışı da gerilla da aynı kural
+      if(yeni&&!sembolik(x.satisFiyat)) hakYeni+=num(x.adet)*num(x.satisFiyat)-K; }
+    else if(x.tip==="tahsilat"){ tah+=num(x.tutar);
+      if(!yeni){ hakEski+=(x.pazPay!=null?num(x.pazPay):0); nakitEski+=num(x.tutar); } }
+    else if(x.tip==="tabla"){ tabla+=num(x.tutar); }   // tabla ücreti de kazançtır
     else if(x.tip==="konsinye"){ konsAd+=num(x.adet); }
     else if(x.tip==="iade"){ iade+=num(x.adet); }
     else if(x.tip==="hediye"){ hediyeAd+=num(x.adet); } });
-  const nakit=tah+ganimet;   // pazarlamacının elindeki toplam para
-  const tikita=nakit-hak;    // hakediş kesildikten sonra Tikita'ya kalan
-  return {satAd,ciro,tah,konsAd,hak,ganimet,iade,hediyeAd,nakit,tikita,bos:!(satAd||tah||konsAd||ganimet||iade||hak||hediyeAd)}; }
+  const hak=hakYeni+hakEski+tabla;
+  const nakit=tah+ganimet;                       // pazarlamacının elindeki toplam para
+  const tikita=Math.max(0,nakit-hakEski);        // yeni dönemde nakdin tamamı Tikita'ya gider
+  return {satAd,ciro,tah,konsAd,hak,hakYeni,hakEski,tabla,ganimet,iade,hediyeAd,nakit,tikita,
+    bos:!(satAd||tah||konsAd||ganimet||iade||hak||hediyeAd)}; }
 // komuta raporunu WhatsApp metnine çevir — satış · konsinye · tahsilat sırasıyla, emojisiz
 function raporMetni(v,recs){ v=v||{};
   const R=recs||[];
@@ -1300,16 +1313,23 @@ function raporMetni(v,recs){ v=v||{};
     L.push(sat("Verilen",adOf(hediye)+" ad",""));
     urunTop(hediye).slice(0,8).forEach(o=>L.push(sat("  "+o.ad,o.adet+"x","")));
   }
-  // 3) TAHSİLAT — pazarlamacı payı · Tikita payı
+  /* 3) TAHSİLAT — müşteriden alınan nakit. Yeni modelde bu paranın tamamı Tikita'ya
+     teslim edilir; hakediş satışta doğar ve haftalık dönemde ayrıca ödenir. */
   const nakit=num(v.nakit!=null?v.nakit:(num(v.tah)+num(v.ganimet)));
-  const hak=num(v.hak), tikita=num(v.tikita!=null?v.tikita:(nakit-hak));
-  const tabla=R.filter(x=>x.tip==="tabla").reduce((s2,x)=>s2+num(x.tutar),0);
+  const hak=num(v.hak), hakEski=num(v.hakEski), tikita=num(v.tikita!=null?v.tikita:(nakit-hakEski));
+  const tabla=num(v.tabla!=null?v.tabla:R.filter(x=>x.tip==="tabla").reduce((s2,x)=>s2+num(x.tutar),0));
   if(nakit||hak||tikita){
-    L.push("","TAHSİLAT");
-    L.push(sat("Toplam","",tl(nakit)));
-    L.push(sat("Pazarlamacı payı","",tl(hak)));
-    if(tabla>0) L.push(sat("  tabla ücreti","",tl(tabla)));
-    L.push(sat("Tikita payı","",tl(tikita)));
+    L.push("","TAHSILAT (musteriden alinan)");
+    L.push(sat("Toplam nakit","",tl(nakit)));
+    if(hakEski>0) L.push(sat("  eski donem payi","",tl(hakEski)));
+    L.push(sat("Tikita'ya teslim","",tl(tikita)));
+  }
+  if(hak>0){
+    L.push("","HAKEDIS (satis - alis)");
+    L.push(sat("Bu donem","",tl(num(v.hakYeni)||Math.max(0,hak-tabla-hakEski))));
+    if(tabla>0) L.push(sat("  tabla ucreti","",tl(tabla)));
+    L.push(sat("Toplam","",tl(hak)));
+    L.push("Tahsilattan dusulmez; haftalik donemde ayrica odenir.");
   }
   if(!L.length) L.push("Bu dönemde işlem yok.");
   return ["TİKİTA - KOMUTA RAPORU",tarih+(kisi?(" - "+kisi):""),"","```",...L,"```"]
@@ -1338,10 +1358,18 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
   const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
   const satRows=RG.filter(x=>x.tip==="satis"&&!x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}));
   const tahRows=RG.filter(x=>x.tip==="tahsilat").map(x=>({t:"Tahsilat"+(num(x.pazPay)>0?(" · 🫰 "+tl(x.pazPay)+" payın"):""),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}));
+  /* 🫰 hakediş dökümü — kesme sonrası her satış (kale + gerilla) satış−alış farkıyla
+     girer; kesme öncesi kayıtlar eski modeldeki tahsilat payıyla kalır. */
+  const yeniMi=x=>(new Date(x.tarih).getTime()||0)>=HAKEDIS_BAS_MS;
   const hakRows=[
-    ...RG.filter(x=>x.tip==="tahsilat"&&num(x.pazPay)>0).map(x=>({t:"Tahsilat payı",
-      alt:tl(x.tutar)+" tahsilat − "+tl(num(x.tutar)-num(x.pazPay))+" üretici · "+(x.yer||"—")+" · "+fmtS(x.tarih),v:"+"+tl(x.pazPay),renk:"var(--gold)"})),
-    ...RG.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat); const m2=th-K;
+    ...RG.filter(x=>x.tip==="satis"&&yeniMi(x)&&!sembolik(x.satisFiyat)).map(x=>{
+      const S=num(x.adet)*num(x.satisFiyat), K=num(x.adet)*num(x.alisFiyat), m2=S-K;
+      return {t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),
+        alt:tl(S)+" satış − "+tl(K)+" veriliş (alış "+tl(x.alisFiyat)+") · "+(x.yer||"—")+" · "+fmtS(x.tarih),
+        v:(m2<0?"":"+")+tl(m2),renk:m2<0?"var(--red)":"var(--gold)"}; }),
+    ...RG.filter(x=>x.tip==="tahsilat"&&!yeniMi(x)&&num(x.pazPay)>0).map(x=>({t:"Tahsilat payı · eski dönem",
+      alt:tl(x.tutar)+" tahsilat − "+tl(num(x.tutar)-num(x.pazPay))+" üretici · "+(x.yer||"—")+" · "+fmtS(x.tarih),v:"+"+tl(x.pazPay),renk:"var(--mut)"})),
+    ...RG.filter(x=>x.tip==="satis"&&x.gerilla&&!yeniMi(x)).map(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat); const m2=th-K;
       return {t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad. sattın",
         alt:tl(th)+" satış − "+tl(K)+" üretici (alış "+tl(x.alisFiyat)+") · "+fmtS(x.tarih),v:(m2<0?"":"+")+tl(m2),renk:m2<0?"var(--red)":"var(--cyan)"}; }),
     ...RG.filter(x=>x.tip==="tabla").map(x=>({t:"🧹 Tabla ücreti",alt:(x.yer||"Atölye")+" · "+fmtS(x.tarih),v:"+"+tl(x.tutar),renk:"var(--violet)"}))];
@@ -1358,12 +1386,15 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
         h(Stat,{ik:"💰",v:vv.satAd+" satış",l:tl(vv.ciro)+" ciro ›",renk:"var(--green)",onClick:()=>ac("💰","#16a34a","Kale satışları",satRows)}),
         h(Stat,{ik:"🧾",v:tl(vv.tah),l:"kale tahsilatı ›",renk:"var(--gold)",onClick:()=>ac("🧾","#d97b12","Tahsilatlar",tahRows)}),
-        h(Stat,{ik:"🏢",v:tl(vv.tikita),l:"Tikita'nın payı",renk:"var(--green)"}),
+        h(Stat,{ik:"🏢",v:tl(vv.tikita),l:"Tikita'ya teslim",renk:"var(--green)"}),
         h(Stat,{ik:"🫰",v:tl(vv.hak),l:"hakedişin (satış − alış) ›",renk:"var(--gold)",onClick:()=>ac("🫰","#d97b12","Hakediş dökümü",hakRows)}),
         h(Stat,{ik:"🏬",v:vv.konsAd+" adet",l:"konsinye bırakılan ›",renk:"var(--violet)",onClick:()=>ac("🏬","#7c46e6","Bırakılan konsinyeler",konsRows)}),
         vv.ganimet>0&&h(Stat,{ik:"⚡",v:tl(vv.ganimet),l:"gerilla ganimet ›",renk:"var(--cyan)",onClick:()=>ac("⚡","#0e8fce","Gerilla satışları",gerRows)}),
         vv.iade>0&&h(Stat,{ik:"↩️",v:vv.iade+" adet",l:"iade alınan ›",renk:"var(--mut)",onClick:()=>ac("↩️","#64748b","İadeler",iadeRows)}),
         vv.hediyeAd>0&&h(Stat,{ik:"🎁",v:vv.hediyeAd+" adet",l:"hediye verilen ›",renk:"#db2777",onClick:()=>ac("🎁","#db2777","Hediye verilenler",hedRows)})),
+      (vv.nakit>0.5)?h("div",{style:{marginTop:12,padding:"10px 12px",borderRadius:12,background:"#f0fdf4",border:"1px solid #86efac",
+        fontSize:11.5,fontWeight:700,color:"#166534",lineHeight:1.5}},
+        "💵 Topladığın "+tl(vv.nakit)+" nakdin tamamı Tikita'ya teslim edilir. Hakedişin bu paradan kesilmez — satışta doğdu, haftalık dönemde ayrıca ödenir."):null,
       zararli.length?h("div",{style:{marginTop:14,padding:"12px 13px",borderRadius:14,background:"#fff7ed",border:"1px solid #fdba74"}},
         h("div",{style:{fontSize:13,fontWeight:800,color:"#9a3412",marginBottom:10}},"Maliyetin altında verilen ürünler"),
         zararli.map((x,i)=>{ const th=num(x.adet)*num(x.satisFiyat), K=num(x.adet)*num(x.alisFiyat); const on=!!hediyeSec[x.id]; const bdv=bedava(x);
