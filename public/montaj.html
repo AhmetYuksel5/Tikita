@@ -74,7 +74,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="M5";
+const SURUM="M6";
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // 👁 yönetici görünümü
 let BEN_ID=AS_ID||REAL_ID;
@@ -194,7 +194,15 @@ function App(){
   const liste=sekme==="acik"?acik:sekme==="montajda"?montajda:biten;
 
   async function teslimAl(g,n){ if(bekle) return; setBekle(true);
-    try{ await save("montaj_gorev",{id:g.id,durum:"alindi",alinanAdet:n,alinanTarih:new Date().toISOString()});
+    try{
+      /* 📦 mal atölyeden montajcıya geçiyor — bu da bir stok hareketidir.
+         Eskiden yalnız görev kaydı güncelleniyordu, ürünün geçmişinde hiç iz kalmıyordu;
+         "kimde ne var" ile "üründe ne var" birbirini tutmuyordu. */
+      let hid="";
+      if(g.urunId){ hid=uid();
+        await save("stok_hareket",{id:hid,urunId:g.urunId,urunAd:g.urunAd||"",delta:-Math.abs(num(n)),
+          sebep:"montajCikis",bakiye:false,yer:(ben&&ben.ad)||"Montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"}); }
+      await save("montaj_gorev",{id:g.id,durum:"alindi",alinanAdet:n,alinanTarih:new Date().toISOString(),alimHareketId:hid});
       setSheet(null); say(n+" adet teslim alındı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
 
@@ -217,7 +225,9 @@ function App(){
           if(sg>0) patch.stokta=increment(sg); if(ks>0) patch.zayiat=increment(ks);
           await save("stok_urun",patch); }
         if(sg>0){ etki.hareketId=uid();
-          await save("stok_hareket",{id:etki.hareketId,urunId:u.id,urunAd:u.ad||"",delta:sg,sebep:"montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"}); }
+          await save("stok_hareket",{id:etki.hareketId,urunId:u.id,urunAd:u.ad||"",delta:sg,sebep:"montaj",yer:(ben&&ben.ad)||"Montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"}); }
+        if(ks>0){ etki.zayiatHareketId=uid();   // kusurlular da geçmişte görünsün
+          await save("stok_hareket",{id:etki.zayiatHareketId,urunId:u.id,urunAd:u.ad||"",delta:-ks,sebep:"montajZayiat",bakiye:false,yer:(ben&&ben.ad)||"Montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"}); }
       }
       let kalanId="";
       if(kalan>0){ kalanId=uid();   // kısmi teslim → kalan için otomatik yeni görev
