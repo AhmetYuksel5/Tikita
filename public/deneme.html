@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v93";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v94";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -138,6 +138,7 @@ function hakedisHesap(har,ts,esik,sirketPaz){
   const E=num(esik!=null?esik:1);
   const byU={};
   let hakedis=0,ciro=0,verisBedel=0,adet=0,gerNakit=0,eksiVar=false,bedavaAdet=0;
+  const byG={};   // 📅 gün + kale kırılımı — "ne zaman, nerede, ne ciro, ne hakediş"
   sat.forEach(x=>{
     const a=Math.max(0,num(x.adet)), fiyat=num(x.satisFiyat), veris=num(x.alisFiyat);
     const bedava=fiyat<=E;
@@ -150,12 +151,22 @@ function hakedisHesap(har,ts,esik,sirketPaz){
     byU[k].adet+=a; byU[k].ciro+=a*fiyat; byU[k].veris+=a*veris; byU[k].hakedis+=tutar;
     if(bedava) byU[k].bedava+=a;
     hakedis+=tutar; ciro+=a*fiyat; verisBedel+=a*veris; adet+=a;
-    if(x.gerilla||x.kaynak==="gerilla") gerNakit+=a*fiyat;
+    const ger=!!(x.gerilla||x.kaynak==="gerilla");
+    if(ger) gerNakit+=a*fiyat;
+    // 📅 gün + kale kırılımı: aynı kaleye aynı gün yapılan satışlar tek satırda toplanır
+    const g0=new Date(x.tarih); g0.setHours(0,0,0,0); const gun=g0.getTime()||0;
+    const kale=ger?"⚡ Seyyar":((x.yer||"").trim()||"—");
+    const gk=gun+"|"+kale;
+    const o=byG[gk]||(byG[gk]={gun,kale,gerilla:ger,adet:0,ciro:0,veris:0,hakedis:0,bedava:0,kayit:0});
+    o.adet+=a; o.ciro+=a*fiyat; o.veris+=a*veris; o.hakedis+=tutar; o.kayit++;
+    if(bedava) o.bedava+=a;
   });
   const tahNakit=(har||[]).filter(x=>x.tip==="tahsilat"&&ic(x)).reduce((s,x)=>s+num(x.tutar),0);
   const urunler=Object.keys(byU).map(k=>({...byU[k]})).sort((a,b)=>b.hakedis-a.hakedis);
+  // en yeni gün üstte; aynı günde çok ciro yapan kale önce
+  const satirlar=Object.keys(byG).map(k=>({...byG[k]})).sort((a,b)=>b.gun-a.gun||b.ciro-a.ciro);
   return {b0,b1,kod:haftaKod(ts),etiket:haftaEtiket(ts),satisKayit:sat.length,
-    urunler,hakedis,ciro,verisBedel,adet,gerNakit,tahNakit,nakit:gerNakit+tahNakit,eksiVar,bedavaAdet,
+    urunler,satirlar,hakedis,ciro,verisBedel,adet,gerNakit,tahNakit,nakit:gerNakit+tahNakit,eksiVar,bedavaAdet,
     sirketPaz:!!sirketPaz, gecerli:b0>=HAKEDIS_BAS_MS};
 }
 /* 💵 SAHA NAKDİ — pazarlamacının topladığı ama henüz teslim etmediği para.
@@ -1165,14 +1176,24 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,say}){
     HD.bedavaAdet>0?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#f1f5f9",
       fontSize:11.5,fontWeight:700,color:"#475569",marginBottom:12}},
       HD.bedavaAdet+" adet sembolik fiyatla (bedava) verilmiş — hakediş doğurmaz."):null,
-    h("div",{style:{fontSize:11.5,fontWeight:800,color:"var(--mut)",letterSpacing:.6,marginBottom:6}},"ÜRÜN DÖKÜMÜ"),
-    HD.urunler.length?HD.urunler.map((u,i)=>h("div",{key:i,style:{display:"flex",alignItems:"baseline",gap:9,
+    /* 📅 GÜN · KALE DÖKÜMÜ — "ne zaman, hangi kale, ne ciro yaptım, ne hakediş ettim".
+       Ürün kırılımı yerine bu; pazarlamacı gününü ve kalesini böyle hatırlıyor. */
+    h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:6}},
+      h("div",{style:{fontSize:11.5,fontWeight:800,color:"var(--mut)",letterSpacing:.6}},"GÜN · KALE DÖKÜMÜ"),
+      HD.satirlar.length?h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut2)"}},HD.satirlar.length+" satır"):null),
+    HD.satirlar.length?HD.satirlar.map((s,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:9,
         padding:"9px 0",borderBottom:"1px solid var(--line)"}},
       h("div",{style:{flex:1,minWidth:0}},
-        h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
-        h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},
-          u.adet+" adet · "+tl(u.ciro)+" − "+tl(u.veris)+(u.bedava?(" · "+u.bedava+" bedava"):""))),
-      h("div",{style:{fontSize:13.5,fontWeight:800,color:u.hakedis<0?"var(--red)":"var(--gold)",whiteSpace:"nowrap"}},tl(u.hakedis))))
+        h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+          color:s.gerilla?"var(--cyan)":"var(--txt)"}},s.kale),
+        h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:2}},
+          gunKisa(s.gun)+" · "+s.adet+" adet"+(s.bedava?(" · "+s.bedava+" bedava"):""))),
+      h("div",{style:{textAlign:"right",flexShrink:0}},
+        h("div",{style:{fontSize:13,fontWeight:800,color:"var(--green)"}},tl(s.ciro)),
+        h("div",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:700,marginTop:1}},"ciro")),
+      h("div",{style:{textAlign:"right",flexShrink:0,minWidth:74}},
+        h("div",{style:{fontSize:13.5,fontWeight:800,color:s.hakedis<0?"var(--red)":"var(--gold)"}},tl(s.hakedis)),
+        h("div",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:700,marginTop:1}},"hakediş"))))
       :h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)",fontSize:12.5}},"Bu dönemde satış yok"),
     h("div",{style:{marginTop:14,padding:"11px 13px",borderRadius:12,background:"#eff8fd",border:"1px solid #a5d8f3"}},
       h("div",{style:{fontSize:11.5,fontWeight:800,color:"#0369a1",marginBottom:5}},"KOMUTAYA TESLİM EDİLECEK NAKİT"),
