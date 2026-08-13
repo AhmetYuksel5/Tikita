@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v92";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v93";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -220,6 +220,25 @@ async function overpassAdAra(t,merkez){
 }
 const ilceOf=a=>a?(a.town||a.district||a.city_district||a.suburb||a.county||""):"";
 const adNorm=s=>String(s||"").toLocaleLowerCase("tr").replace(/\s+/g," ").trim();
+/* 🔁 AYNI DÜKKÂN İKİ KEZ AÇILMASIN. Aynı mekân iki ayrı müşteri kaydı olarak
+   kaydedilirse satışlar ikiye bölünür: kale listesinde aynı isim iki kez çıkar,
+   borç bölünür, tahsilatı iki yerden yapmak gerekir. Ad ve konum birlikte bakılır. */
+const kaleAnahtar=s=>adNorm(s).replace(/[().,\-_/\\]/g," ").replace(/\s+/g," ").trim();
+const mesafeM=(a,b,c,d2)=>{ const R=6371000, r=Math.PI/180;
+  const dLat=(c-a)*r, dLng=(d2-b)*r, la=a*r, lc=c*r;
+  const h2=Math.sin(dLat/2)**2+Math.cos(la)*Math.cos(lc)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(h2))); };
+function benzerKaleler(ad,lat,lng,liste,haricId){
+  const A=kaleAnahtar(ad); const la=parseFloat(lat), lo=parseFloat(lng);
+  const out=[];
+  (liste||[]).forEach(k=>{ if(!k||(haricId&&(k.id===haricId||k.musteriId===haricId))) return;
+    const B=kaleAnahtar(k.ad); let sebep="";
+    if(A&&B&&(A===B||(A.length>=4&&B.indexOf(A)>=0)||(B.length>=4&&A.indexOf(B)>=0))) sebep="ad";
+    if(!sebep&&isFinite(la)&&isFinite(lo)&&parseFloat(k.lat)&&parseFloat(k.lng)){
+      const m=mesafeM(la,lo,parseFloat(k.lat),parseFloat(k.lng));
+      if(m<=60) sebep="konum"; }
+    if(sebep) out.push({...k,sebep}); });
+  return out; }
 const KESIF_KAT=[["kafe","☕ Kafe"],["market","🛒 Market"],["kırtasiye","📚 Kırtasiye"],["oyuncakçı","🧸 Oyuncakçı"],["hediyelik eşya","🎁 Hediyelik"],["tekel","🏪 Tekel"]];
 // dönem raporu hesabı (detaylı rapor + PDF için)
 function donemAralik(kod){ const g=new Date(); g.setHours(0,0,0,0);
@@ -1821,7 +1840,7 @@ function GerillaSheet({d,onClose,onFire}){
               paraN>=maliyet?("🫰 Hakedişin: "+tl(paraN-maliyet)):("⚠ Alış toplamının altında — en az "+tl(maliyet))):null):null));
 }
 /* ————— YENİ KALE (müşteri) ekle — konumlu (ana uygulamadaki KonumSec sistemi) ————— */
-function YeniKaleSheet({onClose,onKaydet,bekle,ilk,kayit,onArsiv,onSil}){
+function YeniKaleSheet({onClose,onKaydet,bekle,ilk,kayit,onArsiv,onSil,mevcut,onVarOlan}){
   const duzen=!!(kayit&&(kayit.id||kayit.key));
   const [ad,setAd]=useState(duzen?(kayit.ad||""):"");
   const [bolge,setBolge]=useState(duzen?(kayit.bolge||""):"");
@@ -1892,10 +1911,28 @@ function YeniKaleSheet({onClose,onKaydet,bekle,ilk,kayit,onArsiv,onSil}){
     if(lat&&lng){ const ll=[+lat,+lng]; mkRef.current.setLatLng(ll); mapObj.current.setView(ll,16); }
     else mapObj.current.setView([merkez.lat,merkez.lng],mapObj.current.getZoom());
   },[lat,lng,merkez]);
-  return h(Sheet,{ik:duzen?"✏️":"🏰",hex:"#16a34a",baslik:duzen?("Düzenle · "+(kayit.ad||"")):"Yeni kale (müşteri)",
+  // 🔁 aynı dükkân zaten var mı — yeni eklerken uyar, var olanı aç
+  const benzer=duzen?[]:benzerKaleler(adSon(),lat,lng,mevcut,null);
+  return h(Sheet,{ik:duzen?"✏️":"🏰",hex:benzer.length?"#d97b12":"#16a34a",baslik:duzen?("Düzenle · "+(kayit.ad||"")):"Yeni kale (müşteri)",
     alt:duzen?"bilgileri güncelle":"ilk satış/konsinyeyle kaleye dönüşür",onClose,
-    cta:bekle?"⏳…":(duzen?"💾 Kaydet":"🏰 Ekle ve ilk akını yap"),disabled:!(ad.trim()||(lat&&lng))||bekle,
-    onCta:()=>onKaydet({id:duzen?(kayit.id||null):null,key:duzen?(kayit.key||null):null,ad:adSon(),bolge:bolge.trim(),telefon:tel.trim(),not:not.trim(),lat,lng})},
+    cta:bekle?"⏳…":(duzen?"💾 Kaydet":(benzer.length?"⚠️ Yine de yeni kale ekle":"🏰 Ekle ve ilk akını yap")),
+    disabled:!(ad.trim()||(lat&&lng))||bekle,
+    onCta:()=>{ if(benzer.length&&!confirm("⚠️ Aynı dükkân zaten kayıtlı:\n"+benzer.map(x=>"• "+x.ad).join("\n")
+        +"\n\nYine de İKİNCİ bir kale açılsın mı?\nAçarsan satışlar ve borç ikiye bölünür.")) return;
+      onKaydet({id:duzen?(kayit.id||null):null,key:duzen?(kayit.key||null):null,ad:adSon(),bolge:bolge.trim(),telefon:tel.trim(),not:not.trim(),lat,lng}); }},
+    benzer.length?h("div",{style:{padding:"12px 13px",borderRadius:14,marginBottom:14,background:"#fff7ed",border:"1px solid #fdba74"}},
+      h("div",{style:{fontSize:13,fontWeight:800,color:"#9a3412",marginBottom:4}},"⚠️ Bu kale zaten kayıtlı"),
+      h("div",{style:{fontSize:11.5,color:"#9a3412",lineHeight:1.5,marginBottom:9}},
+        "İkinci kez eklersen satışlar iki kaleye bölünür, borcu iki yerden tahsil etmen gerekir."),
+      benzer.map((x,i)=>h("button",{key:x.key||x.id||i,onClick:()=>onVarOlan&&onVarOlan(x),
+        style:{display:"flex",alignItems:"center",gap:9,width:"100%",textAlign:"left",padding:"10px 11px",borderRadius:11,
+          marginBottom:i<benzer.length-1?7:0,background:"var(--surf)",border:"1px solid var(--line)"}},
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},x.ad),
+          h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},
+            (x.sebep==="konum"?"📍 aynı konumda":"aynı isim")+(x.bolge?(" · "+x.bolge):"")
+            +(num(x.borc)>0.5?(" · borç "+tl(x.borc)):""))),
+        h("span",{style:{fontSize:12,fontWeight:800,color:"var(--cyan)",flexShrink:0}},"Bunu aç ›")))):null,
     h("div",{className:"lbl",style:{marginBottom:8}},"Mekan adı (isteğe bağlı) — yaz, konumuyla bulunsun"),
     h("div",{style:{display:"flex",gap:8,marginBottom:6}},
       h("input",{value:ad,onChange:e=>{touched.current=true;setAd(e.target.value);},placeholder:"örn. Moda Kafe",
@@ -2707,6 +2744,8 @@ function App(){
     yeniKale&&h(YeniKaleSheet,{bekle:ykBekle,
       ilk:(typeof yeniKale==="object"&&yeniKale.lat&&!yeniKale.kayit)?yeniKale:null,
       kayit:(typeof yeniKale==="object"&&yeniKale.kayit)?yeniKale.kayit:null,
+      mevcut:[...(d?d.kaleler:[]),...adayGoster],
+      onVarOlan:x=>{ setYeniKale(false); if(x&&x.key){ const k2=(d.kaleler||[]).find(y=>y.key===x.key); if(k2){ setKale(k2); return; } } setAdaySec(x); },
       onArsiv:kaleArsivle,onSil:kaleSil,onClose:()=>setYeniKale(false),onKaydet:yeniKaleKaydet}),
     urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),
       recs:emirHar.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
