@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v94";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v95";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -109,6 +109,15 @@ const seriListe=u=>{ if(!u) return [];
   kay.forEach(kat); kat(u.seri);
   return L; };
 const seriMetin=u=>seriListe(u).join(" · ");
+/* 🆕 ÜRÜNÜN KAYIT ZAMANI — ayrı bir tarih alanı yoksa belge kimliğinden çözülür.
+   uid() zaman damgasının 36'lık tabanıyla başladığı için kimlik kendiliğinden
+   tarih sıralı; eski ürünlerde de doğru sonuç verir. */
+const urunZaman=u=>{ if(!u) return 0;
+  const e=Date.parse(u.eklendi||""); if(!isNaN(e)) return e;
+  const t=parseInt(String(u.id||"").slice(0,8),36);
+  return (isFinite(t)&&t>1e12&&t<4e12)?t:0; };
+const enYeniUrunler=(list,n)=>(list||[]).filter(u=>u&&urunZaman(u)>0)
+  .sort((a,b)=>urunZaman(b)-urunZaman(a)).slice(0,Math.max(1,num(n)||10));
 
 /* ═══ 🗓 HAKEDİŞ DÖNEMİ — Cumartesi 00:00 → Cuma 23:59 ═══
    Hakediş TAHSİLATA DEĞİL, gerçekleşen SATIŞA bağlıdır.
@@ -453,7 +462,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const gorevler=kaleler.filter(k=>k.durum.key!=="saglam").sort((a,b)=>oncelik[a.durum.key]-oncelik[b.durum.key]||b.guc-a.guc);
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
-  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",seriler:seriListe(u),stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
+  const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",eklendi:u.eklendi||"",seriler:seriListe(u),stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
     .filter(u=>u.ad!=="?").sort((a,b)=>(b.canta-a.canta)||(b.stokta-a.stokta));
   const cantaTop=cephane.reduce((s,u)=>s+u.canta,0);
   // rozetler (kazanılan başarımlar)
@@ -938,17 +947,24 @@ function Cephane({d,say,cantaAc,openUrun}){
       const t=String(sr||"").trim(); if(t) m[t.toLocaleLowerCase("tr")]=t; }));
     return Object.keys(m).map(k=>m[k]).sort((a,b)=>a.localeCompare(b,"tr")); })();
   const uye=u=>(u.seriler||[]).some(x=>String(x).toLocaleLowerCase("tr")===seri.toLocaleLowerCase("tr"));
-  const liste=!seri?(d.cephane||[]):(seri==="_"?(d.cephane||[]).filter(u=>!(u.seriler||[]).length):(d.cephane||[]).filter(uye));
+  const YENI_SAY=10;   // 🆕 en son eklenen kaç ürün gösterilsin
+  const yeniler=enYeniUrunler(d.cephane,YENI_SAY);
+  const liste=seri==="yeni"?yeniler
+    :(!seri?(d.cephane||[]):(seri==="_"?(d.cephane||[]).filter(u=>!(u.seriler||[]).length):(d.cephane||[]).filter(uye)));
   const seriCanta=liste.reduce((s,u)=>s+num(u.canta),0);
+  const cubuk=(d.cephane||[]).length>0;   // seri olmasa da "En yeniler" sekmesi için çubuk çıkar
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"🎒 Cephane"),
       h("div",{style:{fontSize:13,color:"var(--mut)",fontWeight:600}},
         seri?(liste.length+" ürün · çantanda "+seriCanta):("çantanda "+d.cantaTop+" varlık"))),
-    seriAd.length?h("div",{style:{display:"flex",gap:7,overflowX:"auto",paddingBottom:8,marginBottom:12}},
+    cubuk?h("div",{style:{display:"flex",gap:7,overflowX:"auto",paddingBottom:8,marginBottom:12}},
       h(Chip,{on:!seri,onClick:()=>setSeri("")},"Tümü"),
+      yeniler.length?h(Chip,{on:seri==="yeni",onClick:()=>setSeri(seri==="yeni"?"":"yeni")},"🆕 En yeniler"):null,
       seriAd.map(sr=>h(Chip,{key:sr,on:seri===sr,onClick:()=>setSeri(seri===sr?"":sr)},"🗂 "+sr)),
-      (d.cephane||[]).some(u=>!(u.seriler||[]).length)?h(Chip,{on:seri==="_",onClick:()=>setSeri(seri==="_"?"":"_")},"Serisiz"):null):null,
+      (seriAd.length&&(d.cephane||[]).some(u=>!(u.seriler||[]).length))?h(Chip,{on:seri==="_",onClick:()=>setSeri(seri==="_"?"":"_")},"Serisiz"):null):null,
+    seri==="yeni"?h("div",{style:{fontSize:11.5,color:"var(--mut)",fontWeight:700,marginBottom:10,marginTop:-4}},
+      "En son eklenen "+liste.length+" ürün · yeniden eskiye"):null,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,paddingBottom:84}},
       liste.map((u,i)=>h("button",{key:u.id||i,onClick:()=>openUrun(u),className:"card",style:{padding:"15px 14px",position:"relative",overflow:"hidden",textAlign:"left"}},
         u.canta>0&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"var(--gold)",background:"#d97b1218",padding:"2px 8px",borderRadius:8}},"🎒 "+u.canta),
