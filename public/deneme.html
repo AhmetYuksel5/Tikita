@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v95";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v96";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -982,14 +982,16 @@ function Cephane({d,say,cantaAc,openUrun}){
 }
 
 /* ————— RAPOR ————— */
-function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,hakDonemler,onHakGonder,benId,onNakitTeslim}){ const ovN=(ovList||[]).length;
-  const [hakAcik,setHakAcik]=useState(false);
+function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,hakDonemler,onHakGonder,benId,onNakitTeslim,simdi}){
+  const NOW=simdi||Date.now();   // 🕐 "şimdi" dışarıdan verilebilir — dönem geçişleri böyle sınanıyor
+  const ovN=(ovList||[]).length;
+  const [hakAcik,setHakAcik]=useState(null);   // null · "bu" (içinde bulunulan hafta) · geçmiş haftanın başlangıcı (ms)
   const [nakitAcik,setNakitAcik]=useState(false);
   const [detay,setDetay]=useState(false);
   const [det,setDet]=useState(null);   // üst kutu ayrıntıları — klasik modal
   const fmt2=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
   const {ciroRows,hakRows2,ganimetRows,alacakRows,tablaRows}=useMemo(()=>{
-    const haf=haftaBasMs(Date.now());
+    const haf=haftaBasMs(NOW);
     const hs=(hareketler||[]).filter(x=>x.tip==="satis"&&new Date(x.tarih).getTime()>=haf).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
     const ciroRows=hs.map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),alt:(x.yer||"—")+" · "+fmt2(x.tarih),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"}));
     const hakRows2=hs.map(x=>{const m2=num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat));
@@ -1004,16 +1006,24 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
     return {ciroRows,hakRows2,ganimetRows,alacakRows,tablaRows}; },[hareketler,d]);
   // 🫰 bu dönemin hakedişi — Cumartesi 00:00 → Cuma 23:59
   const sirketPaz=!!(d&&d.emir&&d.emir.sirketPaz);
-  const HD=useMemo(()=>hakedisHesap(hareketler,Date.now(),BEDAVA_ESIK,sirketPaz),[hareketler,sirketPaz]);
+  const HD=useMemo(()=>hakedisHesap(hareketler,NOW,BEDAVA_ESIK,sirketPaz),[hareketler,sirketPaz]);
   const ND=useMemo(()=>nakitDurum(hareketler),[hareketler]);
   const kayitBul=kod=>(hakDonemler||[]).find(x=>x.hafta===kod&&x.kullaniciId===benId)||null;
   const buKayit=kayitBul(HD.kod);
-  const gecmisD=useMemo(()=>hakedisDonemler(hareketler).slice(1).map(t=>{
+  const gecmisD=useMemo(()=>hakedisDonemler(hareketler,NOW).slice(1).map(t=>{
     const o=hakedisHesap(hareketler,t,BEDAVA_ESIK,sirketPaz); return {...o,kayit:kayitBul(o.kod)}; }),[hareketler,hakDonemler,sirketPaz]);
-  const bekleyen=gecmisD.filter(x=>!x.kayit&&x.hakedis>0.5);
+  /* 🗓 KAPATILMAMIŞ DÖNEMLER — Cuma gecesi yeni haftaya geçilir ama kapatılmayan
+     hafta kaybolmaz; kaç tane birikmişse hepsi burada durur ve tek tek gönderilebilir.
+     Hakediş sıfır olsa bile hareket varsa listelenir — pazarlamacı ne olduğunu görsün. */
+  const acikDonemler=gecmisD.filter(x=>!x.kayit&&(x.hakedis>0.5||x.adet>0||x.nakit>0.5));
+  const bekleyen=acikDonemler.filter(x=>x.hakedis>0.5);
+  // açılan dönem: "bu" ise içinde bulunulan hafta, değilse seçilen geçmiş hafta
+  const acikHD=useMemo(()=>!hakAcik?null:(hakAcik==="bu"?HD:hakedisHesap(hareketler,hakAcik,BEDAVA_ESIK,sirketPaz)),
+    [hakAcik,HD,hareketler,sirketPaz]);
+  const acikKayit=acikHD?kayitBul(acikHD.kod):null;
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:14}},"📊 Rapor"),
-    HD.gecerli?h("button",{onClick:()=>setHakAcik(true),className:"card",style:{width:"100%",padding:"15px 16px",marginBottom:12,
+    HD.gecerli?h("button",{onClick:()=>setHakAcik("bu"),className:"card",style:{width:"100%",padding:"15px 16px",marginBottom:12,
         textAlign:"left",boxShadow:"none",border:"1px solid "+(buKayit?"#86efac":"#d9b25a"),
         background:buKayit?"linear-gradient(120deg,#f0fdf4,#fff)":"linear-gradient(120deg,#fffaf0,#fff)"}},
       h("div",{style:{display:"flex",alignItems:"center",gap:11}},
@@ -1032,8 +1042,28 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
         :(buKayit?("✅ Gönderildi · "+(buKayit.durum==="odendi"?"ödendi":(buKayit.durum==="onaylandi"?"onaylandı, ödeme bekleniyor":"komuta onayı bekleniyor")))
                :"Cuma akşamı kapat ve komutaya gönder")),
       bekleyen.length?h("div",{style:{marginTop:7,padding:"8px 11px",borderRadius:10,fontSize:11.5,fontWeight:800,
-        background:"#ffe4e6",color:"#9f1239"}},bekleyen.length+" geçmiş dönem gönderilmemiş"):null):null,
-    hakAcik?h(HakedisSheet,{HD,buKayit,gecmisD,onGonder:onHakGonder,onClose:()=>setHakAcik(false),say}):null,
+        background:"#ffe4e6",color:"#9f1239"}},"⬇️ "+bekleyen.length+" kapatılmamış dönem aşağıda"):null):null,
+    acikDonemler.length?h("div",{style:{marginBottom:12}},
+      h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:7}},
+        h("div",{className:"lbl"},"KAPATILMAMIŞ DÖNEMLER"),
+        h("div",{style:{fontSize:11,fontWeight:800,color:"var(--red)"}},acikDonemler.length+" hafta")),
+      acikDonemler.map((g,i)=>h("button",{key:g.kod||i,onClick:()=>setHakAcik(g.b0),className:"card",
+        style:{width:"100%",padding:"13px 15px",marginBottom:8,textAlign:"left",boxShadow:"none",
+          border:"1px solid #fca5a5",background:"linear-gradient(120deg,#fff5f5,#fff)"}},
+        h("div",{style:{display:"flex",alignItems:"center",gap:11}},
+          h("span",{style:{fontSize:22,flexShrink:0}},"🗓"),
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.etiket),
+            h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:2}},
+              g.adet+" adet · "+tl(g.ciro)+" ciro"+(g.nakit>0.5?(" · "+tl(g.nakit)+" nakit"):""))),
+          h("div",{style:{textAlign:"right",flexShrink:0}},
+            h("div",{style:{fontSize:16,fontWeight:800,color:g.hakedis>0.5?"var(--gold)":"var(--mut2)"}},tl(g.hakedis)),
+            h("div",{style:{fontSize:10.5,fontWeight:800,color:"var(--red)",marginTop:1}},"gönderilmedi")),
+          h("span",{style:{fontSize:17,color:"var(--mut2)",flexShrink:0}},"›")))),
+      h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700,lineHeight:1.5,padding:"0 2px"}},
+        "Cuma akşamı kapatılmayan haftalar burada birikir. Her birine dokun, dökümünü gör, komutaya gönder.")):null,
+    acikHD?h(HakedisSheet,{HD:acikHD,buKayit:acikKayit,gecmisD,onGonder:onHakGonder,
+      onSec:t=>setHakAcik(t),onClose:()=>setHakAcik(null),say,simdi:NOW}):null,
     (ND.toplanan>0||ND.teslim>0)?h("button",{onClick:()=>setNakitAcik(true),className:"card",
         style:{width:"100%",padding:"14px 16px",marginBottom:12,textAlign:"left",boxShadow:"none",
           border:"1px solid "+(ND.kalan>0.5?"#7dd3fc":"var(--line)"),
@@ -1050,10 +1080,10 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
           h("div",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:800}},ND.kalan>0.5?"elinde":"temiz")))):null,
     nakitAcik?h(NakitTeslimSheet,{ND,hareketler,onTeslim:onNakitTeslim,onClose:()=>setNakitAcik(false),say}):null,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
-      h(Stat,{ik:"💰",v:tl(d.hafCiro),l:"Bu hafta ciro ›",renk:"var(--green)",onClick:()=>setDet({ik:"💰",hex:"#16a34a",baslik:"Bu hafta satışlar",alt:ciroRows.length+" satış · "+haftaEtiket(Date.now()),rows:ciroRows})}),
-      h(Stat,{ik:"🫰",v:tl(d.hafKar),l:"Bu hafta hakediş ›",renk:"var(--gold)",onClick:()=>setDet({ik:"🫰",hex:"#d97b12",baslik:"Bu hafta hakediş (satış − alış)",alt:haftaEtiket(Date.now()),rows:hakRows2})}),
+      h(Stat,{ik:"💰",v:tl(d.hafCiro),l:"Bu hafta ciro ›",renk:"var(--green)",onClick:()=>setDet({ik:"💰",hex:"#16a34a",baslik:"Bu hafta satışlar",alt:ciroRows.length+" satış · "+haftaEtiket(NOW),rows:ciroRows})}),
+      h(Stat,{ik:"🫰",v:tl(d.hafKar),l:"Bu hafta hakediş ›",renk:"var(--gold)",onClick:()=>setDet({ik:"🫰",hex:"#d97b12",baslik:"Bu hafta hakediş (satış − alış)",alt:haftaEtiket(NOW),rows:hakRows2})}),
       h(Stat,{ik:"⚡",v:tl(d.hafGanimet),l:"Bu hafta ganimet ›",renk:"var(--cyan)",onClick:()=>setDet({ik:"⚡",hex:"#0e8fce",baslik:"Bu hafta gerilla satışları",
-        alt:haftaEtiket(Date.now())+" · "+ganimetRows.length+" satış · tüm zamanlar "+tl(d.gerillaGanimet),rows:ganimetRows})}),
+        alt:haftaEtiket(NOW)+" · "+ganimetRows.length+" satış · tüm zamanlar "+tl(d.gerillaGanimet),rows:ganimetRows})}),
       h(Stat,{ik:"🧾",v:tl(d.borcTop),l:"Toplam açık alacak ›",renk:d.borcTop>0.5?"var(--red)":"var(--green)",onClick:()=>setDet({ik:"🧾",hex:"#e0483c",baslik:"Kale kale açık alacak",alt:alacakRows.length+" kalede borç",rows:alacakRows})})),
     det?h(DetayListSheet,{...det,onClose:()=>setDet(null)}):null,
     // 👑 komuta tabla hakedişi ödeme emri — onayladıysa burada teslim al
@@ -1152,11 +1182,13 @@ function NakitTeslimSheet({ND,hareketler,onTeslim,onClose,say}){
 }
 
 /* 🫰 HAKEDİŞ DÖNEMİ — döküm + komutaya gönder */
-function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,say}){
+function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
+  const NOW=simdi||Date.now();
   const [bekle,setBekle]=useState(false);
-  const [gecmisAcik,setGecmisAcik]=useState(false);
+  // gönderilmemiş geçmiş dönem varsa liste kendiliğinden açık gelsin — saklı kalmasın
+  const [gecmisAcik,setGecmisAcik]=useState(()=>(gecmisD||[]).some(g=>!g.kayit));
   const kapali=!!buKayit;
-  const bitti=Date.now()>HD.b1;   // dönem sona erdi mi
+  const bitti=NOW>HD.b1;   // dönem sona erdi mi
   const K=buKayit||null;
   const satir=(ad,v,renk,kalin)=>h("div",{style:{display:"flex",alignItems:"baseline",gap:10,padding:"8px 0",
       borderTop:kalin?"1.5px solid var(--line)":"none"}},
@@ -1174,7 +1206,8 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,say}){
     finally{ setBekle(false); }
   }
   return h(Sheet,{ik:"🫰",hex:"#d97b12",baslik:"Hakediş · "+HD.etiket,
-    alt:kapali?("gönderildi · "+(K.durum==="odendi"?"ödendi":(K.durum==="onaylandi"?"onaylandı":"onay bekliyor"))):(bitti?"dönem kapandı":"dönem sürüyor"),
+    alt:kapali?("gönderildi · "+(K.durum==="odendi"?"ödendi":(K.durum==="onaylandi"?"onaylandı":"onay bekliyor")))
+      :(bitti?"dönem kapandı · gönderilmedi":"dönem sürüyor"),
     onClose,cta:(kapali||HD.sirketPaz)?"Kapat":(bekle?"Gönderiliyor…":"📤 Komutaya gönder"),
     onCta:(kapali||HD.sirketPaz)?onClose:gonder,disabled:bekle||(!kapali&&!HD.sirketPaz&&HD.hakedis<=0)},
     h("div",{style:{background:"var(--surf2)",borderRadius:14,padding:"12px 14px",marginBottom:14}},
@@ -1219,17 +1252,22 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,say}){
     h("button",{onClick:()=>setGecmisAcik(!gecmisAcik),style:{width:"100%",marginTop:14,padding:"11px 13px",
       borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},
       (gecmisAcik?"▾":"▸")+" Geçmiş dönemler ("+gecmisD.length+")"),
+    /* her geçmiş dönem tıklanabilir: dokununca o haftanın dökümü açılır ve
+       gönderilmemişse aynı ekrandan komutaya gönderilir */
     gecmisAcik?h("div",{style:{marginTop:8}},
-      gecmisD.length?gecmisD.map((g,i)=>h("div",{key:i,style:{display:"flex",alignItems:"center",gap:9,
-          padding:"10px 0",borderBottom:"1px solid var(--line)"}},
+      gecmisD.length?gecmisD.map((g,i)=>h("button",{key:i,onClick:()=>onSec&&onSec(g.b0),
+          style:{display:"flex",alignItems:"center",gap:9,width:"100%",textAlign:"left",
+          padding:"10px 0",borderBottom:"1px solid var(--line)",
+          background:g.b0===HD.b0?"#fffaf0":"none"}},
         h("div",{style:{flex:1,minWidth:0}},
-          h("div",{style:{fontSize:13,fontWeight:700}},g.etiket),
+          h("div",{style:{fontSize:13,fontWeight:700}},(g.b0===HD.b0?"▸ ":"")+g.etiket),
           h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},g.adet+" adet · "+tl(g.ciro))),
         h("div",{style:{textAlign:"right"}},
           h("div",{style:{fontSize:13.5,fontWeight:800,color:"var(--gold)"}},tl(g.kayit?num(g.kayit.hakedis):g.hakedis)),
           h("div",{style:{fontSize:10.5,fontWeight:800,marginTop:1,
             color:g.kayit?(g.kayit.durum==="odendi"?"var(--green)":"var(--cyan)"):"var(--red)"}},
-            g.kayit?(g.kayit.durum==="odendi"?"ödendi":(g.kayit.durum==="onaylandi"?"onaylandı":"gönderildi")):"gönderilmedi"))))
+            g.kayit?(g.kayit.durum==="odendi"?"ödendi":(g.kayit.durum==="onaylandi"?"onaylandı":"gönderildi")):"gönderilmedi")),
+        h("span",{style:{fontSize:15,color:"var(--mut2)",flexShrink:0}},"›")))
         :h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",fontSize:12.5}},"Geçmiş dönem yok")):null);
 }
 
