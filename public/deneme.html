@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v96";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v97";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -132,6 +132,17 @@ const haftaKod=t=>{ const b=new Date(haftaBasMs(t));
   return b.getFullYear()+"-"+String(b.getMonth()+1).padStart(2,"0")+"-"+String(b.getDate()).padStart(2,"0"); };
 const gunKisa=t=>new Date(t).toLocaleDateString("tr-TR",{day:"2-digit",month:"short"});
 const haftaEtiket=t=>gunKisa(haftaBasMs(t))+" – "+gunKisa(haftaBitMs(t));
+/* 📅 YILIN KAÇINCI HAFTASI — haftalarımız Cumartesi başladığı için ISO takvimi
+   kullanılamıyor; kendi sınırlarımızla sayılıyor. Yılın 1. haftası, ortası (Salı)
+   o yıla düşen ilk haftadır; böylece yıl dönümünde ne boşluk ne tekrar oluşur. */
+const haftaNo=t=>{ const b=haftaBasMs(t); const orta=b+3*864e5;
+  const y=new Date(orta).getFullYear();
+  let ilk=haftaBasMs(new Date(y,0,1).getTime());
+  if(new Date(ilk+3*864e5).getFullYear()<y) ilk+=7*864e5;
+  return Math.round((b-ilk)/(7*864e5))+1; };
+const haftaYil=t=>new Date(haftaBasMs(t)+3*864e5).getFullYear();
+const haftaAdi=t=>haftaNo(t)+". hafta ("+haftaEtiket(t)+")";
+
 // ay dönemi — tabla hakedişi aylık kapanır
 const ayBasMs=t=>{ const d=new Date(t); return new Date(d.getFullYear(),d.getMonth(),1).getTime(); };
 const ayBitMs=t=>{ const d=new Date(t); return new Date(d.getFullYear(),d.getMonth()+1,0,23,59,59,999).getTime(); };
@@ -987,6 +998,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
   const ovN=(ovList||[]).length;
   const [hakAcik,setHakAcik]=useState(null);   // null · "bu" (içinde bulunulan hafta) · geçmiş haftanın başlangıcı (ms)
   const [nakitAcik,setNakitAcik]=useState(false);
+  const [arsivAcik,setArsivAcik]=useState(false);
   const [detay,setDetay]=useState(false);
   const [det,setDet]=useState(null);   // üst kutu ayrıntıları — klasik modal
   const fmt2=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
@@ -1021,6 +1033,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
   const acikHD=useMemo(()=>!hakAcik?null:(hakAcik==="bu"?HD:hakedisHesap(hareketler,hakAcik,BEDAVA_ESIK,sirketPaz)),
     [hakAcik,HD,hareketler,sirketPaz]);
   const acikKayit=acikHD?kayitBul(acikHD.kod):null;
+  const tumDonem=useMemo(()=>[{...HD,kayit:buKayit},...gecmisD],[HD,buKayit,gecmisD]);   // 🗄 arşiv: bu hafta + geçmiş
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:14}},"📊 Rapor"),
     HD.gecerli?h("button",{onClick:()=>setHakAcik("bu"),className:"card",style:{width:"100%",padding:"15px 16px",marginBottom:12,
@@ -1030,7 +1043,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
         h("span",{style:{fontSize:26}},"🫰"),
         h("div",{style:{flex:1,minWidth:0}},
           h("div",{style:{fontSize:12,color:"var(--mut)",fontWeight:800,letterSpacing:.4}},
-            (HD.sirketPaz?"SATIŞ · ":"HAKEDİŞ · ")+HD.etiket),
+            (HD.sirketPaz?"SATIŞ · ":"HAKEDİŞ · ")+haftaNo(HD.b0)+". HAFTA · "+HD.etiket),
           h("div",{style:{fontSize:24,fontWeight:800,color:HD.sirketPaz?"var(--cyan)":"var(--gold)",lineHeight:1.15,marginTop:2}},
             HD.sirketPaz?tl(HD.ciro):tl(HD.hakedis)),
           h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:2}},
@@ -1053,7 +1066,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
         h("div",{style:{display:"flex",alignItems:"center",gap:11}},
           h("span",{style:{fontSize:22,flexShrink:0}},"🗓"),
           h("div",{style:{flex:1,minWidth:0}},
-            h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.etiket),
+            h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},haftaAdi(g.b0)),
             h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:2}},
               g.adet+" adet · "+tl(g.ciro)+" ciro"+(g.nakit>0.5?(" · "+tl(g.nakit)+" nakit"):""))),
           h("div",{style:{textAlign:"right",flexShrink:0}},
@@ -1062,6 +1075,14 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
           h("span",{style:{fontSize:17,color:"var(--mut2)",flexShrink:0}},"›")))),
       h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700,lineHeight:1.5,padding:"0 2px"}},
         "Cuma akşamı kapatılmayan haftalar burada birikir. Her birine dokun, dökümünü gör, komutaya gönder.")):null,
+    h("button",{onClick:()=>setArsivAcik(true),style:{display:"flex",alignItems:"center",gap:10,width:"100%",
+      padding:"13px 15px",borderRadius:14,marginBottom:12,background:"var(--surf2)",border:"1px solid var(--line)",
+      fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
+      h("span",{style:{fontSize:19,flexShrink:0}},"🗄"),
+      h("span",{style:{flex:1,minWidth:0}},"Haftalık arşiv"),
+      h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},tumDonem.length+" hafta ›")),
+    arsivAcik?h(ArsivSheet,{list:tumDonem,onClose:()=>setArsivAcik(false),
+      onSec:t=>{ setArsivAcik(false); setHakAcik(t===HD.b0?"bu":t); }}):null,
     acikHD?h(HakedisSheet,{HD:acikHD,buKayit:acikKayit,gecmisD,onGonder:onHakGonder,
       onSec:t=>setHakAcik(t),onClose:()=>setHakAcik(null),say,simdi:NOW}):null,
     (ND.toplanan>0||ND.teslim>0)?h("button",{onClick:()=>setNakitAcik(true),className:"card",
@@ -1182,6 +1203,37 @@ function NakitTeslimSheet({ND,hareketler,onTeslim,onClose,say}){
 }
 
 /* 🫰 HAKEDİŞ DÖNEMİ — döküm + komutaya gönder */
+/* 🗄 HAFTALIK ARŞİV — sistemin başladığı haftadan bugüne bütün haftalar.
+   Her hafta yılın kaçıncı haftasıysa o numarayla ve tarih aralığıyla listelenir;
+   dokununca o haftanın raporu açılır. Gönderilmiş de gönderilmemiş de burada. */
+function ArsivSheet({list,onSec,onClose}){
+  const L=list||[];
+  const durumOf=g=>g.kayit
+    ?(g.kayit.durum==="odendi"?["ödendi","#dcfce7","#166534"]
+     :(g.kayit.durum==="onaylandi"?["onaylandı","#e0f2fe","#075985"]:["gönderildi","#e0f2fe","#075985"]))
+    :(g.adet>0||g.nakit>0.5?["gönderilmedi","#ffe4e6","#9f1239"]:["hareket yok","#f1f5f9","#64748b"]);
+  const yilGrup={}; L.forEach(g=>{ (yilGrup[haftaYil(g.b0)]=yilGrup[haftaYil(g.b0)]||[]).push(g); });
+  const yillar=Object.keys(yilGrup).sort((a,b)=>b-a);
+  return h(Sheet,{ik:"🗄",hex:"#334155",baslik:"Haftalık arşiv",
+    alt:L.length?(L.length+" hafta · en yeniden eskiye"):"",onClose,cta:"Kapat",onCta:onClose},
+    yillar.map(y=>h(React.Fragment,{key:y},
+      yillar.length>1?h("div",{className:"lbl",style:{margin:"6px 0 8px"}},y):null,
+      yilGrup[y].map((g,i)=>{ const D2=durumOf(g);
+        return h("button",{key:g.kod||i,onClick:()=>onSec&&onSec(g.b0),
+          style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",
+            padding:"11px 0",borderTop:i?"1px solid var(--line)":"none",background:"none"}},
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:14,fontWeight:800}},haftaNo(g.b0)+". hafta"),
+            h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:2}},
+              g.etiket+(g.adet>0?(" · "+g.adet+" adet · "+tl(g.ciro)):""))),
+          h("div",{style:{textAlign:"right",flexShrink:0}},
+            h("div",{style:{fontSize:14.5,fontWeight:800,color:g.hakedis>0.5?"var(--gold)":"var(--mut2)"}},
+              tl(g.kayit?num(g.kayit.hakedis):g.hakedis)),
+            h("span",{style:{display:"inline-block",marginTop:3,fontSize:10,fontWeight:800,padding:"2px 7px",
+              borderRadius:5,background:D2[1],color:D2[2]}},D2[0])),
+          h("span",{style:{fontSize:15,color:"var(--mut2)",flexShrink:0}},"›")); }))),
+    L.length?null:h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Arşivde hafta yok."));
+}
 function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
   const NOW=simdi||Date.now();
   const [bekle,setBekle]=useState(false);
@@ -1205,9 +1257,9 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
     catch(e){ say&&say("⚠ Gönderilemedi"); }
     finally{ setBekle(false); }
   }
-  return h(Sheet,{ik:"🫰",hex:"#d97b12",baslik:"Hakediş · "+HD.etiket,
-    alt:kapali?("gönderildi · "+(K.durum==="odendi"?"ödendi":(K.durum==="onaylandi"?"onaylandı":"onay bekliyor")))
-      :(bitti?"dönem kapandı · gönderilmedi":"dönem sürüyor"),
+  return h(Sheet,{ik:"🫰",hex:"#d97b12",baslik:"Hakediş · "+haftaNo(HD.b0)+". hafta",
+    alt:HD.etiket+" · "+(kapali?(K.durum==="odendi"?"ödendi":(K.durum==="onaylandi"?"onaylandı":"onay bekliyor"))
+      :(bitti?"gönderilmedi":"dönem sürüyor")),
     onClose,cta:(kapali||HD.sirketPaz)?"Kapat":(bekle?"Gönderiliyor…":"📤 Komutaya gönder"),
     onCta:(kapali||HD.sirketPaz)?onClose:gonder,disabled:bekle||(!kapali&&!HD.sirketPaz&&HD.hakedis<=0)},
     h("div",{style:{background:"var(--surf2)",borderRadius:14,padding:"12px 14px",marginBottom:14}},
@@ -1260,7 +1312,7 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
           padding:"10px 0",borderBottom:"1px solid var(--line)",
           background:g.b0===HD.b0?"#fffaf0":"none"}},
         h("div",{style:{flex:1,minWidth:0}},
-          h("div",{style:{fontSize:13,fontWeight:700}},(g.b0===HD.b0?"▸ ":"")+g.etiket),
+          h("div",{style:{fontSize:13,fontWeight:700}},(g.b0===HD.b0?"▸ ":"")+haftaAdi(g.b0)),
           h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1}},g.adet+" adet · "+tl(g.ciro))),
         h("div",{style:{textAlign:"right"}},
           h("div",{style:{fontSize:13.5,fontWeight:800,color:"var(--gold)"}},tl(g.kayit?num(g.kayit.hakedis):g.hakedis)),
