@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L24";   // komuta (admin) deneme sürümü
+const SURUM="L25";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -3533,6 +3533,14 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
     acik:()=>({ik:"🏬",hex:"#7c46e6",baslik:"Toplam açık konsinye",rows:acikRecs.map(x=>({t:num(x.kalan)+" × "+(x.urunAd||"?"),alt:yerAd(x)+" · "+(x.kullaniciAd||"?"),v:tl(num(x.kalan)*num(x.satisFiyat)),renk:"var(--txt)"}))}),
     sat:()=>({ik:"✅",hex:"#16a34a",baslik:"Konsinyeden satılan · "+((donemler.find(x=>x[0]===kod)||["",""])[1]),rows:srt(satRecs).map(x=>harRow(x,tl(num(x.adet)*num(x.satisFiyat)),"var(--green)"))}),
     tah:()=>({ik:"🧾",hex:"#d97b12",baslik:"Tahsilatlar",rows:srt(R.filter(x=>x.tip==="tahsilat")).map(x=>({t:(x.kullaniciAd||"?")+" · "+yerAd(x),alt:fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}))}),
+    /* 💵 Toplanan nakit = tahsilat kayıtları + gerilla satışları.
+       Gerilla parası satışın kendi 'tahsil' alanında durur, ayrı tahsilat kaydı doğurmaz
+       (deneme.html · gerilla yazım yolu) — bu yüzden ikisi birlikte sayılır. nakitDurum ile aynı kural. */
+    nakit:()=>({ik:"💵",hex:"#d97b12",baslik:"Toplanan nakit",
+      rows:srt(R.filter(x=>x.tip==="tahsilat"||(x.tip==="satis"&&x.gerilla))).map(x=>x.tip==="tahsilat"
+        ?{t:(x.kullaniciAd||"?")+" · "+yerAd(x),alt:"tahsilat · "+fmtS(x.tarih),v:tl(x.tutar),renk:"var(--gold)"}
+        :{t:num(x.adet)+" × "+(x.urunAd||"?"),alt:"⚡ gerilla · "+(x.kullaniciAd||"?")+" · "+fmtS(x.tarih),
+          v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"})}),
     hakedis:()=>({ik:"🫰",hex:"#d97b12",baslik:"Hakediş — pazarlamacı bazında",rows:perf.filter(p=>p.hakedis>0||p.sirket).sort((a,b)=>b.hakedis-a.hakedis).map(p=>({t:(p.u.simge||"")+" "+p.u.ad+(p.sirket?" · şirket":""),alt:p.sirket?("satışın tamamı şirkete · "+tl(p.satT+p.gerC)):("tahsilat "+tl(p.nakit)),v:p.sirket?"—":tl(p.hakedis),renk:p.sirket?"var(--mut)":"var(--gold)"}))}),
     uretici:()=>({ik:"🏭",hex:"#334155",baslik:"Üreticiye kalan — pazarlamacı bazında",rows:perf.filter(p=>p.uBorc>0).sort((a,b)=>b.uBorc-a.uBorc).map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"tahsilat "+tl(p.nakit),v:tl(p.uBorc),renk:"var(--txt)"}))}),
     tabla:()=>({ik:"🧹",hex:"#7c46e6",baslik:"Tabla değişimleri",rows:srt(R.filter(x=>x.tip==="tabla")).map(x=>({t:(x.kullaniciAd||"?")+" · "+yerAd(x),alt:fmtS(x.tarih),v:tl(x.tutar),renk:"var(--violet)"}))}),
@@ -3644,7 +3652,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
   const paylas=()=>{ const t="Tikita Komuta — "+new Date().toLocaleDateString("tr-TR")+"\n"
     +"Dönem: "+(donemler.find(x=>x[0]===kod)||["",""])[1]+"\n"
     +"Ciro: "+tl(ciro+T.gerC)+" ("+(adet+T.gerA)+" ad.) · gerilla dahil\n"
-    +"Tahsilat: "+tl(T.tah)+" · hakediş: "+tl(hakMarj)+" · Tikita'ya kalan: "+tl(T.uBorc);
+    +"Tahsilat: "+tl(T.tah+T.gerC)+" · hakediş: "+tl(hakMarj)+" · Tikita'ya kalan: "+tl(T.uBorc);
     window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 84px"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:12,display:"flex",alignItems:"center",gap:8}},
@@ -3707,7 +3715,8 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
             h("span",{style:{fontSize:15,color:"var(--mut2)",flexShrink:0}},"›"))))):null,
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"2px 0 14px"}},
         h(KStat,{ik:h(Icn,{n:"store",c:"var(--green)"}),l:"Ciro",v:tl(ciro+T.gerC),s:(adet+T.gerA)+" adet · etiket",renk:"var(--green)",onClick:()=>setDet(detB.tumSatis())}),
-        h(KStat,{ik:h(Icn,{n:"coins",c:"var(--gold)"}),l:"Tahsilat",v:tl(T.tah),s:"tahsil edilen",renk:"var(--gold)",onClick:()=>setDet(detB.tah())}),
+        h(KStat,{ik:h(Icn,{n:"coins",c:"var(--gold)"}),l:"Tahsilat",v:tl(T.tah+T.gerC),
+          s:T.gerC>0.5?(tl(T.gerC)+" gerilla dahil"):"tahsil edilen",renk:"var(--gold)",onClick:()=>setDet(detB.nakit())}),
         h(KStat,{ik:h(Icn,{n:"wallet",c:"var(--gold)"}),l:"Hakediş",v:tl(hakMarj),s:"pazarlamacıya",renk:"var(--gold)",onClick:()=>setHakDuzen(true)}),
         h(KStat,{ik:h(Icn,{n:"trend",c:tkNet<0?"var(--red)":"var(--violet)"}),l:"Net kâr",v:tlk(tkNet),s:"maliyet ve gider sonrası ›",renk:tkNet<0?"var(--red)":"var(--violet)",onClick:()=>setBol("tikita")}),
         h(KStat,{ik:h(Icn,{n:"box",c:"var(--violet)"}),l:"Açık konsinye",v:konsTopAd,birim:"adet",s:tl(konsTopTut),renk:"var(--violet)",onClick:()=>setAlt("kons")}),
