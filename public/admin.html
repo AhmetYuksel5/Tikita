@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L22";   // komuta (admin) deneme sürümü
+const SURUM="L23";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -3262,8 +3262,8 @@ function haftaListesiA(hareketler,simdi){
   const L=[]; let t=haftaBasMs(simdi||Date.now());
   while(t>=HAKEDIS_BAS_MS&&L.length<60){ L.push(t); t-=7*864e5; }
   return L; }
-function HakedisDonemSheet({list,onOnay,onOde,onGeriAl,onClose,hareketler,simdi}){
-  const [filtre,setFiltre]=useState("acik");
+function HakedisDonemSheet({list,onOnay,onOde,onGeriAl,onClose,hareketler,simdi,ilkFiltre}){
+  const [filtre,setFiltre]=useState(ilkFiltre||"acik");
   const [hafta,setHafta]=useState(null);   // 🗄 arşivde açılan hafta
   const [kisi,setKisi]=useState(null);     // o haftada açılan pazarlamacı
   const NOW=simdi||Date.now();
@@ -3440,6 +3440,13 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
   const tablaKalanTopA=Object.values(tablaBak).reduce((s,v)=>s+Math.max(0,v),0);
   // 🫰 haftalık hakediş dönemleri — bildirilen ama ödenmemiş toplam
   const hakList=(hakedisDonem||[]).slice().sort((a,b)=>(b.hafta||"").localeCompare(a.hafta||"")||(a.kullaniciAd||"").localeCompare(b.kullaniciAd||"","tr"));
+  /* 🗄 arşiv rozeti — kaç hafta var, kaçında herkes göndermemiş.
+     Gönderilmemiş haftayı komuta ekranda görsün diye ayrı kutu. */
+  const arsivOzet=useMemo(()=>{ const L=haftaListesiA(hareketler); let dolu=0,eksik=0;
+    L.forEach(t=>{ const o=haftaOzetA(hareketler,t); if(!o.kisiler.length) return; dolu++;
+      const kay=(hakedisDonem||[]).filter(x=>x.hafta===o.kod);
+      if(kay.length<o.kisiler.length) eksik++; });
+    return {hafta:L.length,dolu,eksik}; },[hareketler,hakedisDonem]);
   const hakOnayBek=hakList.filter(x=>x.durum==="bildirildi");
   const hakOdemeBek=hakList.filter(x=>x.durum==="onaylandi");
   const hakBekleyen=hakOnayBek.concat(hakOdemeBek).reduce((s,x)=>s+num(x.hakedis),0);
@@ -3692,6 +3699,9 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         h(KStat,{ik:h(Icn,{n:"wallet",c:hakBekleyen>0.5?"var(--gold)":"var(--green)"}),l:"Pazarlamacı hakedişi",
           v:tl(hakBekleyen),s:(hakOnayBek.length?(hakOnayBek.length+" onay bekliyor · "):"")+"haftalık ›",
           renk:hakBekleyen>0.5?"var(--gold)":"var(--green)",onClick:()=>setHakDonemAcik(true)}),
+        h(KStat,{ik:h(Icn,{n:"list",c:arsivOzet.eksik?"var(--gold)":"var(--green)"}),l:"Haftalık arşiv",
+          v:arsivOzet.hafta+" hafta",s:(arsivOzet.eksik?(arsivOzet.eksik+" hafta eksik"):"tümü gönderildi")+" ›",
+          renk:arsivOzet.eksik?"var(--gold)":"var(--green)",onClick:()=>setHakDonemAcik("arsiv")}),
         h(KStat,{ik:h(Icn,{n:"box",c:"var(--violet)"}),l:"Açık konsinye",v:konsTopAd,birim:"adet",s:tl(konsTopTut),renk:"var(--violet)",onClick:()=>setAlt("kons")}),
         h(KStat,{ik:h(Icn,{n:"coins",c:alacakTop>0.5?"var(--red)":"var(--green)"}),l:"Açık alacak",v:tl(alacakTop),s:"sahada",renk:alacakTop>0.5?"var(--red)":"var(--green)",onClick:()=>setAlt("alacak")}),
         h(KStat,{ik:h(Icn,{n:"users",c:"var(--txt)"}),l:"Aktif ekip",v:perf.length+" / "+(ekip||[]).length,s:"pazarlamacı",renk:"var(--txt)",onClick:()=>setDet(detB.aktif())}),
@@ -3807,7 +3817,8 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
     alisDuzen?h(HakedisDuzenSheet,{sales:alisDuzen,baslik:"Veriliş fiyatını düzelt",onClose:()=>setAlisDuzen(null),
       onKaydet:async(ch)=>{ if(onHakedisKaydet) await onHakedisKaydet(ch); setAlisDuzen(null); }}):null,
     odemeAcik?h(TablaOdemeSheet,{ekip,tablaBak,acikOdeme,odemeList:tablaOdemeList,onEmir:(u,k)=>onTablaEmri&&onTablaEmri(u,k),onIptal:t=>onTablaIptal&&onTablaIptal(t),onClose:()=>setOdemeAcik(false)}):null,
-    hakDonemAcik?h(HakedisDonemSheet,{list:hakList,hareketler,onOnay:onHakOnay,onOde:onHakOde,onGeriAl:onHakGeriAl,onClose:()=>setHakDonemAcik(false)}):null,
+    hakDonemAcik?h(HakedisDonemSheet,{list:hakList,hareketler,ilkFiltre:hakDonemAcik==="arsiv"?"arsiv":"acik",
+      onOnay:onHakOnay,onOde:onHakOde,onGeriAl:onHakGeriAl,onClose:()=>setHakDonemAcik(false)}):null,
     nakitAcik?h(SahaNakitSheet,{SN:sahaNakit,bildirimler:nakitBildirim,onOnay:onNakitOnay,onGeriAl:onNakitGeriAl,onClose:()=>setNakitAcik(false)}):null);
 }
 // 🧹 TABLA HAKEDİŞİ ÖDEMELERİ — admin ödeme emri verir, pazarlamacı raporunda teslim alır
