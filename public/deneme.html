@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v97";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v98";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -798,10 +798,129 @@ function Kaleler({d,openKale,say,onYeniKale,adaylar,openAday,kesifRedSet,kesifEk
 }
 
 /* ————— KALE DETAYI ————— */
+/* 🧾 ZİYARET RAPORU — bir kalede yapılan işlemler "ziyaret" olarak gruplanır ve
+   raf defteri çıkarılır: öncesi → satılan → sayım sonrası → iade → bırakılan → güncel.
+   Aralarında ZIYARET_ARA'dan az zaman geçen kayıtlar tek ziyarettir. */
+const ZIYARET_ARA=3*36e5;
+const rafArtir=(x)=>x.tip==="konsinye"&&x.konsMod!=="hediye";                                   // rafa giren
+const rafAzalt=(x)=>x.kaynak==="konsinye"&&(x.tip==="satis"||x.tip==="hediye"||x.tip==="iade"); // raftan çıkan
+function ziyaretler(har){
+  const L=(har||[]).filter(x=>x&&["konsinye","satis","iade","hediye","tahsilat","diplomasi","stant"].includes(x.tip))
+    .slice().sort((a,b)=>(new Date(a.tarih).getTime()||0)-(new Date(b.tarih).getTime()||0));
+  const gr=[]; let cur=null;
+  L.forEach(x=>{ const t=new Date(x.tarih).getTime()||0;
+    if(!cur||t-cur.son>ZIYARET_ARA){ cur={bas:t,son:t,kayit:[]}; gr.push(cur); }
+    cur.son=t; cur.kayit.push(x); });
+  const raf={};   // yürüyen raf durumu — ziyaretler kronolojik işlenir
+  const kopya=o=>{ const y={}; Object.keys(o).forEach(k2=>{ if(num(o[k2])>0) y[k2]=num(o[k2]); }); return y; };
+  const out=gr.map((g,i)=>{
+    const once=kopya(raf);
+    const sat=[],iade=[],birak=[],hed=[],diger=[]; let tah=0,ciro=0,tahEk=0;
+    /* Kategori sırasıyla işlenir (sayım → satış → iade → bırakış); kayıt sırası
+       ne olursa olsun rapor hep aynı mantığı gösterir. */
+    g.kayit.forEach(x=>{ const ad=x.urunAd||"?", n=num(x.adet);
+      if(x.tip==="tahsilat"){ tah+=num(x.tutar); return; }
+      if(x.tip==="satis"){ const tut=x.gerilla?(num(x.tahsil)||n*num(x.satisFiyat)):n*num(x.satisFiyat);
+        sat.push({ad,adet:n,birim:num(x.satisFiyat),tutar:tut,raftan:x.kaynak==="konsinye"});
+        ciro+=tut; tahEk+=num(x.tahsil); return; }
+      if(x.tip==="iade"){ iade.push({ad,adet:n}); return; }
+      if(x.tip==="konsinye"&&x.konsMod!=="hediye"){ birak.push({ad,adet:n,birim:num(x.satisFiyat)}); return; }
+      if(x.tip==="hediye"){ hed.push({ad,adet:n,raftan:x.kaynak==="konsinye"}); return; }
+      // envanteri kıpırdatmayan işlemler de rapora düşsün — yoksa ziyaret boş görünür
+      if(x.tip==="diplomasi"){ diger.push({t:"⚔️ Ziyaret",v:(x.not||"").slice(0,60)||"—"}); return; }
+      if(x.tip==="stant"){ diger.push({t:"🎪 Stant",v:num(x.fiyat)>0?tl(num(x.fiyat)):"—"}); return; } });
+    // 1) sayım: raftan satılan + raftan hediye edilen düşülür
+    g.kayit.forEach(x=>{ if(rafAzalt(x)&&x.tip!=="iade") raf[x.urunAd||"?"]=num(raf[x.urunAd||"?"])-num(x.adet); });
+    const sayim=kopya(raf);
+    // 2) iade alınanlar raftan çıkar  3) yeni bırakılanlar rafa girer
+    g.kayit.forEach(x=>{ if(x.tip==="iade"&&x.kaynak==="konsinye") raf[x.urunAd||"?"]=num(raf[x.urunAd||"?"])-num(x.adet);
+      else if(rafArtir(x)) raf[x.urunAd||"?"]=num(raf[x.urunAd||"?"])+num(x.adet); });
+    const guncel=kopya(raf);
+    /* Aynı ürünün birden çok kaydı tek satırda toplansın — iki ayrı konsinye
+       kaydıyla bırakılan 10+10 Ahtapot raporda "20 adet" olarak görünür. */
+    const birlestir=(L,anahtar)=>{ const m={},sira=[];
+      L.forEach(x=>{ const k2=anahtar(x); if(!m[k2]){ m[k2]={...x}; sira.push(k2); }
+        else { m[k2].adet+=x.adet; if(m[k2].tutar!=null) m[k2].tutar+=num(x.tutar); } });
+      return sira.map(k2=>m[k2]); };
+    return {i,bas:g.bas,son:g.son,kayit:g.kayit,once,sayim,guncel,
+      sat:birlestir(sat,x=>x.ad+"|"+x.birim+"|"+(x.raftan?1:0)),
+      iade:birlestir(iade,x=>x.ad), birak:birlestir(birak,x=>x.ad+"|"+x.birim),
+      hed:birlestir(hed,x=>x.ad+"|"+(x.raftan?1:0)), diger,tah,ciro,tahEk}; });
+  return out.reverse();   // en yeni üstte
+}
+const rafTop=o=>Object.keys(o||{}).reduce((s,k2)=>s+num(o[k2]),0);
+const rafSat=o=>Object.keys(o||{}).sort((a,b)=>num(o[b])-num(o[a])||a.localeCompare(b,"tr")).map(k2=>({ad:k2,adet:num(o[k2])}));
+function ziyaretMetni(k,z){
+  const d=new Date(z.son);
+  const bas=(k&&k.ad?("🏬 "+k.ad+"\n"):"")+(isNaN(+d)?"":d.toLocaleDateString("tr-TR",{day:"2-digit",month:"long",year:"numeric"})+" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}))+"\n";
+  const blok=(bl,rows)=>rows.length?("\n"+bl+"\n"+rows.join("\n")+"\n"):"";
+  return bas
+    +blok("SAYIM SONRASI RAFTA",rafSat(z.sayim).length?rafSat(z.sayim).map(r=>"• "+r.ad+" ×"+r.adet):["• rafta ürün yoktu"])
+    +blok("SATILAN",z.sat.map(s=>"• "+s.ad+" ×"+s.adet+" × "+tl(s.birim)+" = "+tl(s.tutar))
+      .concat(z.sat.length?["Toplam: "+tl(z.ciro)]:[]))
+    +blok("İADE ALINAN",z.iade.map(s=>"• "+s.ad+" ×"+s.adet))
+    +blok("BIRAKILAN",z.birak.map(s=>"• "+s.ad+" ×"+s.adet))
+    +blok("HEDİYE",z.hed.map(s=>"• "+s.ad+" ×"+s.adet))
+    +blok("DİĞER",(z.diger||[]).map(s=>"• "+s.t+(s.v&&s.v!=="—"?(" · "+s.v):"")))
+    +blok("GÜNCEL DURUM · RAFTA",rafSat(z.guncel).map(r=>"• "+r.ad+" ×"+r.adet)
+      .concat(["Toplam "+rafTop(z.guncel)+" adet"]))
+    +(z.tah>0.5?("\nTahsil edilen: "+tl(z.tah)+"\n"):"");
+}
+function ZiyaretSheet({k,list,onClose}){
+  const [sec,setSec]=useState((list||[]).length===1?0:null);
+  const L=list||[];
+  const fmtZ=t=>{ const d=new Date(t); return isNaN(+d)?"":d.toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"})+" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}); };
+  const grup=(bas,renk,rows,ekstra)=>rows.length?h("div",{style:{marginBottom:12}},
+    h("div",{className:"lbl",style:{marginBottom:6}},bas),
+    h("div",{className:"card",style:{padding:"2px 13px",boxShadow:"none"}},
+      rows.map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,
+        padding:"8px 0",borderTop:i?"1px solid var(--line)":"none"}},
+        h("span",{style:{fontSize:13,fontWeight:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},r.t),
+        h("span",{style:{fontSize:13,fontWeight:800,color:renk,flexShrink:0}},r.v))),
+      ekstra?h("div",{style:{display:"flex",justifyContent:"space-between",padding:"8px 0",borderTop:"1.5px solid var(--line)",
+        fontSize:13,fontWeight:800}},h("span",null,ekstra.t),h("span",{style:{color:renk}},ekstra.v)):null)):null;
+  if(sec!=null&&L[sec]){ const z=L[sec];
+    return h(Sheet,{ik:"🧾",hex:"#7c46e6",baslik:"Ziyaret raporu",alt:(k?k.ad+" · ":"")+fmtZ(z.son),
+      onClose,cta:"Kapat",onCta:onClose},
+      grup("Sayım sonrası müşteride bulunan","var(--violet)",
+        rafSat(z.sayim).length?rafSat(z.sayim).map(r=>({t:r.ad,v:r.adet+" adet"})):[{t:"Rafta ürün yoktu",v:"0 adet"}],
+        rafSat(z.sayim).length?{t:"Toplam",v:rafTop(z.sayim)+" adet"}:null),
+      grup("Satılan","var(--green)",z.sat.map(s=>({t:s.adet+" × "+s.ad+(s.raftan?"":" · çantadan"),v:tl(s.tutar)})),
+        z.sat.length?{t:"Toplam",v:tl(z.ciro)}:null),
+      grup("İade alınan","var(--gold)",z.iade.map(s=>({t:s.ad,v:s.adet+" adet"}))),
+      grup("Tekrar konsinye bırakılan","var(--cyan)",z.birak.map(s=>({t:s.ad,v:s.adet+" adet"}))),
+      grup("Hediye","var(--mut)",z.hed.map(s=>({t:s.ad,v:s.adet+" adet"}))),
+      grup("Diğer işlemler","var(--cyan)",(z.diger||[]).map(s=>({t:s.t,v:s.v}))),
+      grup("Müşterideki güncel durum","var(--txt)",rafSat(z.guncel).map(r=>({t:r.ad,v:r.adet+" adet"})),
+        {t:"Toplam",v:rafTop(z.guncel)+" adet"}),
+      z.tah>0.5?h("div",{style:{display:"flex",justifyContent:"space-between",padding:"11px 13px",borderRadius:12,
+        background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,marginBottom:12}},
+        h("span",{style:{color:"var(--mut)"}},"Tahsil edilen"),h("span",{style:{color:"var(--gold)"}},tl(z.tah))):null,
+      h("button",{onClick:()=>window.open("https://wa.me/?text="+encodeURIComponent(ziyaretMetni(k,z)),"_blank"),
+        style:{width:"100%",padding:13,borderRadius:14,background:"#16a34a",color:"#fff",fontSize:13.5,fontWeight:800,marginBottom:8}},
+        "WhatsApp'tan gönder"),
+      L.length>1?h("button",{onClick:()=>setSec(null),style:{width:"100%",padding:11,fontSize:12.5,fontWeight:800,color:"var(--mut)"}},"‹ Tüm ziyaretler"):null); }
+  return h(Sheet,{ik:"🧾",hex:"#7c46e6",baslik:"Ziyaret raporları",alt:(k?k.ad+" · ":"")+L.length+" ziyaret",
+    onClose,cta:"Kapat",onCta:onClose},
+    L.length?L.map((z,i)=>h("button",{key:i,onClick:()=>setSec(i),className:"card",
+      style:{width:"100%",textAlign:"left",padding:"12px 14px",marginBottom:8,boxShadow:"none",display:"flex",alignItems:"center",gap:10}},
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800}},fmtZ(z.son)),
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:2}},
+          [z.sat.length?(z.sat.reduce((s,x)=>s+x.adet,0)+" satış"):"",z.iade.length?(z.iade.reduce((s,x)=>s+x.adet,0)+" iade"):"",
+           z.birak.length?(z.birak.reduce((s,x)=>s+x.adet,0)+" bırakış"):"",z.tah>0.5?tl(z.tah):"",
+           (z.diger||[]).map(s=>s.t.replace(/^\S+\s/,"")).join(" · ")].filter(Boolean).join(" · ")||"—")),
+      h("div",{style:{textAlign:"right",flexShrink:0}},
+        h("div",{style:{fontSize:14,fontWeight:800,color:z.ciro>0.5?"var(--green)":"var(--mut2)"}},z.ciro>0.5?tl(z.ciro):"—"),
+        h("div",{style:{fontSize:10.5,fontWeight:800,color:"var(--mut)",marginTop:1}},"rafta "+rafTop(z.guncel))),
+      h("span",{style:{fontSize:17,color:"var(--mut2)",flexShrink:0}},"›")))
+      :h("div",{style:{padding:"22px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Bu kalede henüz işlem yok."));
+}
 function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ const D=k.durum;
   const zt=k.son?(k.gunGecti===0?"bugün":k.gunGecti+" gün önce"):"hiç";
   const telDig=(k.telefon||"").replace(/\D/g,"");
-  const [panel,setPanel]=useState(null);   // "hareket" | "hakedis"
+  const [panel,setPanel]=useState(null);   // "hareket" | "hakedis" | "ziyaret"
+  const ziy=useMemo(()=>ziyaretler(kaleHar),[kaleHar]);
   return h("div",{className:"fade"},
     h("div",{style:{background:"linear-gradient(150deg,var(--hud1),var(--hud2) 60%,"+D.hex+" 150%)",
       padding:"calc(env(safe-area-inset-top,0px) + 14px) 18px 22px",borderRadius:"0 0 26px 26px",color:"#fff",position:"relative",overflow:"hidden"}},
@@ -832,6 +951,16 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ cons
         h("div",{className:"lbl",style:{marginBottom:10}},"🏬 Bu kalede duran konsinye"),
         k.konsKalem.map((c,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:14}},
           h("span",null,c.ad),h("span",{style:{fontWeight:800,color:"var(--violet)"}},c.adet+" adet")))),
+      // 🧾 son işlemden sonra oluşan durum — sayım, satış, iade, bırakış, güncel raf
+      ziy.length?h("button",{onClick:()=>setPanel("ziyaret"),className:"card",
+        style:{display:"flex",alignItems:"center",gap:11,width:"100%",padding:"13px 15px",marginBottom:12,boxShadow:"none",textAlign:"left"}},
+        h("span",{style:{fontSize:22,flexShrink:0}},"🧾"),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13.5,fontWeight:800}},"Ziyaret raporu"),
+          h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:2}},
+            "son işlem "+(new Date(ziy[0].son).toLocaleDateString("tr-TR",{day:"2-digit",month:"short"}))
+            +" · rafta "+rafTop(ziy[0].guncel)+" adet · "+ziy.length+" ziyaret")),
+        h("span",{style:{fontSize:17,color:"var(--mut2)",flexShrink:0}},"›")):null,
       // üç aksiyon: satış + stant + ziyaret
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}},
         h("button",{onClick:()=>openSheet("satis",k),className:"card",style:{padding:"15px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,boxShadow:"none"}},
@@ -852,7 +981,8 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ cons
         h("div",{style:{fontSize:11,color:"var(--mut)",margin:"2px 0 6px"}},"son 48 saat · hatalıysa tek dokunuşla geri al"),
         ovList.map((x,i)=>h(OvSatir,{key:x.id||i,x,geriAl})))),
     panel==="hareket"&&h(HareketPanel,{k,kaleHar,onClose:()=>setPanel(null),geriAl}),
-    panel==="hakedis"&&h(HakedisPanel,{k,kaleHar,onClose:()=>setPanel(null)}));
+    panel==="hakedis"&&h(HakedisPanel,{k,kaleHar,onClose:()=>setPanel(null)}),
+    panel==="ziyaret"&&h(ZiyaretSheet,{k,list:ziy,onClose:()=>setPanel(null)}));
 }
 function Stat({ik,v,l,renk,onClick}){ const inner=[
   h("div",{key:"i",style:{fontSize:16,marginBottom:5}},ik),
