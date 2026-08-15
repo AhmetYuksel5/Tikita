@@ -74,7 +74,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="M6";
+const SURUM="M7";
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // 👁 yönetici görünümü
 let BEN_ID=AS_ID||REAL_ID;
@@ -131,9 +131,16 @@ const DURUM={
 function AdetSheet({baslik,alt,hex,ik,mevcut,ctaTxt,onClose,onOk,bekle}){
   const [n,setN]=useState(String(mevcut||""));
   const v=Math.max(0,Math.floor(num(n)));
-  return h(Sheet,{ik,hex,baslik,alt,onClose,cta:bekle?"⏳…":(ctaTxt+" · "+v+" adet"),disabled:v<1||bekle,onCta:()=>onOk(v)},
+  /* ⚠ İstenenden fazla alım engellenmiyor — bilerek fazla alınabiliyor — ama
+     999 gibi yanlış tuşlama sessizce kaydediliyordu. Uyarı + onay konuldu. */
+  const fazla=Math.max(0,v-num(mevcut));
+  return h(Sheet,{ik,hex,baslik,alt,onClose,cta:bekle?"⏳…":((fazla>0?"⚠ ":"")+ctaTxt+" · "+v+" adet"),disabled:v<1||bekle,
+      onCta:()=>{ if(fazla>0&&!confirm("⚠ İstenen "+num(mevcut)+" adet.\nSen "+v+" adet alıyorsun — "+fazla+" adet fazla.\n\nDoğru mu?")) return; onOk(v); }},
     h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
-    h("input",{type:"number",inputMode:"numeric",value:n,onChange:e=>setN(e.target.value),onFocus:e=>e.target.select(),style:{...inp,textAlign:"center",fontSize:24}}),
+    h("input",{type:"number",inputMode:"numeric",value:n,onChange:e=>setN(e.target.value),onFocus:e=>e.target.select(),
+      style:{...inp,textAlign:"center",fontSize:24,...(fazla>0?{borderColor:"#fca5a5",color:"var(--red)"}:{})}}),
+    fazla>0?h("div",{style:{marginTop:10,padding:"9px 12px",borderRadius:11,background:"#fef2f2",border:"1px solid #fca5a5",
+      fontSize:12,fontWeight:700,color:"#b91c1c"}},"İstenenden "+fazla+" adet fazla alıyorsun."):null,
     h("div",{style:{display:"flex",gap:8,marginTop:12}},
       [mevcut,Math.floor(mevcut/2)].filter((x,i,a)=>x>0&&a.indexOf(x)===i).map(x=>
         h("button",{key:x,onClick:()=>setN(String(x)),style:{flex:1,padding:"11px 8px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,color:"var(--mut)"}},x+" adet"))));

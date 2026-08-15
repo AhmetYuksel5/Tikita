@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L28";   // komuta (admin) deneme sürümü
+const SURUM="L29";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1529,9 +1529,20 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
   const kirBaslik=sekme==="acik"?"Kimde ne kadar ürün var":"Kim ne kadar teslim etti";
   if(yeni){ const u=(stok||[]).find(x=>x.id===yeni.urunId);
     const ucret=num(u&&u.montajUcret);   // 🛠 ücret ürün kartından gelir — görevde ayrıca belirlenmez
+    /* 🧮 KALAN KAPASİTE — montaja hazır adetten, hâlâ kapanmamış görevlere ayrılmış
+       olanı düş. Eskiden hiç bakılmıyordu: montajda 20 varken 500 adetlik görev
+       verilebiliyor, üstelik açık görevler de görünmüyordu. */
+    const ayrilan=(gorevler||[]).filter(g=>g.urunId===yeni.urunId&&g.durum!=="teslim")
+      .reduce((s2,g)=>s2+montajAdet(g),0);
+    const kapasite=num(u&&u.montajda), kalanKap=kapasite-ayrilan, istenen=num(yeni.adet);
+    const asiyor=!!yeni.urunId&&istenen>kalanKap;
     return h(Sheet,{ik:"🔧",hex:"#0369a1",baslik:"Montaj görevi",alt:"",onClose:()=>setYeni(null),
-      cta:bekle?"⏳…":"Görevi ver",disabled:!yeni.urunId||!yeni.kullaniciId||num(yeni.adet)<1||ucret<=0||bekle,
-      onCta:()=>{ onKaydet({urunId:yeni.urunId,urunAd:u?u.ad:"",adet:num(yeni.adet),birimUcret:ucret,
+      cta:bekle?"⏳…":(asiyor?"⚠ Kapasiteyi aşarak ver":"Görevi ver"),
+      disabled:!yeni.urunId||!yeni.kullaniciId||istenen<1||ucret<=0||bekle,
+      onCta:()=>{ if(asiyor&&!confirm("⚠ Montaja hazır "+kapasite+" adet.\n"
+          +(ayrilan>0?(ayrilan+" adedi açık görevlere ayrılmış, kalan "+kalanKap+".\n"):"")
+          +istenen+" adet isteniyor — "+(istenen-kalanKap)+" adet fazla.\n\nYine de verilsin mi?")) return;
+        onKaydet({urunId:yeni.urunId,urunAd:u?u.ad:"",adet:istenen,birimUcret:ucret,
         kullaniciId:yeni.kullaniciId,kullaniciAd:kad[yeni.kullaniciId]||"",not:(yeni.not||"").trim()}); setYeni(null); }},
       h("button",{onClick:()=>setYeni(null),style:{marginBottom:12,fontSize:12.5,fontWeight:800,color:"var(--cyan)",background:"none",padding:0}},"‹ Geri"),
       h("div",{className:"lbl",style:{marginBottom:8}},"Ürün"),
@@ -1542,8 +1553,18 @@ function MontajYonetimSheet({gorevler,stok,kullanicilar,onKaydet,onSil,onOde,onG
       h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
         personel.length?personel.map(k=>h(Chip,{key:k.id,on:yeni.kullaniciId===k.id,onClick:()=>setYeni(o=>({...o,kullaniciId:k.id}))},(k.simge||"")+" "+k.ad))
           :h("div",{style:{fontSize:12.5,color:"var(--mut)"}},"Montaj personeli yok — Ekip'ten ekle.")),
+      yeni.urunId?h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+        [[String(kapasite),"montaja hazır","var(--txt)"],
+         [String(ayrilan),"açık görevlere ayrılan","var(--cyan)"],
+         [String(kalanKap),"kalan kapasite",kalanKap<0?"var(--red)":"var(--green)"]].map((k,i)=>
+          h("div",{key:i,style:{flex:1,minWidth:0,padding:"10px 11px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)"}},
+            h("div",{style:{fontSize:16,fontWeight:800,color:k[2]}},k[0]),
+            h("div",{style:{fontSize:10,color:"var(--mut)",fontWeight:700,marginTop:2,lineHeight:1.3}},k[1])))):null,
       h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
       h("input",{type:"number",inputMode:"numeric",value:yeni.adet,onChange:e=>setYeni(o=>({...o,adet:e.target.value})),style:{...inp,marginBottom:12}}),
+      asiyor?h("div",{style:{padding:"10px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",
+        fontSize:12,fontWeight:700,color:"#9a3412",marginBottom:12}},
+        "Kalan kapasite "+kalanKap+" adet — "+(istenen-kalanKap)+" adet fazla isteniyor."):null,
       yeni.urunId?(ucret>0
         ? h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"11px 13px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",marginBottom:14,fontSize:13,fontWeight:800}},
             h("span",{style:{color:"var(--mut)"}},"Montaj ücreti "+tlk(ucret)+" / ad"),
@@ -4361,11 +4382,18 @@ function App(){
       // görev tamamen siliniyorsa "montaja verildi" hareketi de kalkmalı, yoksa geçmişte öksüz kalır
       if(sil&&g.alimHareketId){ try{ await remove("stok_hareket",g.alimHareketId); }catch(e){} }
       if(g.giderId){ try{ await remove("gider",g.giderId); }catch(e){} }   // ödeme gideri de geri alınır
+      /* Kısmi teslimde kalan için açılan devir görevi:
+         — henüz teslim edilmemişse silinir, adet asıl göreve geri döner.
+         — ZATEN TESLİM EDİLMİŞSE silinemez; o adet asıl görevin "alınan"ından
+           düşülmeli, yoksa montajcının elinde iki kez sayılır. */
+      let alinanDuzelt=null;
       if(g.kalanGorevId){ const kg=(montajGorev||[]).find(x=>x.id===g.kalanGorevId);
-        if(kg&&kg.durum!=="teslim"){ try{ await remove("montaj_gorev",g.kalanGorevId); }catch(e){} } }
+        if(kg&&kg.durum!=="teslim"){ try{ await remove("montaj_gorev",g.kalanGorevId); }catch(e){} }
+        else if(kg) alinanDuzelt=Math.max(0,num(g.alinanAdet)-num(kg.alinanAdet)); }
       if(sil){ await remove("montaj_gorev",g.id); say("Görev silindi — muhasebe geri alındı"); }
-      else { await save("montaj_gorev",{id:g.id,durum:"alindi",teslimAdet:0,kusurAdet:0,teslimTarih:"",etki:{},kalanGorevId:"",odendi:false,odemeTarih:"",giderId:""});
-        say("Teslim geri alındı"); } }
+      else { await save("montaj_gorev",{id:g.id,durum:"alindi",teslimAdet:0,kusurAdet:0,teslimTarih:"",etki:{},kalanGorevId:"",odendi:false,odemeTarih:"",giderId:"",
+          ...(alinanDuzelt!=null?{alinanAdet:alinanDuzelt}:{})});
+        say(alinanDuzelt!=null?("Teslim geri alındı · elindeki "+alinanDuzelt+" adete düzeltildi"):"Teslim geri alındı"); } }
     catch(e){ console.error(e); say(sil?"Silinemedi":"Geri alınamadı"); } finally{ setIsBekle(false); } }
   async function ayarKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ await save("ayar",{id:"genel",...p2}); setModal(null); say("Ayarlar kaydedildi"); }
