@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L27";   // komuta (admin) deneme sürümü
+const SURUM="L28";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -240,6 +240,7 @@ const KESIF_KAT=[
   {k:"hediyelik", ad:"Oyuncak/Hediye", ik:"🧸", q:'["shop"~"^(toys|gift)$"]', gt:["gift_shop","toy_store"]},
 ];
 const kesifKatFromGTypes=types=>{ const ts=new Set(types||[]); const c=KESIF_KAT.find(x=>(x.gt||[]).some(g=>ts.has(g))); return c?c.k:"diger"; };
+const GOOGLE_MAX_ISTEK=12;   // tek taramada atılacak en fazla Places isteği — günlük kotayı korur
 const ZINCIR_RE=/(^|[^a-zçğıöşü])(bim|migros|a\s?-?101|şok|sok\s?market|carrefour(sa)?|file\b|macro\s?center|metro\s?(market|gross)|tespo|hakmar|onur\s?market|happy\s?center|ekomini|beğendik|kipa|tansaş|real\b|seç\s?market|dia\b|snowy|mopaş|pehlivanoğlu|çağrı\s?market|birmar|marketpaşa|ekomax|hopi)([^a-zçğıöşü]|$)/i;
 const KURUMSAL_RE=/(genel\s?(merkez|müdürlük)|dağıtım|lojistik|depo(su)?|a\.?ş\.?\s*$|san\.?\s?ve\s?tic|holding|plaza|toptan)/i;
 function zincirMi(ad){ const t=(ad||"").trim(); if(!t) return true;
@@ -255,7 +256,12 @@ async function kesifGoogle(merkezler, katlar, metre, key){
       headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,
         "X-Goog-FieldMask":"places.id,places.displayName,places.location,places.types,places.rating,places.userRatingCount,places.nationalPhoneNumber"},
       body:JSON.stringify(body)});
-    if(!r.ok){ let e=""; try{ e=(await r.json()).error.message; }catch(x){} throw new Error("Google "+r.status+(e?(" — "+e):"")); }
+    if(!r.ok){ let e=""; try{ e=(await r.json()).error.message; }catch(x){}
+      /* Kota/yetki hataları en sık karşılaşılanlar — ham kodu değil ne yapılacağını yaz. */
+      if(r.status===429) throw new Error("günlük kota doldu · Google Cloud → Places API (New) → Kotalar'dan yükseltilebilir");
+      if(r.status===403) throw new Error("anahtar reddedildi · Places API (New) açık mı, anahtar kısıtlaması var mı?");
+      if(r.status===400) throw new Error("istek geçersiz"+(e?(" — "+e):""));
+      throw new Error("Google "+r.status+(e?(" — "+e):"")); }
     const j=await r.json();
     (j.places||[]).forEach(p=>{ const ad=p.displayName&&p.displayName.text; if(!ad||!p.location) return;
       if(gor.has(p.id)) return; gor.add(p.id);
@@ -3053,6 +3059,7 @@ function HedefHarita({kullanicilar,gkey,onKaydet,odak}){
   const [kat,setKat]=useState(KESIF_KAT.map(c=>c.k));
   const [yuk,setYuk]=useState(false);
   const [ad,setAd]=useState(""); const [kime,setKime]=useState("");
+  const [tani,setTani]=useState(null);   // son taramanın künyesi: kaç istek, kaç sonuç, neden elendi
   useEffect(()=>{ if(!window.L||!ref.current||mapRef.current) return; const L=window.L;
     const map=L.map(ref.current,{scrollWheelZoom:true,attributionControl:false}).setView([41.02,29.03],12);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd"}).addTo(map);
@@ -3092,20 +3099,37 @@ function HedefHarita({kullanicilar,gkey,onKaydet,odak}){
   }
   async function tara(){ if(kose.length<3) return alert("Önce haritaya en az 3 nokta koyarak bir alan çiz.");
     const katlar=KESIF_KAT.filter(c=>kat.includes(c.k)); if(!katlar.length) return alert("En az bir kategori seç.");
-    const {mrk,cellKm}=gridMerkezler(); const mtr=Math.round(cellKm*1000); setYuk(true);
+    const {mrk,cellKm}=gridMerkezler(); const mtr=Math.round(cellKm*1000);
+    /* 🛡 KOTA KORUMASI — kesifGoogle her ızgara hücresi için ayrı istek atıyor;
+       6×6'lık bir alan tek taramada 36 istek yakar ve günlük kotayı bitirir. */
+    const mrkG=mrk.slice(0,GOOGLE_MAX_ISTEK);
+    setYuk(true); setTani(null);
+    const t={gAd:0,oAd:0,gHata:"",oHata:"",istek:gkey?mrkG.length:0,atlanan:gkey?(mrk.length-mrkG.length):0,zincir:0,disari:0,tekrar:0};
     try{ let all=[];
-      if(gkey){ try{ const g=await kesifGoogle(mrk,katlar,mtr,gkey); if(g) all=all.concat(g); }catch(e){} }
-      try{ const o=await kesifOverpass(mrk,katlar,mtr); if(o) all=all.concat(o); }catch(e){}
+      if(gkey){ try{ const g=await kesifGoogle(mrkG,katlar,mtr,gkey); if(g){ all=all.concat(g); t.gAd=g.length; } }
+        catch(e){ t.gHata=String(e.message||e); } }
+      else t.gHata="anahtar tanımlı değil (Ayarlar → API anahtarı)";
+      try{ const o=await kesifOverpass(mrk,katlar,mtr); if(o){ all=all.concat(o); t.oAd=o.length; } }
+      catch(e){ t.oHata=String(e.message||e); }
       const tut=[];
       all.forEach(r=>{ if(r.lat==null||r.lng==null||!(r.ad||"").trim()) return;
-        if(zincirMi(r.ad)) return;
-        if(!pointInPoly([+r.lat,+r.lng],kose)) return;
+        if(zincirMi(r.ad)){ t.zincir++; return; }
+        if(!pointInPoly([+r.lat,+r.lng],kose)){ t.disari++; return; }
         const a2=(r.ad||"").toLocaleLowerCase("tr").trim();
         const dup=tut.some(g=> ((g.ad||"").toLocaleLowerCase("tr").trim()===a2) || haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04);
-        if(dup){ if(r.puanG!=null){ const ex=tut.find(g=>haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04); if(ex&&ex.puanG==null){ ex.puanG=r.puanG; if(r.tel)ex.tel=ex.tel||r.tel; } } return; }
+        if(dup){ t.tekrar++; if(r.puanG!=null){ const ex=tut.find(g=>haversineKm(+g.lat,+g.lng,+r.lat,+r.lng)<0.04); if(ex&&ex.puanG==null){ ex.puanG=r.puanG; if(r.tel)ex.tel=ex.tel||r.tel; } } return; }
         tut.push(r); });
       tut.sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
-      setSonuc(tut); if(!tut.length) alert("Bu alanda mekan bulunamadı — alanı büyüt ya da kategori ekle.");
+      setSonuc(tut); setTani({...t,bulunan:tut.length});
+      /* Sonuç yoksa NEDEN yok olduğunu söyle — "bulunamadı" tek başına yanıltıyor:
+         çoğu zaman kaynak hata vermiş oluyor, alan gerçekten boş olmuyor. */
+      if(!tut.length){
+        const ned=[t.gHata?("• Google Places: "+t.gHata):"",t.oHata?("• OpenStreetMap: "+t.oHata):""].filter(Boolean);
+        if(ned.length) alert("Sonuç yok — kaynaklara ulaşılamadı:\n\n"+ned.join("\n")
+          +(ned.length<2?"\n\nÇalışan kaynaktan da bu alanda sonuç gelmedi.":""));
+        else alert("Bu alanda mekan bulunamadı — alanı büyüt ya da kategori ekle."
+          +((t.zincir||t.disari)?("\n\nHam sonuç "+(t.gAd+t.oAd)+" · zincir elendi "+t.zincir+" · alan dışı "+t.disari):""));
+      }
     }catch(e){ alert("Tarama yapılamadı: "+(e.message||e)); }
     setYuk(false);
   }
@@ -3130,6 +3154,14 @@ function HedefHarita({kullanicilar,gkey,onKaydet,odak}){
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}},
       h("button",{onClick:()=>{setKose([]);setSonuc([]);setSecili({});},style:{padding:"11px 14px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},"Temizle ("+kose.length+")"),
       h("button",{disabled:yuk,onClick:tara,style:{flex:1,minWidth:140,padding:"11px 14px",borderRadius:12,background:yuk?"var(--line)":"var(--cyan)",color:yuk?"var(--mut2)":"#fff",fontSize:13.5,fontWeight:800}},yuk?"⏳ Taranıyor…":"Alanı tara")),
+    tani?h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:10,fontSize:11.5,fontWeight:700,lineHeight:1.55,
+      background:(tani.gHata||tani.oHata)?"#fff7ed":"var(--surf2)",
+      border:"1px solid "+((tani.gHata||tani.oHata)?"#fdba74":"var(--line)"),
+      color:(tani.gHata||tani.oHata)?"#9a3412":"var(--mut)"}},
+      h("div",null,"Google "+(tani.gHata?("✕ "+tani.gHata):(tani.gAd+" sonuç · "+tani.istek+" istek"))
+        +(tani.atlanan?(" · "+tani.atlanan+" hücre atlandı (kota koruması)"):"")),
+      h("div",null,"OpenStreetMap "+(tani.oHata?("✕ "+tani.oHata):(tani.oAd+" sonuç"))),
+      h("div",null,"Elenen: "+tani.zincir+" zincir · "+tani.disari+" alan dışı · "+tani.tekrar+" tekrar → "+tani.bulunan+" mekan")):null,
     sonuc.length>0?h(React.Fragment,null,
       h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:6}},
         h("div",{className:"lbl"},"📍 "+sonuc.length+" mekan · "+secSay+" seçili"),
