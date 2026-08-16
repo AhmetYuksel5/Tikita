@@ -49,7 +49,7 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo}=React; const h=React.createElement;
 
-const SURUM="F9";
+const SURUM="F10";
 const SAAT_MALIYET=12;          // ₺/saat — üretim panelindeki standart makine saati
 /* 🗓 HAKEDİŞ KESME TARİHİ — bu tarihten itibaren pazarlamacı hakedişi SATIŞA bağlıdır
    ve haftalık ayrı ödenir. Öncesinde tahsilattan mahsup ediliyordu (önce üretici). */
@@ -241,7 +241,11 @@ function defterUret(D,V){
 
   /* ——— 4.1 açılış fişi ——— */
   const filAlim=(D.giderler||[]).filter(g=>g.tur==="Filament alımı");
-  const alinanKg=filAlim.reduce((s,g)=>s+num(g.kg),0);
+  /* ⚠ gider kaydında 'kg' diye bir alan hiç yazılmıyor — admin filament alımını
+     'miktar' alanına yazıyor (admin.html · ek.miktar). Alan adı tutmadığı için
+     alinanKg daima 0 çıkıyor, açılış filament stoğu satın alınan tüm kg kadar
+     şişiyor ve fark 500 Sermaye'ye biniyordu. İkisini de kabul et. */
+  const alinanKg=filAlim.reduce((s,g)=>s+(num(g.kg)||num(g.miktar)),0);
   const dusenKg=(D.filamentler||[]).reduce((s,f)=>s+num(f.dusenKg),0);
   const kgFiyatOrt=(()=>{ const f=(D.filamentler||[]).filter(x=>num(x.kgFiyat)>0);
     return f.length? f.reduce((s,x)=>s+num(x.kgFiyat),0)/f.length : 600; })();
@@ -328,13 +332,26 @@ function defterUret(D,V){
   (D.hareketler||[]).forEach(x=>{
     const mal=bm(x.urunId), a=num(x.adet);
     if(x.tip==="al"&&a>0&&mal>0)
-      ek(x.tarih,"stok","Çantaya çıkış · "+(x.urunAd||""),[{h:"152.2",b:a*mal},{h:depoH(x.urunId),a:a*mal}],"har:"+x.id);
+      /* Çantaya çıkan mal montajdan geçmiş, 152.1 Mamuller'de durur.
+         depoH() parçalı üründe 151 Yarı Mamuller döndürüyordu → 151 negatife
+         iniyor, 152.1 şişiyordu. Mamul çıkışı her zaman 152.1'den. */
+      ek(x.tarih,"stok","Çantaya çıkış · "+(x.urunAd||""),[{h:"152.2",b:a*mal},{h:"152.1",a:a*mal}],"har:"+x.id);
     else if(x.tip==="konsinye"&&a>0&&mal>0)
       ek(x.tarih,"konsinye","Konsinye bırakma · "+(x.urunAd||"")+" @ "+(x.yer||""),
         [{h:"152.3",b:a*mal},{h:"152.2",a:a*mal}],"har:"+x.id);
-    else if(x.tip==="iade"&&a>0&&mal>0)
-      ek(x.tarih,"konsinye","Konsinye iade · "+(x.urunAd||"")+" @ "+(x.yer||""),
-        [{h:"152.2",b:a*mal},{h:"152.3",a:a*mal}],"har:"+x.id);
+    else if(x.tip==="iade"&&a>0&&mal>0){
+      /* ⚠ 'iade' İKİ ayrı olay için yazılıyor:
+         · kaynak="konsinye" → raftan çantaya dönüş     (152.3 → 152.2)
+         · kaynak yok        → sefer sonu çanta→atölye  (152.2 → depo)
+         Eskiden ikisi de konsinye iadesi sayılıyordu; çanta şişip konsinye
+         negatife düşüyordu. Ayrım kaynak alanında zaten vardı, kullanılmıyordu. */
+      if(x.kaynak==="konsinye")
+        ek(x.tarih,"konsinye","Konsinye iade · "+(x.urunAd||"")+" @ "+(x.yer||""),
+          [{h:"152.2",b:a*mal},{h:"152.3",a:a*mal}],"har:"+x.id);
+      else
+        ek(x.tarih,"stok","Atölyeye dönüş · "+(x.urunAd||""),
+          [{h:"152.1",b:a*mal},{h:"152.2",a:a*mal}],"har:"+x.id);
+    }
   });
 
   /* ——— 4.6 satış ——— */
@@ -399,7 +416,16 @@ function defterUret(D,V){
   /* ——— 4.9 stant ——— */
   (D.hareketler||[]).forEach(x=>{ if(x.tip!=="stant") return;
     const f=num(x.fiyat); if(f<=0) return;
-    ek(x.tarih,"stant","Stant bedeli · "+(x.yer||""),[{h:"631.9",b:f},{h:"100",a:f}],"har:"+x.id); });
+    /* ⚠ Stant bedeli GELİRDİ, gider olarak yazılıyordu — kâr 2×bedel kadar
+       yanlış yöne kayıyor, üstelik kasa da azaltılıyordu. Ana uygulama bunu
+       gelir sayıyor (index.html · standGelir → satToplam). */
+    if(x.mod==="hediye"){
+      ek(x.tarih,"stant","Stant · hediye · "+(x.yer||""),[{h:"631.9",b:f},{h:"100",a:f}],"har:"+x.id);
+    } else {
+      const {net,kdv}=ayir(f);
+      ek(x.tarih,"stant","Stant geliri · "+(x.yer||""),
+        [{h:"100",b:f},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
+    } });
 
   /* ——— 4.9b nakit teslim: saha kasası → Tikita kasası ——— */
   (D.hareketler||[]).forEach(x=>{ if(x.tip!=="nakitTeslim") return;
@@ -460,7 +486,13 @@ function defterUret(D,V){
     fiziki["152.1"]+=num(u.stokta)*m;
     fiziki["152.2"]+=Object.keys(u.pazStokK||{}).reduce((s,k)=>s+num(u.pazStokK[k]),0)*m;
     fiziki["152.3"]+=num(u.konsinye)*m;
-    fiziki["152.4"]+=num(u.montajda)*m; });
+    /* ⚠ u.montajda diye bir ALAN YOK — admin ekranında türetiliyor, stok_urun'a
+       hiç yazılmıyor. Bu yüzden 152.4 fiziki sayımı daima 0 çıkıyor ve montajdaki
+       her mal her kapanışta sayım farkına dönüşüyordu. Gerçek kaynak montaj görevi. */
+  });
+  (D.montajGorev||[]).forEach(g=>{ if(!g||g.durum!=="alindi") return;
+    const m=bm(g.urunId); if(m<=0) return;
+    fiziki["152.4"]+=num(g.alinanAdet)*m; });
   (D.filamentler||[]).forEach(f=>{ fiziki["150"]+=num(f.stokKg)*num(f.kgFiyat); });
   (D.sarflar||[]).forEach(s=>{ fiziki["157"]+=num(s.stokta)*num(s.birimFiyat); });
 
@@ -1084,8 +1116,11 @@ function hareketAkisi(D){
     if(g.teslimTarih) ekle(g.teslimTarih,"montaj","📤","Montajcı teslim etti · "+u,
       ile(num(g.teslimAdet)+" adet"+(num(g.kusurAdet)>0?(" · "+num(g.kusurAdet)+" kusurlu"):""),k),
       num(g.teslimAdet)*num(g.birimUcret),num(g.teslimAdet),r);
-    if(g.odendi) ekle(g.odemeTarih||g.teslimTarih||g.tarih,"para","✅","Montaj hakedişi ödendi · "+k,
-      num(g.teslimAdet)+" × "+u,num(g.teslimAdet)*num(g.birimUcret),0,g.giderId?("gid:"+g.giderId):r); });
+    /* Dördü de aynı kalıpta: başlık = "eylem · ürün", alt satır = "adet · kişi".
+       Ödeme satırı ürün adı taşımıyordu; ürün süzgeci onu kaçırıyordu. */
+    if(g.odendi) ekle(g.odemeTarih||g.teslimTarih||g.tarih,"para","✅","Montaj hakedişi ödendi · "+u,
+      ile(num(g.teslimAdet)+" adet × "+tl(num(g.birimUcret)),k),
+      num(g.teslimAdet)*num(g.birimUcret),0,g.giderId?("gid:"+g.giderId):r); });
 
   (D.giderler||[]).forEach(g=>{ if(!g||!g.id) return;
     ekle(g.tarih,"para","💸","Masraf · "+(g.tur||"Diğer"),
