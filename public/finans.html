@@ -49,7 +49,7 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo}=React; const h=React.createElement;
 
-const SURUM="F11";
+const SURUM="F12";
 const SAAT_MALIYET=12;          // ₺/saat — üretim panelindeki standart makine saati
 /* 🗓 HAKEDİŞ KESME TARİHİ — bu tarihten itibaren pazarlamacı hakedişi SATIŞA bağlıdır
    ve haftalık ayrı ödenir. Öncesinde tahsilattan mahsup ediliyordu (önce üretici). */
@@ -322,7 +322,11 @@ function defterUret(D,V){
     const bir=num(g.birimUcret); const mal=bm(g.urunId);
     // montaj.html "alinanTarih" yazar; eski kayıtlarda alisTarih olabilir
     const alisT=g.alinanTarih||g.alisTarih||g.tarih;
-    if(alinan>0&&alisT) ek(alisT,"montaj","Montaja çıkış · "+(g.urunAd||""),
+    /* ⚠ Kısmi teslimde kalan için açılan DEVİR görevi yeni bir çıkış değildir —
+       o mal ana görevin çıkışında zaten montajcıya verilmişti. İkisi de çıkış
+       yazınca aynı fiziksel adet iki kez 152.4'e biniyordu (canlıda 46 adet
+       iki kez = 92). Devir görevinde çıkış fişi üretilmez. */
+    if(alinan>0&&alisT&&!g.devirId) ek(alisT,"montaj","Montaja çıkış · "+(g.urunAd||""),
       [{h:"152.4",b:alinan*mal},{h:depoH(g.urunId),a:alinan*mal}],"mg:"+g.id+":c");
     if(teslim>0||kusur>0){
       const t=g.teslimTarih||g.tarih;
@@ -490,7 +494,8 @@ function defterUret(D,V){
   (D.urunler||[]).forEach(u=>{ const m=bm(u.id); if(m<=0) return;
     fiziki["152.1"]+=num(u.stokta)*m;
     fiziki["152.2"]+=Object.keys(u.pazStokK||{}).reduce((s,k)=>s+num(u.pazStokK[k]),0)*m;
-    fiziki["152.3"]+=num(u.konsinye)*m;
+    /* ⚠ stok_urun.konsinye sayacı canlıda TÜM ürünlerde 0 — ölü alan.
+       Gerçek konsinye, bırakış kayıtlarının kalan bakiyesidir (canlıda 933 adet). */
     /* ⚠ u.montajda diye bir ALAN YOK — admin ekranında türetiliyor, stok_urun'a
        hiç yazılmıyor. Bu yüzden 152.4 fiziki sayımı daima 0 çıkıyor ve montajdaki
        her mal her kapanışta sayım farkına dönüşüyordu. Gerçek kaynak montaj görevi. */
@@ -498,6 +503,10 @@ function defterUret(D,V){
   (D.montajGorev||[]).forEach(g=>{ if(!g||g.durum!=="alindi") return;
     const m=bm(g.urunId); if(m<=0) return;
     fiziki["152.4"]+=num(g.alinanAdet)*m; });
+  /* Konsinye fizikisi ürün sayacından değil, açık bırakış kalanlarından. */
+  (D.hareketler||[]).forEach(x=>{ if(x.tip!=="konsinye") return;
+    const m=bm(x.urunId); if(m<=0) return;
+    fiziki["152.3"]+=Math.max(0,num(x.kalan))*m; });
   (D.filamentler||[]).forEach(f=>{ fiziki["150"]+=num(f.stokKg)*num(f.kgFiyat); });
   (D.sarflar||[]).forEach(s=>{ fiziki["157"]+=num(s.stokta)*num(s.birimFiyat); });
 
@@ -1015,7 +1024,7 @@ function App(){
       margin:"0 auto 16px",animation:"sp .8s linear infinite"}}),
     h("div",{style:{fontSize:13,fontWeight:700}},"Defter kuruluyor"));
 
-  const SEK=[{k:"panel",ad:"Panel"},{k:"hareket",ad:"Hareketler"},{k:"gelir",ad:"Gelir Tablosu"},{k:"bilanco",ad:"Bilanço"},
+  const SEK=[{k:"panel",ad:"Panel"},{k:"hareket",ad:"Hareketler"},{k:"kapsam",ad:"Kapsam"},{k:"gelir",ad:"Gelir Tablosu"},{k:"bilanco",ad:"Bilanço"},
     {k:"nakit",ad:"Nakit Akış"},{k:"analiz",ad:"Analiz"},{k:"urun",ad:"Ürün Kârlılığı"},
     {k:"mizan",ad:"Mizan"},{k:"defter",ad:"Yevmiye"},{k:"denetim",ad:"Denetim"},{k:"varsayim",ad:"Varsayım"}];
   const ARALIK=[["hafta","Bu hafta"],["ay","Bu ay"],["gecenay","Geçen ay"],["ceyrek","3 ay"],["yil","Yıl"],["tum","Tümü"],["ozel","Özel"]];
@@ -1045,6 +1054,7 @@ function App(){
     h("div",{style:{padding:"6px 12px 0"}},
       sekme==="panel"?h(Panel,{H:HES,V,b0,b1}):
       sekme==="hareket"?h(HareketEkran,{H:HES,b0,b1}):
+      sekme==="kapsam"?h(KapsamEkran,{H:HES,V}):
       sekme==="gelir"?h(GelirEkran,{H:HES,V}):
       sekme==="bilanco"?h(BilancoEkran,{H:HES}):
       sekme==="nakit"?h(NakitEkran,{H:HES,V,b0,b1}):
@@ -1056,6 +1066,156 @@ function App(){
       h(VarsayimEkran,{V,setV,H:HES})));
 }
 
+
+/* ═════════ KAPSAM & MUTABAKAT ═════════
+   "Bütün raporlar defteri baz alsın" ancak defter her olayı görüyorsa olur.
+   Bu ekran iki soruyu cevaplar:
+     1· Hangi ham kayıt deftere girdi, hangisi girmedi, neden?
+     2· Defterin söylediği rakam ile ekranların söylediği tutuyor mu?
+   Hiçbir şeyi düzeltmez — yalnız gösterir. Düzeltme kararı buradan çıkar. */
+
+/* Bir olayın deftere girip girmediği, fişlerin ref alanından anlaşılır.
+   ref biçimleri: har:<id> · gid:<id> · mg:<id>[:c] · sab:<id>:<ay> · plan:<id> */
+function fisKok(fisler){ const m={};
+  (fisler||[]).forEach(f=>{ const r=String(f.ref||""); if(!r) return;
+    const kok=r.split(":").slice(0,2).join(":"); m[kok]=(m[kok]||0)+1; });
+  return m; }
+
+/* Mali olay olmayan kayıtlar "eksik" sayılmamalı — ayrı işaretlenir. */
+const MALI_DEGIL={diplomasi:"ziyaret · para/mal hareketi yok"};
+
+function kapsamRapor(D,fisler){
+  const K=fisKok(fisler); const bul=r=>!!K[r];
+  const B=[];
+  const grup=(baslik,kayitlar,anahtar,refOn,notlar)=>{
+    const g={};
+    (kayitlar||[]).forEach(x=>{ const k=(anahtar(x)||"(tanımsız)");
+      const o=g[k]||(g[k]={ad:k,n:0,girdi:0,ornek:x});
+      o.n++; if(bul(refOn+":"+x.id)) o.girdi++; });
+    B.push({baslik,n:(kayitlar||[]).length,
+      satir:Object.values(g).sort((a,b)=>b.n-a.n).map(o=>({...o,not:(notlar||{})[o.ad]||""}))}); };
+
+  grup("pazarlama_hareket",D.hareketler,x=>x.tip,"har",MALI_DEGIL);
+  grup("stok_hareket",D.stokHareket,x=>x.sebep,"sh",{});
+  /* Devir görevi bilerek fiş üretmez (çıkışı ana görevde yazıldı) — bunu
+     "eksik" göstermemek için ayrı satırda ve notlu. */
+  grup("montaj_gorev",D.montajGorev,x=>x.durum+(x.devirId?" · devir":""),"mg",
+    {"alindi · devir":"çıkışı ana görevde yazıldı · ikinci fiş yazılmaz",
+     "teslim · devir":"çıkışı ana görevde yazıldı"});
+  grup("gider",D.giderler,x=>x.tur,"gid",{});
+  return B; }
+
+/* Aynı fiziksel olayı iki ayrı koleksiyon yazıyorsa, ikisini de deftere
+   bağlamak çift sayım demektir. Bilinen eşleşmeler burada sayılır. */
+function cakismaRapor(D){
+  const say=(L,f)=>(L||[]).filter(f).length;
+  const H=D.hareketler||[], S=D.stokHareket||[], M=D.montajGorev||[];
+  return [
+    {olay:"Pazarlamacıya mal verme",a:'pazarlama_hareket · tip="al"',an:say(H,x=>x.tip==="al"),
+      b:'stok_hareket · sebep="cikis"',bn:say(S,x=>x.sebep==="cikis"),
+      secim:"pazarlama_hareket"},
+    {olay:"Atölyeye dönüş",a:'tip="iade" (kaynak yok)',an:say(H,x=>x.tip==="iade"&&x.kaynak!=="konsinye"),
+      b:'sebep="donus" + "iade"',bn:say(S,x=>x.sebep==="donus"||x.sebep==="iade"),
+      secim:"pazarlama_hareket"},
+    {olay:"Montajdan mal girişi",a:"montaj_gorev · teslimAdet",an:say(M,g=>g.durum==="teslim"),
+      b:'stok_hareket · sebep="montaj"',bn:say(S,x=>x.sebep==="montaj"),
+      secim:"montaj_gorev"},
+    {olay:"Montaja mal çıkışı",a:"montaj_gorev · alinanAdet",an:say(M,g=>!!g.alinanTarih),
+      b:'sebep="montajCikis"',bn:say(S,x=>x.sebep==="montajCikis"),
+      secim:"montaj_gorev"},
+    {olay:"Satış stok düşümü",a:'tip="satis" (SMM)',an:say(H,x=>x.tip==="satis"),
+      b:'sebep="satis"',bn:say(S,x=>x.sebep==="satis"),
+      secim:"pazarlama_hareket"},
+  ]; }
+
+/* Defter ne diyor, ekranlar ne diyor — yan yana. Fark varsa sebebi yazılır. */
+function mutabakatRapor(D,fisler,MZ,fiziki,V){
+  const bak=h=>(fisler||[]).reduce((s,f)=>s+f.s.filter(x=>x.h===h).reduce((z,x)=>z+num(x.b)-num(x.a),0),0);
+  const H=D.hareketler||[];
+  const sat=H.filter(x=>x.tip==="satis");
+  const etiketCiro=sat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
+  const verisCiro=sat.reduce((s,x)=>s+num(x.adet)*num(x.alisFiyat),0);
+  const acikAlacak=sat.filter(x=>!(x.gerilla||x.kaynak==="gerilla"))
+    .reduce((s,x)=>s+Math.max(0,num(x.adet)*num(x.satisFiyat)-num(x.tahsil)),0);
+  const marj=sat.filter(x=>!(x.gerilla||x.kaynak==="gerilla"))
+    .reduce((s,x)=>s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)),0);
+  const tablaTop=H.filter(x=>x.tip==="tabla").reduce((s,x)=>s+num(x.tutar),0);
+  const tablaOde=H.filter(x=>x.tip==="tablaOde").reduce((s,x)=>s+num(x.tutar),0);
+  const montajHak=(D.montajGorev||[]).filter(g=>g.durum==="teslim")
+    .reduce((s,g)=>s+num(g.teslimAdet)*num(g.birimUcret),0);
+  const R=(ad,defter,ekran,aciklama)=>({ad,defter:r2(defter),ekran:r2(ekran),
+    fark:r2(defter-ekran),aciklama});
+  return [
+    R("Satış hasılatı","600 hesabı: "+0,0,""),   // yer tutucu, aşağıda değiştirilir
+  ].slice(0,0).concat([
+    {ad:"Satış hasılatı (600)",defter:r2(-bak("600")),ekran:r2(V.hasilatGorusu==="net"?verisCiro:etiketCiro),
+      aciklama:V.hasilatGorusu==="net"?"veriliş fiyatından":"etiket fiyatından · KDV ayrıştırılır"},
+    {ad:"Alıcılar (120)",defter:r2(bak("120")),ekran:r2(acikAlacak),
+      aciklama:"defter tahsilatı düşer; ekran satış kaydındaki tahsil alanından hesaplar"},
+    {ad:"Personele borç (335)",defter:r2(-bak("335")),ekran:r2(marj+tablaTop+montajHak-tablaOde),
+      aciklama:"pazarlamacı marjı + tabla + montaj hakedişi − ödenenler"},
+    {ad:"Depo mamul (152.1)",defter:r2(bak("152.1")),ekran:r2(num(fiziki["152.1"])),
+      aciklama:"ekran = stok_urun.stokta × birim maliyet"},
+    {ad:"Çantadaki mal (152.2)",defter:r2(bak("152.2")),ekran:r2(num(fiziki["152.2"])),
+      aciklama:"ekran = pazStokK × birim maliyet"},
+    {ad:"Konsinyedeki mal (152.3)",defter:r2(bak("152.3")),ekran:r2(num(fiziki["152.3"])),
+      aciklama:"ekran = stok_urun.konsinye × birim maliyet"},
+    {ad:"Montajdaki mal (152.4)",defter:r2(bak("152.4")),ekran:r2(num(fiziki["152.4"])),
+      aciklama:"ekran = montaj_gorev.alinanAdet × birim maliyet"},
+  ].map(x=>({...x,fark:r2(x.defter-x.ekran)}))); }
+
+function KapsamEkran({H,V}){
+  const {D,fisler,KP}=H;
+  const KAP=useMemo(()=>kapsamRapor(D,fisler),[D,fisler]);
+  const CAK=useMemo(()=>cakismaRapor(D),[D]);
+  const MUT=useMemo(()=>mutabakatRapor(D,fisler,H.MZ,KP.fiziki||{},V),[D,fisler,KP,V]);
+  const esik=(x)=>Math.max(50,Math.abs(x.ekran)*0.02);
+  const rozet=(o)=>{
+    if(o.not) return ["mali olay değil","bilgi"];
+    if(o.girdi>=o.n) return ["deftere girdi","ok"];
+    if(o.girdi===0) return ["deftere GİRMİYOR","hata"];
+    return [o.girdi+"/"+o.n+" girdi","uyari"]; };
+  return h("div",null,
+    h(Bolum,{b:"Kayıt kapsamı",alt:"hangi ham kayıt deftere girdi"},
+      KAP.map((g,i)=>h("div",{key:i,style:{marginBottom:i<KAP.length-1?14:0}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}},
+          h("span",{className:"mono",style:{fontSize:12.5,fontWeight:800}},g.baslik),
+          h("span",{style:{fontSize:11.5,color:"var(--mut)",fontWeight:700}},ad(g.n)+" kayıt")),
+        h("table",null,h("tbody",null,g.satir.map((o,j)=>{ const rz=rozet(o);
+          return h("tr",{key:j},
+            h("td",{style:{fontSize:12.5,fontWeight:700}},o.ad),
+            h("td",{className:"n",style:{width:64,fontSize:12.5}},ad(o.n)),
+            h("td",{style:{width:150}},h(Rozet,{t:rz[0],r:rz[1]})),
+            h("td",{style:{fontSize:11,color:"var(--mut)"}},o.not||"")); })))))),
+    h(Bolum,{b:"Çift sayım riski",alt:"aynı olayı iki koleksiyon yazıyor — biri seçilmeli"},
+      h("table",null,h("thead",null,h("tr",null,
+        h("th",null,"Olay"),h("th",null,"Kaynak A"),h("th",{className:"n"},"A"),
+        h("th",null,"Kaynak B"),h("th",{className:"n"},"B"),h("th",null,"Defterin seçtiği"))),
+        h("tbody",null,CAK.map((c,i)=>h("tr",{key:i},
+          h("td",{style:{fontSize:12.5,fontWeight:700}},c.olay),
+          h("td",{className:"mono",style:{fontSize:11}},c.a),
+          h("td",{className:"n",style:{fontWeight:800}},ad(c.an)),
+          h("td",{className:"mono",style:{fontSize:11}},c.b),
+          h("td",{className:"n",style:{fontWeight:800,color:c.bn?"var(--neg)":"var(--mut2)"}},ad(c.bn)),
+          h("td",null,h(Rozet,{t:c.secim,r:"bilgi"}))))))),
+    h(Bolum,{b:"Mutabakat",alt:"defter ne diyor · ekranlar ne diyor"},
+      h("table",null,
+        h("thead",null,h("tr",null,
+          h("th",null,"Kalem"),h("th",{className:"n"},"Defter"),h("th",{className:"n"},"Ekran"),
+          h("th",{className:"n"},"Fark"),h("th",null,""))),
+        h("tbody",null,MUT.map((m,i)=>{ const tut=Math.abs(m.fark)<=esik(m);
+          return h("tr",{key:i},
+            h("td",{style:{fontSize:12.5,fontWeight:700}},m.ad),
+            h("td",{className:"n"},tl(m.defter)),
+            h("td",{className:"n"},tl(m.ekran)),
+            h("td",{className:"n",style:{fontWeight:800,color:tut?"var(--pos)":"var(--neg)"}},tl(m.fark)),
+            h("td",null,h(Rozet,{t:tut?"tutuyor":"AYRIŞIYOR",r:tut?"ok":"hata"}))); }))),
+      h("div",{style:{padding:"10px 14px",fontSize:11.5,color:"var(--mut)",lineHeight:1.6}},
+        MUT.filter(m=>Math.abs(m.fark)>esik(m)).length
+          ? MUT.filter(m=>Math.abs(m.fark)>esik(m)).map((m,i)=>
+              h("div",{key:i,style:{marginBottom:4}},"• ",h("b",null,m.ad),": ",m.aciklama))
+          : h("div",{style:{color:"var(--pos)",fontWeight:700}},"Bütün kalemler tutuyor."))));
+}
 
 /* ═════════ HAREKETLER — bütün olayların tek akışı ═════════
    Tasarım kararı: bir OLAY ile onun YEVMİYE karşılığı ayrı iki katman.
