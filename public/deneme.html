@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v98";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v99";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -2936,9 +2936,19 @@ function App(){
       setSeferSheet(null); }catch(e){ console.error(e); say("⚠ İşlem tamamlanamadı"); } finally{ setSbekle(false); } }
   async function cantaEkle(items,mod){ if(sbekle) return; setSbekle(true);
     const bosalt=mod==="bosalt";
+    /* 🧾 Çanta hareketi de bir OLAYDIR — eskiden yalnız sayaçlar (pazStokK, stokta)
+       oynatılıyor, hiçbir hareket kaydı yazılmıyordu. Bu yüzden defterde çantaya
+       giriş görünmüyor, çıkış görünüyordu: 152.2 hesabı eksiye düşüyordu.
+       Ana uygulamada bu kayıt vardı ama yalnız açık sefer varsa yazılıyordu;
+       sahada bu ekran kullanılınca "al" akışı tamamen durmuştu. */
+    const kul={kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||""};
+    const now=new Date().toISOString();
+    const sid=(aktifSefer&&aktifSefer.id)||"";
     try{ for(const it of items){ if(num(it.adet)>0){
           if(bosalt) await cantaDelta(it.id,it.ad,-num(it.adet),+num(it.adet));   // çantadan atölyeye (stok artar) — iade
-          else await cantaDelta(it.id,it.ad,+num(it.adet),-num(it.adet)); } }       // atölyeden çantaya (stok düşer)
+          else await cantaDelta(it.id,it.ad,+num(it.adet),-num(it.adet));         // atölyeden çantaya (stok düşer)
+          await save("pazarlama_hareket",{...kul,tip:bosalt?"iade":"al",kaynak:"canta",
+            urunId:it.id||"",urunAd:it.ad||"",adet:num(it.adet),...(sid?{seferId:sid}:{}),tarih:now}); } }
       setCantaSheet(false); say(bosalt?"📤 Atölyeye bırakıldı — stoğa eklendi":"🎒 Çantaya eklendi — atölyeden düşüldü"); }
     catch(e){ console.error(e); say(bosalt?"⚠ Boşaltılamadı":"⚠ Eklenemedi"); } finally{ setSbekle(false); } }
   // 🔑 kendi şifreni değiştir
