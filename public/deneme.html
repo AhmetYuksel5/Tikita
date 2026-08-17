@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v103";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v104";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -820,14 +820,36 @@ function ziyaretler(har){
      Aynı mekana hem konsinye bırakılıp hem doğrudan satış yapılabildiği için
      sonraki sayımda hangi ürünün hangi havuzdan olduğu ayrı ayrı tutulur. */
   const raf={},rafD={},mul={},mulD={};   // yürüyen durum — ziyaretler kronolojik işlenir
-  const dus=(o,od,ad,n)=>{ const q=num(o[ad]), br=q>0?num(od[ad])/q:0;
-    o[ad]=q-n; od[ad]=Math.max(0,num(od[ad])-n*br); };
+  /* Rafta olmayandan düşülemez. Adet ile tutar birlikte klemplenmezse (eskiden
+     adet negatife düşüyor, tutar 0'da kalıyordu) sonraki bırakış doğru tutarı
+     yanlış adede bölüyor ve birim fiyat bozuluyordu. */
+  const dus=(o,od,ad,n)=>{ const q=num(o[ad]), br=q>0?num(od[ad])/q:0, d=Math.min(q,num(n));
+    if(d>0){ o[ad]=q-d; od[ad]=Math.max(0,num(od[ad])-d*br); }
+    return Math.max(0,num(n)-d); };   // karşılanamayan kısım
   const ekle=(o,od,ad,n,br)=>{ o[ad]=num(o[ad])+n; od[ad]=num(od[ad])+n*num(br); };
   const rafDus=(ad,n)=>dus(raf,rafD,ad,n);
+  /* Bir ziyarette hem bırakılıp hem o raftan satılabilir. Sayım aşamasında raf
+     henüz dolmadığı için karşılanamayan miktar burada birikir, bırakıştan sonra
+     düşülür. Ziyaret sonunda kalan açık taşınmaz — gerçek bir fazla satıştır. */
+  let eksik={};
   const rafEkle=(ad,n,br)=>ekle(raf,rafD,ad,n,br);
   const kopya=o=>{ const y={}; Object.keys(o).forEach(k2=>{ if(num(o[k2])>0) y[k2]=num(o[k2]); }); return y; };
+  /* Uygulama dışında kapanmış konsinye (excel/geçmiş aktarımı): kaydın kalan'ı
+     adetten az ama bunu açıklayan satış/iade olayı yok. Aradaki fark bırakış
+     anında rafa girmez — yoksa rapor, ana ekranların gösterdiği açık konsinyeyle
+     çelişir. Olaylarla açıklanabilen her yerde bu düzeltme etkisizdir. */
+  const disari={};
+  (function(){ const acik={},olay={};
+    L.forEach(x=>{ const u=x.urunAd||"?";
+      if(rafArtir(x)&&x.kalan!=null) acik[u]=num(acik[u])+num(x.adet)-num(x.kalan);
+      if(x.tip==="iade"?(x.kaynak!=="canta"):rafAzalt(x)) olay[u]=num(olay[u])+num(x.adet); });
+    Object.keys(acik).forEach(u=>{ const d=num(acik[u])-num(olay[u]); if(d>0.001) disari[u]=d; }); })();
+  let hicKons=false;   // bu kaleye bugüne dek hiç konsinye girdi mi
   const out=gr.map((g,i)=>{
     const once=kopya(raf), onceD={...rafD};
+    /* ilkGiris: raf o an boş olması yetmez — raf tükenip yeniden dolduğunda
+       bu ziyaret "ilk giriş" değildir, "tekrar bırakış"tır. */
+    const ilkGiris=!hicKons;
     const sat=[],iade=[],birak=[],hed=[],diger=[]; let tah=0,ciro=0,tahEk=0;
     /* Kategori sırasıyla işlenir (sayım → satış → iade → bırakış); kayıt sırası
        ne olursa olsun rapor hep aynı mantığı gösterir. */
@@ -836,18 +858,26 @@ function ziyaretler(har){
       if(x.tip==="satis"){ const tut=x.gerilla?(num(x.tahsil)||n*num(x.satisFiyat)):n*num(x.satisFiyat);
         sat.push({ad,adet:n,birim:num(x.satisFiyat),tutar:tut,raftan:x.kaynak==="konsinye",seyyar:!!x.gerilla});
         ciro+=tut; tahEk+=num(x.tahsil); return; }
-      if(x.tip==="iade"){ iade.push({ad,adet:n}); return; }
+      if(x.tip==="iade"){ if(x.kaynak!=="canta") iade.push({ad,adet:n}); return; }
       if(x.tip==="konsinye"&&x.konsMod!=="hediye"){ birak.push({ad,adet:n,birim:num(x.satisFiyat),tutar:n*num(x.satisFiyat)}); return; }
       if(x.tip==="hediye"){ hed.push({ad,adet:n,raftan:x.kaynak==="konsinye"}); return; }
       // envanteri kıpırdatmayan işlemler de rapora düşsün — yoksa ziyaret boş görünür
       if(x.tip==="diplomasi"){ diger.push({t:"⚔️ Ziyaret",v:(x.not||"").slice(0,60)||"—"}); return; }
       if(x.tip==="stant"){ diger.push({t:"🎪 Stant",v:num(x.fiyat)>0?tl(num(x.fiyat)):"—"}); return; } });
     // 1) sayım: raftan satılan + raftan hediye edilen düşülür
-    g.kayit.forEach(x=>{ if(rafAzalt(x)&&x.tip!=="iade") rafDus(x.urunAd||"?",num(x.adet)); });
+    eksik={};
+    g.kayit.forEach(x=>{ if(rafAzalt(x)&&x.tip!=="iade"){ const u=x.urunAd||"?";
+      eksik[u]=num(eksik[u])+rafDus(u,num(x.adet)); } });
     const sayim=kopya(raf), sayimD={...rafD};
     // 2) iade alınanlar raftan çıkar  3) yeni bırakılanlar rafa girer
-    g.kayit.forEach(x=>{ if(x.tip==="iade"&&x.kaynak==="konsinye") rafDus(x.urunAd||"?",num(x.adet));
-      else if(rafArtir(x)) rafEkle(x.urunAd||"?",num(x.adet),num(x.satisFiyat)); });
+    /* Kaledeki her iade raftan çıkar — kaynak alanı taşımayan eski kayıtlar da.
+       (Çantadan depoya dönüş rafla ilgisizdir, o dışarıda kalır.) */
+    g.kayit.forEach(x=>{ const u=x.urunAd||"?";
+      if(x.tip==="iade"&&x.kaynak!=="canta") eksik[u]=num(eksik[u])+rafDus(u,num(x.adet));
+      else if(rafArtir(x)){ rafEkle(u,num(x.adet),num(x.satisFiyat)); hicKons=true;
+        if(num(disari[u])>0){ const d=Math.min(num(disari[u]),num(raf[u])); rafDus(u,d); disari[u]=num(disari[u])-d; } } });
+    // bırakış sonrası, aynı ziyarette karşılanamamış çıkışlar kapatılır
+    Object.keys(eksik).forEach(u=>{ if(num(eksik[u])>0) eksik[u]=rafDus(u,num(eksik[u])); });
     const guncel=kopya(raf), guncelD={...rafD};
     /* 4) doğrudan satılan müşterinin malı olur — standda durur ama konsinye değildir */
     g.kayit.forEach(x=>{ if(dogrudanSatis(x)) ekle(mul,mulD,x.urunAd||"?",num(x.adet),num(x.satisFiyat)); });
@@ -861,9 +891,7 @@ function ziyaretler(har){
     const birakL=birlestir(birak,x=>x.ad+"|"+x.birim);
     const satL=birlestir(sat,x=>x.ad+"|"+x.birim+"|"+(x.raftan?1:0)+"|"+(x.seyyar?1:0));
     const top=L2=>L2.reduce((s,x)=>s+num(x.tutar),0);
-    return {i,bas:g.bas,son:g.son,kayit:g.kayit,once,onceD,sayim,sayimD,guncel,guncelD,mulk,mulkD,
-      /* ilkGiris: bu ziyarete girerken rafta hiç konsinye yoktu — sayılacak bir şey de yok */
-      ilkGiris:Object.keys(once).length===0,
+    return {i,bas:g.bas,son:g.son,kayit:g.kayit,once,onceD,sayim,sayimD,guncel,guncelD,mulk,mulkD,ilkGiris,
       sat:satL,
       /* Üç ayrı satış: raftan (konsinye çözülür) · doğrudan (mal müşterinin olur) · seyyar (mekanla ilgisiz) */
       satKons:satL.filter(x=>x.raftan), satDog:satL.filter(x=>!x.raftan&&!x.seyyar), satSey:satL.filter(x=>x.seyyar),
@@ -892,14 +920,14 @@ function rafBirakAyni(guncel,birak){
 }
 function ziyaretMetni(k,z){
   const d=new Date(z.son);
-  const bas=(k&&k.ad?("🏬 "+k.ad+"\n"):"")+(isNaN(+d)?"":d.toLocaleDateString("tr-TR",{day:"2-digit",month:"long",year:"numeric"})+" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}))+"\n";
+  const bas=(k&&k.ad?("🏬 "+k.ad+"\n"):"")+((isNaN(+d)||+d<=0)?"tarihsiz kayıt":(d.toLocaleDateString("tr-TR",{day:"2-digit",month:"long",year:"numeric"})+" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})))+"\n";
   const blok=(bl,rows)=>rows.length?("\n"+bl+"\n"+rows.join("\n")+"\n"):"";
   const rafRow=r=>"• "+r.ad+" ×"+r.adet+(r.birim>0?(" × "+tl(r.birim)+" = "+tl(r.tutar)):"");
   const rafTut=(o,dm)=>rafTop(o)+" adet"+(rafDeger(o,dm)>0.5?(" · "+tl(rafDeger(o,dm))):"");
   const satRow=s=>"• "+s.ad+" ×"+s.adet+" × "+tl(s.birim)+" = "+tl(s.tutar);
   const mulkVar=rafTop(z.mulk)>0;
   return bas
-    +(z.ilkGiris?"":blok("SAYIM SONRASI RAFTA",rafSat(z.sayim,z.sayimD).length
+    +(z.ilkGiris?"":blok("SAYIM SONRASI MÜŞTERİDE",rafSat(z.sayim,z.sayimD).length
       ?rafSat(z.sayim,z.sayimD).map(rafRow).concat(["Toplam "+rafTut(z.sayim,z.sayimD)])
       :["• rafta konsinye kalmamış"]))
     +blok("KONSİNYEDEN SATILAN",z.satKons.map(satRow)
@@ -913,11 +941,12 @@ function ziyaretMetni(k,z){
       .concat(z.birak.length?["Toplam: "+z.birakAdet+" adet · "+tl(z.birakTop)]:[]))
     +blok("HEDİYE",z.hed.map(s=>"• "+s.ad+" ×"+s.adet))
     +blok("DİĞER",(z.diger||[]).map(s=>"• "+s.t+(s.v&&s.v!=="—"?(" · "+s.v):"")))
-    +(rafBirakAyni(z.guncel,z.birak)?"":blok(mulkVar?"STANDIN KONSİNYE DURUMU":"GÜNCEL DURUM · RAFTA",
+    +((rafBirakAyni(z.guncel,z.birak)||(rafTop(z.once)===0&&rafTop(z.guncel)===0))?"":blok(
+      mulkVar?"STANDIN KONSİNYE DURUMU":"STANDIN GÜNCEL DURUMU",
       rafSat(z.guncel,z.guncelD).length
         ?rafSat(z.guncel,z.guncelD).map(rafRow).concat(["Toplam "+rafTut(z.guncel,z.guncelD)])
         :["• konsinye kalmadı"]))
-    +blok("MÜŞTERİNİN SATIN ALDIĞI",mulkVar
+    +blok("MÜŞTERİNİN BUGÜNE DEK SATIN ALDIĞI",mulkVar
       ?rafSat(z.mulk,z.mulkD).map(rafRow).concat(["Toplam "+rafTut(z.mulk,z.mulkD)]):[])
     +(z.tah>0.5?("\nTahsil edilen: "+tl(z.tah)+"\n"):"");
 }
@@ -941,7 +970,9 @@ function fisBolumler(z){
   if(!z.ilkGiris) B.push(rafSat(z.sayim).length
     ?{b:"SAYIM SONRASI MÜŞTERİDE",satir:rs(z.sayim,z.sayimD),toplam:{ad:"Toplam",sag:rafTut(z.sayim,z.sayimD)}}
     :{b:"SAYIM SONRASI MÜŞTERİDE",satir:[{ad:"Rafta konsinye kalmamış",alt:"",sag:"0 adet"}]});
-  const satSat=L=>L.map(x=>({ad:x.ad,alt:x.adet+" × "+tl(x.birim),sag:tl(x.tutar),vurgu:true}));
+  // fiyat yoksa "0 ₺" yazılmaz — raf satırlarıyla aynı davranış
+  const satSat=L=>L.map(x=>({ad:x.ad,alt:x.adet+(x.birim>0?(" × "+tl(x.birim)):" adet"),
+    sag:x.birim>0?tl(x.tutar):(x.adet+" adet"),vurgu:x.birim>0}));
   if(z.satKons.length) B.push({b:"KONSİNYEDEN SATILAN",satir:satSat(z.satKons),
     toplam:z.satKons.length>1?{ad:"Toplam",sag:tl(z.satKonsTop)}:null});
   /* Doğrudan satış konsinyeden ayrı bölümde: mal müşterinin olur, standda
@@ -956,12 +987,16 @@ function fisBolumler(z){
     toplam:{ad:"Toplam",sag:z.birakAdet+" adet  ·  "+tl(z.birakTop)}});
   if(z.hed.length) B.push({b:"HEDİYE",satir:z.hed.map(x=>({ad:x.ad,alt:"",sag:x.adet+" adet"}))});
   if((z.diger||[]).length) B.push({b:"DİĞER",satir:z.diger.map(x=>({ad:x.t,alt:"",sag:x.v||"—"}))});
-  // bırakılanla birebir aynıysa güncel durum ikinci kez yazılmaz
-  if(!rafBirakAyni(z.guncel,z.birak))
+  /* Güncel durum yazılmaz: (a) bırakılanla birebir aynıysa, (b) rafın öncesi de
+     sonrası da boşsa — sadece tahsilat/ziyaret kaydı olan uğrayışta anlamsız. */
+  const rafSessiz=rafTop(z.once)===0&&rafTop(z.guncel)===0;
+  if(!rafBirakAyni(z.guncel,z.birak)&&!rafSessiz)
     B.push({b:mulkVar?"STANDIN KONSİNYE DURUMU":"STANDIN GÜNCEL DURUMU",
       satir:rafSat(z.guncel).length?rs(z.guncel,z.guncelD):[{ad:"Konsinye kalmadı",alt:"",sag:"0 adet"}],
       toplam:rafSat(z.guncel).length?{ad:"Toplam",sag:rafTut(z.guncel,z.guncelD)}:null});
-  if(mulkVar) B.push({b:"MÜŞTERİNİN SATIN ALDIĞI",satir:rs(z.mulk,z.mulkD),
+  /* Bu havuz birikimlidir — mekanın kendi malını satması Tikita'da olay
+     üretmediği için azalmaz. Başlık bu yüzden zaman kapsamını taşır. */
+  if(mulkVar) B.push({b:"MÜŞTERİNİN BUGÜNE DEK SATIN ALDIĞI",satir:rs(z.mulk,z.mulkD),
     toplam:{ad:"Toplam",sag:rafTut(z.mulk,z.mulkD)}});
   return B;
 }
@@ -985,10 +1020,13 @@ function ziyaretPngCiz(k,z){
   const gr=g.createLinearGradient(0,0,W,BAS); gr.addColorStop(0,FIS_R.bas1); gr.addColorStop(1,FIS_R.bas2);
   g.fillStyle=gr; g.fillRect(0,0,W,BAS);
   g.fillStyle="#fff"; g.textBaseline="alphabetic";
-  F(52,800); g.fillText(kis((k&&k.ad)||"Kale",W-2*KX).toLocaleUpperCase("tr"),KX,84);
+  /* Önce büyüt sonra kırp: büyük harfler daha geniş, ters sırada kırpılan ad
+     büyütülünce bütçesini aşıp "…" bile koymadan kenardan taşıyordu. */
+  F(52,800); g.fillText(kis(String((k&&k.ad)||"Kale").toLocaleUpperCase("tr"),W-2*KX),KX,84);
   const d=new Date(z.son);
-  const tarih=isNaN(+d)?"":d.toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})
-    +" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
+  const gecerliT=!isNaN(+d)&&+d>0;   // epoch(0) bozuk tarihtir, 1970 yazılmaz
+  const tarih=gecerliT?(d.toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})
+    +" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})):"tarihsiz kayıt";
   F(25,600); g.fillStyle="rgba(255,255,255,.9)"; g.fillText(tarih+"  ·  Ziyaret Raporu",KX,128);
   let y=BAS+22;
   B.forEach(bl=>{
@@ -1028,7 +1066,9 @@ function ziyaretPngCiz(k,z){
   g.fillText(tl(bedel),W-KX-4,y+38);
   y+=54;
   F(23,800); g.textAlign="left";
-  const et=durum[0]+(alinan>0.5&&alinan<bedel-0.5?(" · "+tl(alinan)+" alındı, "+tl(kalan)+" kaldı"):"");
+  const fazla=Math.max(0,alinan-bedel);
+  const et=durum[0]+(alinan>0.5&&alinan<bedel-0.5?(" · "+tl(alinan)+" alındı, "+tl(kalan)+" kaldı")
+    :(fazla>0.5?(" · "+tl(alinan)+" alındı, "+tl(fazla)+" fazla"):""));
   const etW=g.measureText(et).width+34;
   g.fillStyle=durum[1]+"1f"; yuvarlak(KX+4,y,etW,40,10); g.fill();
   g.fillStyle=durum[1]; g.fillText(et,KX+21,y+27);
@@ -1103,7 +1143,7 @@ function ZiyaretSheet({k,list,onClose,say}){
         rafTop(z.mulk)>0?"Standın konsinye durumu":"Müşterideki güncel durum","var(--txt)",
         rafSat(z.guncel,z.guncelD).length?rafSat(z.guncel,z.guncelD).map(rafR):[{t:"Konsinye kalmadı",v:"0 adet"}],
         rafSat(z.guncel).length?{t:"Toplam",v:rafTut(z.guncel,z.guncelD)}:null)),
-      grup("Müşterinin satın aldığı","#9333ea",
+      grup("Müşterinin bugüne dek satın aldığı","#9333ea",
         rafSat(z.mulk,z.mulkD).map(rafR),
         rafTop(z.mulk)>0?{t:"Toplam",v:rafTut(z.mulk,z.mulkD)}:null),
       z.tah>0.5?h("div",{style:{display:"flex",justifyContent:"space-between",padding:"11px 13px",borderRadius:12,
@@ -1184,7 +1224,7 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ cons
       /* Doğrudan satılan mal müşterinin — standda durur ama konsinye değil.
          Sayım yaparken hangi ürünün hangi havuzdan olduğu buradan görülür. */
       (mulkKalem.length>0)&&h("div",{className:"card",style:{padding:"14px 16px",marginBottom:12}},
-        h("div",{className:"lbl",style:{marginBottom:10}},"🛍 Müşterinin satın aldığı"),
+        h("div",{className:"lbl",style:{marginBottom:10}},"🛍 Müşterinin bugüne dek satın aldığı"),
         mulkKalem.map((c,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:14}},
           h("span",{style:{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},c.ad,
             h("span",{style:{fontSize:11.5,color:"var(--mut2)",fontWeight:600,marginLeft:7}},
