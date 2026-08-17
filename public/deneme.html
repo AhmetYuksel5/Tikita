@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v99";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v100";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -866,7 +866,125 @@ function ziyaretMetni(k,z){
       .concat(["Toplam "+rafTop(z.guncel)+" adet"]))
     +(z.tah>0.5?("\nTahsil edilen: "+tl(z.tah)+"\n"):"");
 }
-function ZiyaretSheet({k,list,onClose}){
+/* ═════════ ZİYARET FİŞİ · PNG ═════════
+   Neden Canvas: uygulama CDN'e çıkamıyor (html2canvas gibi bir kütüphane
+   yüklenemez) ve ekran görüntüsü almak kullanıcıya bırakılamaz. Canvas hem
+   bağımsız hem keskin (retina için 2× ölçek) hem de doğrudan paylaşılabilir
+   bir dosya üretir. Şablon Tikita renklerinde: kehribar başlık, gold tutar. */
+const FIS_R={bas1:"#7c2d12",bas2:"#b45309",bolBg:"#fdf1e0",bolTxt:"#7c2d12",
+  txt:"#1b1e25",mut:"#a9adb6",cizgi:"#ece7df",gold:"#b45309",yesil:"#16a34a",kirmizi:"#e0483c",kagit:"#ffffff"};
+function fisBolumler(z){
+  const B=[];
+  const rs=o=>rafSat(o).map(r=>({ad:r.ad,alt:"",sag:r.adet+" adet"}));
+  B.push({b:"SAYIM SONRASI MÜŞTERİDE",satir:rafSat(z.sayim).length?rs(z.sayim)
+    :[{ad:"Rafta ürün yoktu",alt:"",sag:"0 adet"}]});
+  if(z.sat.length) B.push({b:"SATILAN",satir:z.sat.map(x=>({ad:x.ad,
+    alt:x.adet+" × "+tl(x.birim)+(x.raftan?"":" · çantadan"),sag:tl(x.tutar),vurgu:true}))});
+  if(z.iade.length) B.push({b:"İADE ALINAN",satir:z.iade.map(x=>({ad:x.ad,alt:"",sag:x.adet+" adet"}))});
+  if(z.birak.length) B.push({b:"TEKRAR KONSİNYE BIRAKILAN",satir:z.birak.map(x=>({ad:x.ad,alt:"",sag:x.adet+" adet"}))});
+  if(z.hed.length) B.push({b:"HEDİYE",satir:z.hed.map(x=>({ad:x.ad,alt:"",sag:x.adet+" adet"}))});
+  if((z.diger||[]).length) B.push({b:"DİĞER",satir:z.diger.map(x=>({ad:x.t,alt:"",sag:x.v||"—"}))});
+  B.push({b:"STANDIN GÜNCEL DURUMU",satir:rafSat(z.guncel).length?rs(z.guncel)
+    :[{ad:"Rafta ürün kalmadı",alt:"",sag:"0 adet"}],
+    toplam:{ad:"Toplam",sag:rafTop(z.guncel)+" adet"}});
+  return B;
+}
+function ziyaretPngCiz(k,z){
+  const B=fisBolumler(z);
+  const W=1100, OL=2, KX=40;                        // KX: kenar boşluğu
+  const BAS=176, BOL=64, SAT=62, TOP=118, ALT=34;   // blok yükseklikleri
+  let H=BAS+ALT+TOP;
+  B.forEach(x=>{ H+=BOL+x.satir.length*SAT+(x.toplam?SAT:0)+18; });
+  const cv=document.createElement("canvas");
+  cv.width=W*OL; cv.height=H*OL;
+  const g=cv.getContext("2d"); g.scale(OL,OL);
+  const F=(px,w)=>{ g.font=(w||400)+" "+px+'px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'; };
+  const kis=(t,max)=>{ let s2=String(t==null?"":t); if(g.measureText(s2).width<=max) return s2;
+    while(s2.length>1&&g.measureText(s2+"…").width>max) s2=s2.slice(0,-1); return s2+"…"; };
+  const yuvarlak=(x,y,w,h,r)=>{ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r);
+    g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); };
+  // kağıt
+  g.fillStyle=FIS_R.kagit; g.fillRect(0,0,W,H);
+  // başlık — kehribar geçiş
+  const gr=g.createLinearGradient(0,0,W,BAS); gr.addColorStop(0,FIS_R.bas1); gr.addColorStop(1,FIS_R.bas2);
+  g.fillStyle=gr; g.fillRect(0,0,W,BAS);
+  g.fillStyle="#fff"; g.textBaseline="alphabetic";
+  F(52,800); g.fillText(kis((k&&k.ad)||"Kale",W-2*KX).toLocaleUpperCase("tr"),KX,84);
+  const d=new Date(z.son);
+  const tarih=isNaN(+d)?"":d.toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"})
+    +" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
+  F(25,600); g.fillStyle="rgba(255,255,255,.9)"; g.fillText(tarih+"  ·  Ziyaret Raporu",KX,128);
+  let y=BAS+22;
+  B.forEach(bl=>{
+    // bölüm başlığı
+    g.fillStyle=FIS_R.bolBg; yuvarlak(KX,y,W-2*KX,BOL-14,12); g.fill();
+    F(24,800); g.fillStyle=FIS_R.bolTxt; g.textAlign="left";
+    g.fillText(bl.b,KX+22,y+34);
+    y+=BOL;
+    const ciz=(r,kalin)=>{
+      F(kalin?27:26,kalin?800:600); g.fillStyle=FIS_R.txt; g.textAlign="left";
+      const sagG=(()=>{ F(kalin?29:27,800); return g.measureText(String(r.sag||"")).width; })();
+      F(kalin?27:26,kalin?800:600);
+      const altG=r.alt?(()=>{ F(21,500); const w=g.measureText(r.alt).width; F(26,600); return w+18; })():0;
+      g.fillText(kis(r.ad,W-2*KX-sagG-altG-60),KX+22,y+38);
+      if(r.alt){ const adG=g.measureText(kis(r.ad,W-2*KX-sagG-altG-60)).width;
+        F(21,500); g.fillStyle=FIS_R.mut; g.fillText(r.alt,KX+22+adG+18,y+38); }
+      F(kalin?29:27,800); g.fillStyle=r.vurgu||kalin?FIS_R.gold:FIS_R.txt; g.textAlign="right";
+      g.fillText(String(r.sag||""),W-KX-22,y+38);
+      g.textAlign="left";
+      g.fillStyle=FIS_R.cizgi; g.fillRect(KX+22,y+SAT-1,W-2*KX-44,1);
+      y+=SAT; };
+    bl.satir.forEach(r=>ciz(r,false));
+    if(bl.toplam) ciz(bl.toplam,true);
+    y+=18;
+  });
+  // ——— tahsilat kapanışı ———
+  const bedel=num(z.ciro), alinan=num(z.tah);
+  const kalan=Math.max(0,bedel-alinan);
+  const durum=bedel<=0.5?["SATIŞ YOK",FIS_R.mut]
+    :(alinan>=bedel-0.5?["✓ TAHSİL EDİLDİ",FIS_R.yesil]
+    :(alinan>0.5?["KISMİ TAHSİLAT",FIS_R.gold]:["⏳ TAHSİL EDİLMEDİ",FIS_R.kirmizi]));
+  g.fillStyle=FIS_R.bas2; g.fillRect(KX,y+2,W-2*KX,3);
+  y+=26;
+  F(30,800); g.fillStyle=FIS_R.txt; g.textAlign="left";
+  g.fillText("TAHSİL EDİLECEK",KX+4,y+34);
+  F(46,800); g.fillStyle=FIS_R.gold; g.textAlign="right";
+  g.fillText(tl(bedel),W-KX-4,y+38);
+  y+=54;
+  F(23,800); g.textAlign="left";
+  const et=durum[0]+(alinan>0.5&&alinan<bedel-0.5?(" · "+tl(alinan)+" alındı, "+tl(kalan)+" kaldı"):"");
+  const etW=g.measureText(et).width+34;
+  g.fillStyle=durum[1]+"1f"; yuvarlak(KX+4,y,etW,40,10); g.fill();
+  g.fillStyle=durum[1]; g.fillText(et,KX+21,y+27);
+  F(20,600); g.fillStyle=FIS_R.mut; g.textAlign="right";
+  g.fillText("Tikita · "+SURUM,W-KX-4,y+27);
+  return cv;
+}
+async function ziyaretPaylas(k,z,say){
+  try{
+    const cv=ziyaretPngCiz(k,z);
+    const blob=await new Promise(r=>cv.toBlob(r,"image/png"));
+    if(!blob){ say&&say("⚠ Görsel oluşturulamadı"); return; }
+    const d=new Date(z.son);
+    const gunAd=isNaN(+d)?"":d.toISOString().slice(0,10);
+    const adDosya=("ziyaret-"+String((k&&k.ad)||"kale").replace(/[^\wçğıöşüÇĞİÖŞÜ]+/g,"-")+"-"+gunAd+".png").slice(0,80);
+    const dosya=new File([blob],adDosya,{type:"image/png"});
+    /* Mobilde WhatsApp'a doğrudan görsel göndermenin tek yolu paylaşım sayfası. */
+    if(navigator.canShare&&navigator.canShare({files:[dosya]})){
+      await navigator.share({files:[dosya],title:((k&&k.ad)||"Kale")+" · ziyaret raporu"});
+      return; }
+    // yedek: indir + metni WhatsApp'a taşı
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=adDosya; a.rel="noopener";
+    document.body.appendChild(a); a.click();
+    /* Bağlantı hemen kaldırılırsa tarayıcı 'download' adını kaçırabiliyor —
+       dosya "download" diye kaydediliyor. Bir tur bekletip kaldır. */
+    setTimeout(()=>{ try{ a.remove(); }catch(e){} URL.revokeObjectURL(url); },5000);
+    try{ window.open("https://wa.me/?text="+encodeURIComponent(ziyaretMetni(k,z)),"_blank"); }catch(e){}
+    say&&say("🖼 Görsel indirildi — WhatsApp'a ekleyebilirsin");
+  }catch(e){ console.error(e); say&&say("⚠ Paylaşılamadı"); }
+}
+function ZiyaretSheet({k,list,onClose,say}){
   const [sec,setSec]=useState((list||[]).length===1?0:null);
   const L=list||[];
   const fmtZ=t=>{ const d=new Date(t); return isNaN(+d)?"":d.toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"})+" · "+d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}); };
@@ -896,9 +1014,14 @@ function ZiyaretSheet({k,list,onClose}){
       z.tah>0.5?h("div",{style:{display:"flex",justifyContent:"space-between",padding:"11px 13px",borderRadius:12,
         background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,marginBottom:12}},
         h("span",{style:{color:"var(--mut)"}},"Tahsil edilen"),h("span",{style:{color:"var(--gold)"}},tl(z.tah))):null,
+      h("button",{onClick:()=>ziyaretPaylas(k,z,say),
+        style:{width:"100%",padding:14,borderRadius:14,background:"linear-gradient(120deg,#7c2d12,#b45309)",
+          color:"#fff",fontSize:14,fontWeight:800,marginBottom:8}},
+        "🖼 Fiş görselini gönder"),
       h("button",{onClick:()=>window.open("https://wa.me/?text="+encodeURIComponent(ziyaretMetni(k,z)),"_blank"),
-        style:{width:"100%",padding:13,borderRadius:14,background:"#16a34a",color:"#fff",fontSize:13.5,fontWeight:800,marginBottom:8}},
-        "WhatsApp'tan gönder"),
+        style:{width:"100%",padding:12,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",
+          color:"var(--mut)",fontSize:12.5,fontWeight:800,marginBottom:8}},
+        "Yazı olarak gönder"),
       L.length>1?h("button",{onClick:()=>setSec(null),style:{width:"100%",padding:11,fontSize:12.5,fontWeight:800,color:"var(--mut)"}},"‹ Tüm ziyaretler"):null); }
   return h(Sheet,{ik:"🧾",hex:"#7c46e6",baslik:"Ziyaret raporları",alt:(k?k.ad+" · ":"")+L.length+" ziyaret",
     onClose,cta:"Kapat",onCta:onClose},
@@ -982,7 +1105,7 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ cons
         ovList.map((x,i)=>h(OvSatir,{key:x.id||i,x,geriAl})))),
     panel==="hareket"&&h(HareketPanel,{k,kaleHar,onClose:()=>setPanel(null),geriAl}),
     panel==="hakedis"&&h(HakedisPanel,{k,kaleHar,onClose:()=>setPanel(null)}),
-    panel==="ziyaret"&&h(ZiyaretSheet,{k,list:ziy,onClose:()=>setPanel(null)}));
+    panel==="ziyaret"&&h(ZiyaretSheet,{k,list:ziy,say,onClose:()=>setPanel(null)}));
 }
 function Stat({ik,v,l,renk,onClick}){ const inner=[
   h("div",{key:"i",style:{fontSize:16,marginBottom:5}},ik),
