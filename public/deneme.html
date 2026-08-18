@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v110";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v109";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -645,7 +645,7 @@ function SecBaslik({no,txt,ek}){ return h("div",{style:{display:"flex",alignItem
   h("span",{style:{fontSize:11,fontWeight:800,minWidth:20,height:20,borderRadius:6,background:"var(--surf2)",color:"var(--gold)",display:"inline-flex",alignItems:"center",justifyContent:"center"}},no),
   h("span",{className:"lbl",style:{color:"var(--mut2)"}},txt),
   ek&&h("span",{style:{marginLeft:"auto",fontSize:11.5,color:"var(--mut2)",fontWeight:700}},ek)); }
-function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tablaTopla,tablaUc,hedefler,goHarita,kampanyalar,tumHar,openRota,kmpFoto}){
+function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tablaTopla,tablaUc,hedefler,goHarita,kampanyalar,tumHar,openRota}){
   const [sahada,setSahada]=useState(false);
   const [seriAcik,setSeriAcik]=useState(false);
   const borclular=d.kaleler.filter(k=>k.borc>0.5).sort((a,b)=>b.borc-a.borc);
@@ -654,11 +654,6 @@ function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tab
   const P="22px 16px 0";
   const fir=[]; // fırsat radarı (istihbarat — emir değil)
   /* 🎁 kampanyalar — ilerleme çubuğu; hedef dolunca ödül komutadan beklenir */
-  /* 📢 müşteriye gönderilecek afiş — kampanya kartının altında */
-  const brosurBtn=k=>h("button",{onClick:e=>{ e.stopPropagation(); brosurPaylas(k,(kmpFoto||{})[k.id],say); },
-    style:{width:"100%",marginTop:10,padding:"10px 0",borderRadius:12,
-      background:"linear-gradient(120deg,#1b2a5e,#17a2b8)",color:"#fff",fontSize:12.5,fontWeight:800}},
-    "📢 Broşürü müşteriye gönder");
   const kmpKart=(kampanyalar||[]).map(k=>{
     const hedef=Math.max(1,num(k.hedefMiktar));
     const odulEt=num(k.odulAdet)+" × "+(k.odulUrunAd||"ürün");
@@ -682,8 +677,7 @@ function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tab
           "Her mekan "+hedefEt+" alınca  →  "+odulEt),
         h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:5,fontWeight:700}},
           yakin?("En yakın: "+(yakin.ad||"—")+" · "+(k.hedefTip==="ciro"?tl(yakin.kalan):num(yakin.kalan)+" adet")+" kaldı")
-            :(M.length?"Hak eden mekanlar komutadan ödül bekliyor":"Henüz satış yok")),
-        brosurBtn(k));
+            :(M.length?"Hak eden mekanlar komutadan ödül bekliyor":"Henüz satış yok")));
     }
     const ilr=kampanyaIlerleme(k,tumHar,d.emir.id);
     const oran=Math.max(0,Math.min(100,Math.round(ilr/hedef*100)));
@@ -697,8 +691,7 @@ function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tab
       h("div",{style:{height:7,borderRadius:7,background:"var(--line)",overflow:"hidden"}},
         h("div",{style:{height:"100%",width:oran+"%",borderRadius:7,
           background:verildi?"var(--green)":(doldu?"var(--gold)":"var(--cyan)"),transition:"width .4s"}})),
-      h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:6,fontWeight:700}},"Ödül: "+odulEt),
-      brosurBtn(k)); });
+      h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:6,fontWeight:700}},"Ödül: "+odulEt)); });
   // 🎯 komutanın verdiği hedefler — atandıktan sonra 2 gün radarda kalır
   const yeniHedefler=(hedefler||[]).filter(g=>{ const t=new Date(g.tarih).getTime(); return t&&(Date.now()-t)<2*864e5; })
     .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
@@ -1451,107 +1444,6 @@ function HakedisPanel({k,kaleHar,onClose}){
 }
 
 /* ————— HARİTA ————— */
-/* ═════════ 📢 KAMPANYA BROŞÜRÜ · PNG ═════════
-   Pazarlamacının müşteriye WhatsApp'tan göndereceği afiş. Ziyaret fişiyle aynı
-   yol: Canvas, 2× ölçek, navigator.share. Logo ve stant görseli tuvale çizilir —
-   ikisi de aynı kökten geldiği için tuval kirlenmez, PNG'ye dönüştürülebilir. */
-const BRS={lacivert:"#1b2a5e",kirmizi:"#e8334a",turkuaz:"#17a2b8",sari:"#f5b400",
-  mor:"#7b2fbe",yesil:"#7cb92b",turuncu:"#f47b20",kagit:"#ffffff",
-  txt:"#1b1e25",mut:"#8d93a1",cizgi:"#e9ecf2"};
-const BRS_SERIT=[BRS.kirmizi,BRS.turkuaz,BRS.sari,BRS.mor,BRS.yesil,BRS.turuncu];
-function gorselYukle(src){ return new Promise(res=>{ if(!src) return res(null);
-  const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-function brosurMetni(kmp){
-  const hedef=(kmp.hedefTip==="ciro"?tl(kmp.hedefMiktar):(num(kmp.hedefMiktar)+" ADET"));
-  const odul=num(kmp.odulAdet)+" × "+(kmp.odulUrunAd||"ÜRÜN");
-  return {ust:kampanyaMekanMi(kmp)?"STANT KAMPANYASI":"KAMPANYA",
-    hedef:hedef+" AL", odul:odul+" HEDİYE",
-    sure:(kmp.bas||kmp.bit)?((kmp.bas?tarihKisa(kmp.bas):"")+" – "+(kmp.bit?tarihKisa(kmp.bit):"süresiz")):""};
-}
-const tarihKisa=g=>{ const d=new Date(g+"T12:00:00"); return isNaN(+d)?g
-  :d.toLocaleDateString("tr-TR",{day:"numeric",month:"long"}); };
-async function brosurCiz(kmp,fotoSrc){
-  const M=brosurMetni(kmp);
-  const [logo,foto]=await Promise.all([gorselYukle("tikita-logo.png"),gorselYukle(fotoSrc)]);
-  const W=1080, H=1350, OL=2, KX=64;
-  const cv=document.createElement("canvas");
-  cv.width=W*OL; cv.height=H*OL;
-  const g=cv.getContext("2d"); g.scale(OL,OL);
-  const F=(px,w)=>{ g.font=(w||400)+" "+px+'px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'; };
-  const yuvarlak=(x,y,w,h,r)=>{ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r);
-    g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); };
-  const kis=(t,max)=>{ let s2=String(t==null?"":t); if(g.measureText(s2).width<=max) return s2;
-    while(s2.length>1&&g.measureText(s2+"…").width>max) s2=s2.slice(0,-1); return s2+"…"; };
-  g.fillStyle=BRS.kagit; g.fillRect(0,0,W,H);
-  // logodaki renk şeridi — üstte ve altta
-  const serit=(y,h2)=>{ const w=W/BRS_SERIT.length;
-    BRS_SERIT.forEach((c,i)=>{ g.fillStyle=c; g.fillRect(i*w,y,w+1,h2); }); };
-  serit(0,18); serit(H-18,18);
-  let y=54;
-  // ——— logo ———
-  if(logo){ const lw=Math.min(W-2*KX,420), lh=lw*logo.height/logo.width;
-    g.drawImage(logo,(W-lw)/2,y,lw,lh); y+=lh+16; }
-  else { F(64,800); g.fillStyle=BRS.lacivert; g.textAlign="center"; g.fillText("Tikita",W/2,y+58); y+=96; }
-  // ——— kampanya adı ———
-  g.textAlign="center"; F(30,800); g.fillStyle=BRS.mut;
-  g.fillText(kis(String(M.ust).toLocaleUpperCase("tr"),W-2*KX),W/2,y+8); y+=44;
-  F(46,800); g.fillStyle=BRS.lacivert;
-  g.fillText(kis(kmp.ad||"Kampanya",W-2*KX),W/2,y+18); y+=64;
-  // ——— teklif kutusu ———
-  const kutuY=y, kutuH=232;
-  g.fillStyle="#f7f9fc"; yuvarlak(KX,kutuY,W-2*KX,kutuH,26); g.fill();
-  g.strokeStyle=BRS.turkuaz; g.lineWidth=3; yuvarlak(KX,kutuY,W-2*KX,kutuH,26); g.stroke();
-  F(58,800); g.fillStyle=BRS.lacivert;
-  g.fillText(kis(M.hedef,W-2*KX-56),W/2,kutuY+82);
-  // ok
-  F(34,800); g.fillStyle=BRS.turuncu; g.fillText("▼",W/2,kutuY+126);
-  F(58,800); g.fillStyle=BRS.kirmizi;
-  g.fillText(kis(M.odul,W-2*KX-56),W/2,kutuY+188);
-  y=kutuY+kutuH+30;
-  // ——— stant görseli ———
-  /* Alt bant H-172'de başlıyor; tarih satırına yer kalsın diye görsel alanı
-     bandın 64 px yukarısında bitiyor — yoksa tarih banda yapışıyor. */
-  const altY=H-172-64;
-  const alan=altY-y;
-  if(foto&&alan>140){
-    const gw=W-2*KX, gh=Math.min(alan,Math.round(gw*0.62));
-    const sc=Math.max(gw/foto.width,gh/foto.height);
-    const dw=foto.width*sc, dh=foto.height*sc;
-    g.save(); yuvarlak(KX,y,gw,gh,24); g.clip();
-    g.drawImage(foto,(W-dw)/2,y+(gh-dh)/2,dw,dh);
-    g.restore();
-    g.strokeStyle=BRS.cizgi; g.lineWidth=2; yuvarlak(KX,y,gw,gh,24); g.stroke();
-    y+=gh+18;
-  }
-  // ——— süre ———
-  if(M.sure){ F(27,700); g.fillStyle=BRS.mut; g.textAlign="center";
-    g.fillText(M.sure,W/2,Math.min(y+30,H-196)); }
-  // ——— alt bant: instagram ———
-  g.fillStyle=BRS.lacivert; g.fillRect(0,H-172,W,154);
-  F(30,700); g.fillStyle="rgba(255,255,255,.82)"; g.textAlign="center";
-  g.fillText("Bizi Instagram'da takip edin",W/2,H-112);
-  F(46,800); g.fillStyle="#fff";
-  g.fillText("@tikitatoys",W/2,H-58);
-  return cv;
-}
-async function brosurPaylas(kmp,fotoSrc,say){
-  try{
-    const cv=await brosurCiz(kmp,fotoSrc);
-    const blob=await new Promise(r=>cv.toBlob(r,"image/png"));
-    if(!blob){ say&&say("⚠ Broşür oluşturulamadı"); return; }
-    const adDosya=("tikita-kampanya-"+String(kmp.ad||"brosur")
-      .replace(/[^\wçğıöşüÇĞİÖŞÜ]+/g,"-")+".png").slice(0,80);
-    const dosya=new File([blob],adDosya,{type:"image/png"});
-    if(navigator.canShare&&navigator.canShare({files:[dosya]})){
-      await navigator.share({files:[dosya],title:(kmp.ad||"Kampanya")+" · Tikita"});
-      return; }
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a"); a.href=url; a.download=adDosya; a.rel="noopener";
-    document.body.appendChild(a); a.click();
-    setTimeout(()=>{ try{ a.remove(); }catch(e){} URL.revokeObjectURL(url); },5000);
-    say&&say("🖼 Broşür indirildi — WhatsApp'a ekleyebilirsin");
-  }catch(e){ console.error(e); say&&say("⚠ Paylaşılamadı"); }
-}
 /* 🧭 GÖREV ROTASI — komutanın verdiği görevin durakları sırayla haritada.
    Duraklar komuta panelinde rota sırasına dizilmiş hâlde kaydediliyor, burada
    o sıra korunuyor. Köşedeki düğme aynı sırayı Google Maps yol tarifine taşır. */
@@ -3226,7 +3118,6 @@ function App(){
   const canliHar=useColl("pazarlama_hareket"), musteriler=useColl("musteri"), kullanicilar=useColl("kullanici"), urunler=useColl("stok_urun");
   const hedefler=useColl("hedef");
   const kampanyalar=useColl("kampanya");   // 🎁 komutanın tanımladığı kampanyalar
-  const kampanyaFoto=useColl("kampanya_foto");   // 🖼 broşür görselleri
   const ayarlar=useColl("ayar");
   GKEY=(((ayarlar||[]).find(a=>a.id==="genel")||{}).googleKey||"").trim();   // Places anahtarı — ana uygulama ile aynı kaynak
   const seferler=useColl("sefer"), kesifRed=useColl("kesif_red");
@@ -3319,7 +3210,6 @@ function App(){
   const okunmamisKampanya=useMemo(()=>{ if(AS_ID||!emirId) return null;
     return benimKampanya.filter(k=>!((k.okuyan||{})[emirId]))
       .sort((a,b)=>(new Date(b.tarih||0)-new Date(a.tarih||0)))[0]||null; },[benimKampanya,emirId]);
-  const kmpFotoMap=useMemo(()=>{ const m={}; (kampanyaFoto||[]).forEach(f=>{ if(f&&f.kampanyaId) m[f.kampanyaId]=f.data||""; }); return m; },[kampanyaFoto]);
   async function kampanyaOkundu(){ const k=okunmamisKampanya; if(!k||!k.id||sbekle) return; setSbekle(true);
     try{ await save("kampanya",{id:k.id,okuyan:{[emirId]:new Date().toISOString()}});
       say("🎁 Kampanya kabul edildi · "+(k.ad||"")); }
@@ -3730,7 +3620,7 @@ function App(){
   let ekran;
   if(kaleGuncel) ekran=h(KaleDetay,{kampanyalar:benimKampanya,tumHar:emirHar,k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar,
     openDuzen:k=>setYeniKale({kayit:{id:k.musteriId||"",key:k.key,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}})});
-  else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,openBrif:()=>setBrifAcik(true),goView:go,openBilgi,toplanacak,tablaTopla,tablaUc,hedefler:emirHedef,goHarita:()=>go("harita"),kampanyalar:benimKampanya,tumHar:emirHar,openRota:setRotaGorev,kmpFoto:kmpFotoMap});
+  else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,openBrif:()=>setBrifAcik(true),goView:go,openBilgi,toplanacak,tablaTopla,tablaUc,hedefler:emirHedef,goHarita:()=>go("harita"),kampanyalar:benimKampanya,tumHar:emirHar,openRota:setRotaGorev});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say,onYeniKale:()=>setYeniKale(true),adaylar:adayGoster,openAday:a=>setAdaySec(a),
     onDuzen:k=>setYeniKale({kayit:{id:k.musteriId||"",key:k.key,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}}),
     kesifRedSet:redSet,kesifEkle:async r=>{ try{ await save("musteri",{ad:r.ad,bolge:r.bolge||"",lat:String(r.lat),lng:String(r.lng),kesif:true,kullaniciId:emirId,tarih:new Date().toISOString()}); say("🧭 Aday eklendi · "+r.ad); }catch(e){ say("⚠ Eklenemedi"); } },
