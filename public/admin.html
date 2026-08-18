@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L29";   // komuta (admin) deneme sürümü
+const SURUM="L30";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -738,6 +738,150 @@ function KStat({ik,l,v,birim,s,renk,onClick}){ const inner=[
   const st={padding:"13px 14px",boxShadow:"none",minHeight:84,display:"flex",flexDirection:"column",justifyContent:"flex-start"};
   return onClick? h("button",{onClick,className:"card",style:{...st,textAlign:"left",width:"100%"}},inner)
     : h("div",{className:"card",style:st},inner); }
+/* ————— 🎁 KAMPANYA — komuta hedef koyar, pazarlamacı ilerler, ödülü komuta elle verir —————
+   Hedef satış kayıtlarından sayılır: ya adet ya ciro; istenirse tek ürüne daraltılır.
+   Ödül ürünü pazarlamacıya bedelsiz geçer — veriliş 0 yazılır, satarsa tamamı hakedişi olur. */
+function kampanyaIlerleme(kmp,har,uid){
+  if(!kmp||!uid) return 0;
+  const b0=kmp.bas?(new Date(kmp.bas+"T00:00:00").getTime()||0):0;
+  const b1=kmp.bit?(new Date(kmp.bit+"T23:59:59").getTime()||Infinity):Infinity;
+  let t=0;
+  (har||[]).forEach(x=>{
+    if(!x||x.tip!=="satis") return;
+    if((x.kullaniciId||"")!==uid) return;
+    const ts=new Date(x.tarih).getTime()||0; if(ts<b0||ts>b1) return;
+    if(kmp.hedefUrunId&&(x.urunId||"")!==kmp.hedefUrunId) return;
+    t+=(kmp.hedefTip==="ciro")?num(x.adet)*num(x.satisFiyat):num(x.adet); });
+  return t;
+}
+const kampanyaKapsar=(kmp,uid)=>!!kmp&&kmp.aktif!==false&&(!((kmp.kime||[]).length)||(kmp.kime||[]).indexOf(uid)>=0);
+const kampanyaVerildi=(kmp,uid)=>!!(((kmp&&kmp.verilen)||{})[uid]);
+const kampanyaSuresi=kmp=>{ if(!kmp) return true;
+  const now=Date.now();
+  if(kmp.bas&&(new Date(kmp.bas+"T00:00:00").getTime()||0)>now) return false;
+  if(kmp.bit&&(new Date(kmp.bit+"T23:59:59").getTime()||0)<now) return false;
+  return true; };
+/* 🎁 kampanya yönetimi — liste, tanımlama, kişi kişi ilerleme, ödül verme */
+function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,bekle,onKaydet,onSil,onOdulVer,onClose}){
+  const [duzen,setDuzen]=useState(null);   // null | {} (yeni) | kayıt
+  const pazarlamacilar=(kullanicilar||[]).filter(u=>u&&u.id&&(u.ad||"").trim()&&!u.arsiv
+    &&u.rol!=="admin"&&u.rol!=="montaj"&&!u.demo&&!u.minimal);
+  const liste=(kampanyalar||[]).slice().sort((a,b)=>new Date(b.tarih||0)-new Date(a.tarih||0));
+  const urunAd=id=>((urunler||[]).find(u=>u.id===id)||{}).ad||"";
+
+  if(duzen) return h(KampanyaDuzenSheet,{k:duzen,pazarlamacilar,urunler,bekle,
+    onKaydet:async p2=>{ if(p2===null){ setDuzen(null); return; } await onKaydet(p2); setDuzen(null); },
+    onSil:duzen.id?(()=>{ onSil(duzen); setDuzen(null); }):null});
+
+  const satir=k=>{
+    const hedefEt=(k.hedefTip==="ciro"?tl(k.hedefMiktar):(num(k.hedefMiktar)+" adet"))
+      +(k.hedefUrunId?(" · "+urunAd(k.hedefUrunId)):" satış");
+    const kisiler=pazarlamacilar.filter(u=>kampanyaKapsar(k,u.id));
+    const sureli=kampanyaSuresi(k);
+    return h("div",{key:k.id,className:"card",style:{padding:"14px 16px",marginBottom:10,
+        opacity:(k.aktif===false)?.55:1}},
+      h("div",{style:{display:"flex",alignItems:"flex-start",gap:10,marginBottom:10}},
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad||"Kampanya"),
+          h("div",{style:{fontSize:12,color:"var(--mut)",marginTop:3,fontWeight:600}},
+            hedefEt+"  →  "+num(k.odulAdet)+" × "+(urunAd(k.odulUrunId)||"ödül")),
+          (k.bas||k.bit)?h("div",{style:{fontSize:11,color:sureli?"var(--mut2)":"var(--red)",marginTop:2,fontWeight:700}},
+            (k.bas||"")+" – "+(k.bit||"süresiz")+(sureli?"":" · süresi geçti")):null),
+        h("button",{onClick:()=>setDuzen(k),style:{flexShrink:0,padding:"7px 11px",borderRadius:10,
+          background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12,fontWeight:800}},"Düzenle")),
+      kisiler.length?h("div",{style:{display:"grid",gap:7}},kisiler.map(u=>{
+        const ilr=kampanyaIlerleme(k,hareketler,u.id);
+        const hedef=Math.max(1,num(k.hedefMiktar));
+        const oran=Math.max(0,Math.min(100,Math.round(ilr/hedef*100)));
+        const doldu=ilr>=num(k.hedefMiktar);
+        const verildi=kampanyaVerildi(k,u.id);
+        return h("div",{key:u.id,style:{padding:"9px 11px",borderRadius:12,background:"var(--surf2)",
+            border:"1px solid "+(verildi?"var(--green)":(doldu?"var(--gold)":"var(--line)"))}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:9,marginBottom:6}},
+            h("span",{style:{fontSize:13,fontWeight:800,flex:1,minWidth:0,overflow:"hidden",
+              textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+            h("span",{style:{fontSize:12,fontWeight:800,color:doldu?"var(--gold)":"var(--mut)"}},
+              (k.hedefTip==="ciro"?tl(ilr):num(ilr))+" / "+(k.hedefTip==="ciro"?tl(k.hedefMiktar):num(k.hedefMiktar)))),
+          h("div",{style:{height:6,borderRadius:6,background:"var(--line)",overflow:"hidden",marginBottom:verildi||doldu?7:0}},
+            h("div",{style:{height:"100%",width:oran+"%",borderRadius:6,
+              background:doldu?"var(--gold)":"var(--cyan)"}})),
+          verildi
+            ? h("div",{style:{fontSize:11.5,fontWeight:800,color:"var(--green)"}},
+                "✓ Ödül verildi · "+String(((k.verilen||{})[u.id]||{}).tarih||"").slice(0,10))
+            : (doldu?h("button",{onClick:()=>onOdulVer(k,u),disabled:bekle,
+                style:{width:"100%",padding:"9px 0",borderRadius:10,border:"none",
+                  background:bekle?"var(--line)":"var(--gold)",color:"#fff",fontSize:12.5,fontWeight:800}},
+                bekle?"⏳":("🎁 Ödülü ver · "+num(k.odulAdet)+" × "+(urunAd(k.odulUrunId)||"ürün"))):null)); }))
+        :h("div",{style:{fontSize:12,color:"var(--mut)",padding:"6px 0"}},"Bu kampanyanın kapsadığı pazarlamacı yok.")); };
+
+  return h(Sheet,{ik:"🎁",hex:"#b45309",baslik:"Kampanyalar",alt:liste.length+" kampanya",
+      onClose,cta:"Kapat",onCta:onClose,
+      basEk:h("button",{onClick:()=>setDuzen({}),style:{width:34,height:34,borderRadius:11,
+        background:"#b45309",color:"#fff",fontSize:19,fontWeight:800,border:"none"}},"+")},
+    liste.length?liste.map(satir)
+      :h("div",{style:{padding:"22px 0",textAlign:"center",color:"var(--mut)",fontSize:13.5}},
+        "Henüz kampanya yok — sağ üstteki + ile tanımla."));
+}
+function KampanyaDuzenSheet({k,pazarlamacilar,urunler,bekle,onKaydet,onSil}){
+  const [ad,setAd]=useState(k.ad||"");
+  const [hedefTip,setHedefTip]=useState(k.hedefTip||"adet");
+  const [hedefUrunId,setHedefUrunId]=useState(k.hedefUrunId||"");
+  const [hedefMiktar,setHedefMiktar]=useState(k.hedefMiktar!=null?String(k.hedefMiktar):"100");
+  const [odulUrunId,setOdulUrunId]=useState(k.odulUrunId||"");
+  const [odulAdet,setOdulAdet]=useState(k.odulAdet!=null?String(k.odulAdet):"10");
+  const [kime,setKime]=useState(k.kime||[]);
+  const [bas,setBas]=useState(k.bas||"");
+  const [bit,setBit]=useState(k.bit||"");
+  const [aktif,setAktif]=useState(k.aktif!==false);
+  const urunList=(urunler||[]).filter(u=>u&&u.id&&(u.ad||"").trim())
+    .slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
+  const gecerli=!!ad.trim()&&num(hedefMiktar)>0&&!!odulUrunId&&num(odulAdet)>0;
+  const tog=(list,setList,v)=>setList(list.indexOf(v)>=0?list.filter(x=>x!==v):[...list,v]);
+  const lbl=(t,ust)=>h("div",{className:"lbl",style:{margin:(ust||14)+"px 0 8px"}},t);
+  return h(Sheet,{ik:"🎁",hex:"#b45309",baslik:k.id?"Kampanyayı düzenle":"Yeni kampanya",alt:"",
+      onClose:()=>onKaydet(null),cta:bekle?"⏳ Kaydediliyor…":"Kaydet",disabled:!gecerli||bekle,
+      onCta:()=>onKaydet({id:k.id,ad:ad.trim(),hedefTip,hedefUrunId,hedefMiktar:num(hedefMiktar),
+        odulUrunId,odulUrunAd:((urunList.find(u=>u.id===odulUrunId)||{}).ad||""),odulAdet:num(odulAdet),
+        kime,bas,bit,aktif})},
+    lbl("Kampanya adı",0),
+    h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Ağustos atağı",style:inp}),
+    lbl("Hedef neye göre sayılsın"),
+    h("div",{style:{display:"flex",gap:8}},
+      h(Chip,{on:hedefTip==="adet",onClick:()=>setHedefTip("adet")},"Satılan adet"),
+      h(Chip,{on:hedefTip==="ciro",onClick:()=>setHedefTip("ciro")},"Ciro ₺")),
+    lbl("Hangi üründe"),
+    h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
+      h(Chip,{on:!hedefUrunId,onClick:()=>setHedefUrunId("")},"Tüm ürünler"),
+      urunList.map(u=>h(Chip,{key:u.id,on:hedefUrunId===u.id,onClick:()=>setHedefUrunId(u.id)},u.ad))),
+    lbl(hedefTip==="ciro"?"Hedef ciro ₺":"Hedef adet"),
+    h("input",{type:"number",inputMode:"numeric",value:hedefMiktar,
+      onChange:e=>setHedefMiktar(e.target.value),style:inp}),
+    lbl("Ödül ürün"),
+    h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
+      urunList.map(u=>h(Chip,{key:u.id,on:odulUrunId===u.id,onClick:()=>setOdulUrunId(u.id)},u.ad))),
+    lbl("Ödül adet"),
+    h("input",{type:"number",inputMode:"numeric",value:odulAdet,
+      onChange:e=>setOdulAdet(e.target.value),style:inp}),
+    lbl("Kimler için"),
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+      h(Chip,{on:!kime.length,onClick:()=>setKime([])},"Tüm pazarlamacılar"),
+      pazarlamacilar.map(u=>h(Chip,{key:u.id,on:kime.indexOf(u.id)>=0,
+        onClick:()=>tog(kime,setKime,u.id)},u.ad))),
+    lbl("Tarih aralığı — boş bırakılabilir"),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      h("input",{type:"date",value:bas,onChange:e=>setBas(e.target.value),style:inp}),
+      h("input",{type:"date",value:bit,onChange:e=>setBit(e.target.value),style:inp})),
+    h("button",{onClick:()=>setAktif(!aktif),style:{display:"flex",alignItems:"center",gap:11,width:"100%",
+        textAlign:"left",padding:"13px 14px",borderRadius:14,marginTop:14,
+        background:aktif?"#b4530910":"var(--surf2)",border:"1.5px solid "+(aktif?"#b45309":"var(--line)")}},
+      h("span",{style:{width:24,height:24,borderRadius:8,display:"flex",alignItems:"center",
+        justifyContent:"center",fontSize:14,fontWeight:800,color:"#fff",
+        background:aktif?"#b45309":"var(--line)"}},aktif?"✓":""),
+      h("span",{style:{fontSize:14,fontWeight:800,color:aktif?"#7c2d12":"var(--mut)"}},"Kampanya aktif")),
+    onSil?h("button",{onClick:onSil,style:{width:"100%",padding:12,borderRadius:13,marginTop:12,
+      background:"var(--surf2)",border:"1px solid var(--red)",color:"var(--red)",
+      fontSize:13,fontWeight:800}},"🗑 Kampanyayı sil"):null);
+}
 function Chip({on,onClick,children}){ return h("button",{onClick,style:{flexShrink:0,display:"inline-flex",alignItems:"center",gap:5,padding:"9px 13px",borderRadius:11,fontSize:13,fontWeight:800,
   background:on?"#1b1e25":"var(--surf2)",color:on?"#fff":"var(--mut)",border:"1px solid "+(on?"#1b1e25":"var(--line)")}},children); }
 function DetayListSheet({ik,hex,baslik,alt,rows,onClose}){
@@ -3024,6 +3168,7 @@ function Ekip({d,ac,kullanicilar,hareketler,talepler,yinelenenSay}){
     h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"Ekip"),
       h("div",{style:{display:"flex",gap:8}},
+        h("button",{onClick:()=>ac({tip:"kampanya"}),style:{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},h("span",{style:{fontSize:14}},"🎁"),"Kampanya"),
         h("button",{onClick:()=>ac({tip:"yazismalar"}),style:{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},IK("mesaj","var(--mut)",15),"Yazışmalar"),
         h("button",{onClick:()=>ac({tip:"ayar"}),style:{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},IK("ayarlar","var(--mut)",15),"Ayarlar"))),
     h("button",{onClick:()=>ac({tip:"kullanici",u:null}),style:{width:"100%",padding:12,borderRadius:14,
@@ -4116,6 +4261,7 @@ function App(){
   const hedefler=useColl("hedef");
   const talepler=useColl("talep");
   const ayarlar=useColl("ayar");
+  const kampanyalar=useColl("kampanya");   // 🎁 pazarlamacı kampanyaları
   const ayar=(ayarlar||[]).find(x=>x.id==="genel")||{};
   const tablaUc=ayar.tablaUcret!=null?num(ayar.tablaUcret):5;
   const gkey=(ayar.googleKey||"").trim();
@@ -4398,6 +4544,38 @@ function App(){
   async function ayarKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ await save("ayar",{id:"genel",...p2}); setModal(null); say("Ayarlar kaydedildi"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  /* 🎁 kampanya kaydı — ödül ürün adı da yazılır ki pazarlamacı tarafı ürün
+     listesi gelmeden de doğru gösterebilsin. */
+  async function kampanyaKaydet(p2){ if(isBekle) return; setIsBekle(true);
+    try{ await save("kampanya",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,hedefTip:p2.hedefTip,
+        hedefUrunId:p2.hedefUrunId||"",hedefMiktar:num(p2.hedefMiktar),
+        odulUrunId:p2.odulUrunId,odulUrunAd:p2.odulUrunAd||"",odulAdet:num(p2.odulAdet),
+        kime:p2.kime||[],bas:p2.bas||"",bit:p2.bit||"",aktif:p2.aktif!==false,
+        ...(p2.id?{}:{tarih:new Date().toISOString()})});
+      say((p2.id?"Kampanya güncellendi · ":"Kampanya tanımlandı · ")+p2.ad); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  async function kampanyaSil(k){ if(!k||!k.id) return;
+    if(!confirm("🗑 \""+(k.ad||"kampanya")+"\" silinsin mi?\nVerilmiş ödüller geri alınmaz.")) return;
+    try{ await remove("kampanya",k.id); say("Kampanya silindi"); }
+    catch(e){ console.error(e); say("Silinemedi"); } }
+  /* Ödül elle verilir: ürün atölyeden pazarlamacının ödül stoğuna geçer ve bu da
+     bir 'al' hareketi olarak kayda geçer — veriliş 0, yani satarsa tamamı onun. */
+  async function kampanyaOdulVer(k,u){ if(!k||!u||isBekle) return;
+    const ad2=num(k.odulAdet); const urun=(urunler||[]).find(x=>x.id===k.odulUrunId);
+    if(!urun||ad2<=0) return alert("Ödül ürünü bulunamadı.");
+    const kalan=num(urun.stokta)-ad2;
+    if(!confirm("🎁 "+(u.ad||"")+" için "+ad2+" × "+(urun.ad||"")+" ödülü verilsin mi?\n\n"
+      +"Atölye stoğu: "+num(urun.stokta)+" → "+kalan+(kalan<0?"  ⚠ eksiye düşüyor":"")
+      +"\nVeriliş 0 yazılır — satarsa tutarın tamamı hakedişi olur.")) return;
+    setIsBekle(true);
+    try{
+      await save("stok_urun",{id:urun.id,stokta:increment(-ad2),odulStokK:{[u.id]:increment(ad2)}});
+      await save("pazarlama_hareket",{kullaniciId:u.id,kullaniciAd:u.ad||"",tip:"al",kaynak:"kampanya",
+        kampanyaId:k.id,kampanyaAd:k.ad||"",urunId:urun.id,urunAd:urun.ad||"",adet:ad2,
+        alisFiyat:0,maliyetBirim:num(urun.maliyetGuncel),tarih:new Date().toISOString()});
+      await save("kampanya",{id:k.id,verilen:{[u.id]:{tarih:new Date().toISOString(),adet:ad2}}});
+      say("🎁 Ödül verildi · "+(u.ad||"")); }
+    catch(e){ console.error(e); say("Ödül verilemedi"); } finally{ setIsBekle(false); } }
   async function gorevKaydet(g){ try{ await save("hedef",{tip:"gorev",ad:g.ad,poly:g.poly,lat:g.lat,lng:g.lng,r:g.r,duraklar:g.duraklar,
       kullaniciId:g.kullaniciId||"",kullaniciAd:(kullanicilar||[]).find(u=>u.id===g.kullaniciId)?((kullanicilar||[]).find(u=>u.id===g.kullaniciId).ad):"",tarih:new Date().toISOString()});
       say("Görev atandı · "+(g.ad||"")); }catch(e){ console.error(e); say("Görev atanamadı"); } }
@@ -4605,6 +4783,8 @@ function App(){
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } },
       onGeri:async(g)=>{ if(!g||!g.id||isBekle) return; await montajGeriAl(g); }}),
     modal&&modal.tip==="seriler"&&h(SeriYonetSheet,{stok:d.stok,bekle:isBekle,onAta:seriAta,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="kampanya"&&h(KampanyaSheet,{kampanyalar,kullanicilar,hareketler,urunler,
+      bekle:isBekle,onKaydet:kampanyaKaydet,onSil:kampanyaSil,onOdulVer:kampanyaOdulVer,onClose:()=>setModal(null)}),
     modal&&modal.tip==="anlasma"&&h(AnlasmaSheet,{list:anlasmalar,bekle:isBekle,onKaldir:anlasmaKaldir,onClose:()=>setModal(null)}),
     modal&&modal.tip==="yinelenen"&&h(YinelenenSheet,{gruplar:yinelenenler,bekle:isBekle,onBirlestir:kaleBirlestir,onClose:()=>setModal(null)}),
     modal&&modal.tip==="sarfYonet"&&h(SarfYonetimSheet,{sarflar,stok:d.stok,giderler,bekle:isBekle,onClose:()=>setModal(null),
