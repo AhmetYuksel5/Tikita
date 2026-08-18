@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L31";   // komuta (admin) deneme sürümü
+const SURUM="L32";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -791,7 +791,7 @@ const kampanyaSuresi=kmp=>{ if(!kmp) return true;
   if(kmp.bit&&(new Date(kmp.bit+"T23:59:59").getTime()||0)<now) return false;
   return true; };
 /* 🎁 kampanya yönetimi — liste, tanımlama, kişi kişi ilerleme, ödül verme */
-function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,bekle,onKaydet,onSil,onOdulVer,onClose}){
+function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,fotoMap,onFoto,onFotoSil,bekle,onKaydet,onSil,onOdulVer,onClose}){
   const [duzen,setDuzen]=useState(null);   // null | {} (yeni) | kayıt
   const pazarlamacilar=(kullanicilar||[]).filter(u=>u&&u.id&&(u.ad||"").trim()&&!u.arsiv
     &&u.rol!=="admin"&&u.rol!=="montaj"&&!u.demo&&!u.minimal);
@@ -799,6 +799,7 @@ function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,bekle,onKayd
   const urunAd=id=>((urunler||[]).find(u=>u.id===id)||{}).ad||"";
 
   if(duzen) return h(KampanyaDuzenSheet,{k:duzen,pazarlamacilar,urunler,bekle,
+    foto:(fotoMap||{})[duzen.id],onFoto,onFotoSil,
     onKaydet:async p2=>{ if(p2===null){ setDuzen(null); return; } await onKaydet(p2); setDuzen(null); },
     onSil:duzen.id?(()=>{ onSil(duzen); setDuzen(null); }):null});
 
@@ -878,7 +879,7 @@ function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,bekle,onKayd
       :h("div",{style:{padding:"22px 0",textAlign:"center",color:"var(--mut)",fontSize:13.5}},
         "Henüz kampanya yok — sağ üstteki + ile tanımla."));
 }
-function KampanyaDuzenSheet({k,pazarlamacilar,urunler,bekle,onKaydet,onSil}){
+function KampanyaDuzenSheet({k,pazarlamacilar,urunler,bekle,onKaydet,onSil,foto,onFoto,onFotoSil}){
   const [ad,setAd]=useState(k.ad||"");
   const [kapsam,setKapsam]=useState(k.kapsam||"mekan");
   const [hedefTip,setHedefTip]=useState(k.hedefTip||"adet");
@@ -943,6 +944,24 @@ function KampanyaDuzenSheet({k,pazarlamacilar,urunler,bekle,onKaydet,onSil}){
         justifyContent:"center",fontSize:14,fontWeight:800,color:"#fff",
         background:aktif?"#b45309":"var(--line)"}},aktif?"✓":""),
       h("span",{style:{fontSize:14,fontWeight:800,color:aktif?"#7c2d12":"var(--mut)"}},"Kampanya aktif")),
+    /* 🖼 Broşür görseli — pazarlamacının müşteriye göndereceği afişte kullanılır.
+       Kampanya kaydedilmeden yüklenemez, çünkü görsel kampanya kimliğine bağlanıyor. */
+    k.id?h(React.Fragment,null,
+      lbl("Broşür görseli — stant fotoğrafı"),
+      h("div",{style:{display:"flex",alignItems:"center",gap:11}},
+        foto&&foto.data?h("img",{src:foto.data,alt:"",style:{width:74,height:74,borderRadius:12,
+          objectFit:"cover",flexShrink:0,background:"var(--surf2)"}}):null,
+        h("label",{style:{flex:1,padding:"11px 14px",borderRadius:13,background:"var(--surf2)",
+            border:"1.5px dashed var(--cyan)",color:"var(--cyan)",fontSize:13,fontWeight:800,
+            textAlign:"center",cursor:"pointer"}},
+          (foto&&foto.data)?"Görseli değiştir":"Görsel yükle",
+          h("input",{type:"file",accept:"image/*",style:{display:"none"},
+            onChange:e=>{ const f=e.target.files&&e.target.files[0]; if(f&&onFoto) onFoto(k.id,f); e.target.value=""; }})),
+        (foto&&foto.data&&onFotoSil)?h("button",{onClick:()=>onFotoSil(k.id),
+          style:{flexShrink:0,padding:"11px 13px",borderRadius:13,background:"var(--surf2)",
+            border:"1px solid var(--red)",color:"var(--red)",fontSize:12.5,fontWeight:800}},"Sil"):null))
+      :h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:14,lineHeight:1.5}},
+        "Broşür görselini kampanyayı kaydettikten sonra ekleyebilirsin."),
     onSil?h("button",{onClick:onSil,style:{width:"100%",padding:12,borderRadius:13,marginTop:12,
       background:"var(--surf2)",border:"1px solid var(--red)",color:"var(--red)",
       fontSize:13,fontWeight:800}},"🗑 Kampanyayı sil"):null);
@@ -4327,6 +4346,9 @@ function App(){
   const talepler=useColl("talep");
   const ayarlar=useColl("ayar");
   const kampanyalar=useColl("kampanya");   // 🎁 pazarlamacı kampanyaları
+  /* Broşür görseli ayrı koleksiyonda: kampanya kaydı her açılışta okunuyor,
+     görseli oraya koysak sahadaki herkesin yükleme süresi uzardı. */
+  const kampanyaFoto=useColl("kampanya_foto");
   const ayar=(ayarlar||[]).find(x=>x.id==="genel")||{};
   const tablaUc=ayar.tablaUcret!=null?num(ayar.tablaUcret):5;
   const gkey=(ayar.googleKey||"").trim();
@@ -4619,6 +4641,17 @@ function App(){
         ...(p2.id?{}:{tarih:new Date().toISOString()})});
       say((p2.id?"Kampanya güncellendi · ":"Kampanya tanımlandı · ")+p2.ad); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  const kmpFotoMap=useMemo(()=>{ const m={}; (kampanyaFoto||[]).forEach(f=>{ if(f&&f.kampanyaId) m[f.kampanyaId]=f; }); return m; },[kampanyaFoto]);
+  async function kampanyaFotoEkle(kampanyaId,file){ if(!kampanyaId||!file) return;
+    try{ const data=await dosyaOku(file,1100); const eski=kmpFotoMap[kampanyaId];
+      if(eski) await remove("kampanya_foto",eski.id);   // kampanya başına tek görsel
+      await save("kampanya_foto",{kampanyaId,data,tarih:new Date().toISOString()});
+      say("Broşür görseli eklendi"); }
+    catch(e){ console.error(e); say("⚠ Görsel eklenemedi"); } }
+  async function kampanyaFotoSil(kampanyaId){ const f=kmpFotoMap[kampanyaId]; if(!f||!f.id) return;
+    if(!confirm("Broşür görseli silinsin mi?")) return;
+    try{ await remove("kampanya_foto",f.id); say("Görsel silindi"); }
+    catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   async function kampanyaSil(k){ if(!k||!k.id) return;
     if(!confirm("🗑 \""+(k.ad||"kampanya")+"\" silinsin mi?\nVerilmiş ödüller geri alınmaz.")) return;
     try{ await remove("kampanya",k.id); say("Kampanya silindi"); }
@@ -4865,6 +4898,7 @@ function App(){
       onGeri:async(g)=>{ if(!g||!g.id||isBekle) return; await montajGeriAl(g); }}),
     modal&&modal.tip==="seriler"&&h(SeriYonetSheet,{stok:d.stok,bekle:isBekle,onAta:seriAta,onClose:()=>setModal(null)}),
     modal&&modal.tip==="kampanya"&&h(KampanyaSheet,{kampanyalar,kullanicilar,hareketler,urunler,
+      fotoMap:kmpFotoMap,onFoto:kampanyaFotoEkle,onFotoSil:kampanyaFotoSil,
       bekle:isBekle,onKaydet:kampanyaKaydet,onSil:kampanyaSil,onOdulVer:kampanyaOdulVer,onClose:()=>setModal(null)}),
     modal&&modal.tip==="anlasma"&&h(AnlasmaSheet,{list:anlasmalar,bekle:isBekle,onKaldir:anlasmaKaldir,onClose:()=>setModal(null)}),
     modal&&modal.tip==="yinelenen"&&h(YinelenenSheet,{gruplar:yinelenenler,bekle:isBekle,onBirlestir:kaleBirlestir,onClose:()=>setModal(null)}),
