@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L30";   // komuta (admin) deneme sürümü
+const SURUM="L31";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -755,6 +755,35 @@ function kampanyaIlerleme(kmp,har,uid){
   return t;
 }
 const kampanyaKapsar=(kmp,uid)=>!!kmp&&kmp.aktif!==false&&(!((kmp.kime||[]).length)||(kmp.kime||[]).indexOf(uid)>=0);
+/* 🏬 Mekan kapsamlı kampanya: hedef her kale için ayrı sayılır ve TEKRARLANIR —
+   200 alan kale 100'lük hedefi iki kez hak eder. Ödül kaleye verilir. */
+const kmpKaleKey=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
+function kampanyaMekanlar(kmp,har){
+  if(!kmp) return [];
+  const b0=kmp.bas?(new Date(kmp.bas+"T00:00:00").getTime()||0):0;
+  const b1=kmp.bit?(new Date(kmp.bit+"T23:59:59").getTime()||Infinity):Infinity;
+  const kime=kmp.kime||[];
+  const M={};
+  (har||[]).forEach(x=>{
+    if(!x||x.tip!=="satis"||x.gerilla) return;                 // seyyar satışın mekanı yok
+    if(kime.length&&kime.indexOf(x.kullaniciId||"")<0) return;
+    const ts=new Date(x.tarih).getTime()||0; if(ts<b0||ts>b1) return;
+    if(kmp.hedefUrunId&&(x.urunId||"")!==kmp.hedefUrunId) return;
+    const key=kmpKaleKey(x); if(key==="y:?") return;
+    const o=M[key]||(M[key]={key,ad:x.yer||"",musteriId:x.musteriId||"",
+      kullaniciId:x.kullaniciId||"",kullaniciAd:x.kullaniciAd||"",ilerleme:0,son:0});
+    o.ilerleme+=(kmp.hedefTip==="ciro")?num(x.adet)*num(x.satisFiyat):num(x.adet);
+    if(ts>o.son){ o.son=ts; o.ad=x.yer||o.ad; o.kullaniciId=x.kullaniciId||o.kullaniciId;
+      o.kullaniciAd=x.kullaniciAd||o.kullaniciAd; } });
+  const hedef=Math.max(1,num(kmp.hedefMiktar));
+  return Object.values(M).map(o=>{
+    const hak=Math.floor(o.ilerleme/hedef);
+    const verilen=num((((kmp.verilen||{})[o.key])||{}).kez);
+    return {...o,hak,verilen,bekleyen:Math.max(0,hak-verilen),
+      kalan:Math.max(0,hedef*(hak+1)-o.ilerleme)}; })
+    .sort((a,b)=>b.bekleyen-a.bekleyen||b.ilerleme-a.ilerleme);
+}
+const kampanyaMekanMi=kmp=>!kmp||kmp.kapsam!=="pazarlamaci";   // varsayılan: mekan kapsamı
 const kampanyaVerildi=(kmp,uid)=>!!(((kmp&&kmp.verilen)||{})[uid]);
 const kampanyaSuresi=kmp=>{ if(!kmp) return true;
   const now=Date.now();
@@ -776,7 +805,9 @@ function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,bekle,onKayd
   const satir=k=>{
     const hedefEt=(k.hedefTip==="ciro"?tl(k.hedefMiktar):(num(k.hedefMiktar)+" adet"))
       +(k.hedefUrunId?(" · "+urunAd(k.hedefUrunId)):" satış");
-    const kisiler=pazarlamacilar.filter(u=>kampanyaKapsar(k,u.id));
+    const mekanMi=kampanyaMekanMi(k);
+    const mekanlar=mekanMi?kampanyaMekanlar(k,hareketler):[];
+    const kisiler=mekanMi?[]:pazarlamacilar.filter(u=>kampanyaKapsar(k,u.id));
     const sureli=kampanyaSuresi(k);
     return h("div",{key:k.id,className:"card",style:{padding:"14px 16px",marginBottom:10,
         opacity:(k.aktif===false)?.55:1}},
@@ -784,12 +815,37 @@ function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,bekle,onKayd
         h("div",{style:{flex:1,minWidth:0}},
           h("div",{style:{fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad||"Kampanya"),
           h("div",{style:{fontSize:12,color:"var(--mut)",marginTop:3,fontWeight:600}},
-            hedefEt+"  →  "+num(k.odulAdet)+" × "+(urunAd(k.odulUrunId)||"ödül")),
+            (mekanMi?"Her mekan ":"")+hedefEt+"  →  "+num(k.odulAdet)+" × "+(urunAd(k.odulUrunId)||"ödül")),
+          h("div",{style:{fontSize:11,color:"var(--cyan)",marginTop:2,fontWeight:800}},
+            mekanMi?"🏬 mekan bazlı · her hedefte yeniden":"🎖 pazarlamacı bazlı · bir kez"),
           (k.bas||k.bit)?h("div",{style:{fontSize:11,color:sureli?"var(--mut2)":"var(--red)",marginTop:2,fontWeight:700}},
             (k.bas||"")+" – "+(k.bit||"süresiz")+(sureli?"":" · süresi geçti")):null),
         h("button",{onClick:()=>setDuzen(k),style:{flexShrink:0,padding:"7px 11px",borderRadius:10,
           background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12,fontWeight:800}},"Düzenle")),
-      kisiler.length?h("div",{style:{display:"grid",gap:7}},kisiler.map(u=>{
+      mekanMi
+        ? (mekanlar.length?h("div",{style:{display:"grid",gap:7}},mekanlar.map(m=>{
+            const oran=Math.max(0,Math.min(100,Math.round((m.ilerleme%Math.max(1,num(k.hedefMiktar)))/Math.max(1,num(k.hedefMiktar))*100)));
+            const tam=m.bekleyen>0;
+            return h("div",{key:m.key,style:{padding:"9px 11px",borderRadius:12,background:"var(--surf2)",
+                border:"1px solid "+(tam?"var(--gold)":(m.verilen>0?"var(--green)":"var(--line)"))}},
+              h("div",{style:{display:"flex",alignItems:"center",gap:9,marginBottom:6}},
+                h("span",{style:{fontSize:13,fontWeight:800,flex:1,minWidth:0,overflow:"hidden",
+                  textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad||"—"),
+                h("span",{style:{fontSize:12,fontWeight:800,color:tam?"var(--gold)":"var(--mut)"}},
+                  (k.hedefTip==="ciro"?tl(m.ilerleme):num(m.ilerleme)))),
+              h("div",{style:{height:6,borderRadius:6,background:"var(--line)",overflow:"hidden",marginBottom:6}},
+                h("div",{style:{height:"100%",width:(tam?100:oran)+"%",borderRadius:6,
+                  background:tam?"var(--gold)":"var(--cyan)"}})),
+              h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700,marginBottom:tam?7:0}},
+                (m.kullaniciAd?(m.kullaniciAd+" · "):"")
+                +(m.verilen>0?(m.verilen+" kez verildi · "):"")
+                +(tam?(m.bekleyen+" kez hak etti"):("sonraki ödüle "+(k.hedefTip==="ciro"?tl(m.kalan):num(m.kalan)+" adet")))),
+              tam?h("button",{onClick:()=>onOdulVer(k,m),disabled:bekle,
+                style:{width:"100%",padding:"9px 0",borderRadius:10,border:"none",
+                  background:bekle?"var(--line)":"var(--gold)",color:"#fff",fontSize:12.5,fontWeight:800}},
+                bekle?"⏳":("🎁 Ödülü ver · "+num(k.odulAdet)+" × "+(urunAd(k.odulUrunId)||"ürün"))):null); }))
+          :h("div",{style:{fontSize:12,color:"var(--mut)",padding:"6px 0"}},"Henüz hiçbir mekan bu kampanyada satış görmedi."))
+        : kisiler.length?h("div",{style:{display:"grid",gap:7}},kisiler.map(u=>{
         const ilr=kampanyaIlerleme(k,hareketler,u.id);
         const hedef=Math.max(1,num(k.hedefMiktar));
         const oran=Math.max(0,Math.min(100,Math.round(ilr/hedef*100)));
@@ -824,6 +880,7 @@ function KampanyaSheet({kampanyalar,kullanicilar,hareketler,urunler,bekle,onKayd
 }
 function KampanyaDuzenSheet({k,pazarlamacilar,urunler,bekle,onKaydet,onSil}){
   const [ad,setAd]=useState(k.ad||"");
+  const [kapsam,setKapsam]=useState(k.kapsam||"mekan");
   const [hedefTip,setHedefTip]=useState(k.hedefTip||"adet");
   const [hedefUrunId,setHedefUrunId]=useState(k.hedefUrunId||"");
   const [hedefMiktar,setHedefMiktar]=useState(k.hedefMiktar!=null?String(k.hedefMiktar):"100");
@@ -840,11 +897,19 @@ function KampanyaDuzenSheet({k,pazarlamacilar,urunler,bekle,onKaydet,onSil}){
   const lbl=(t,ust)=>h("div",{className:"lbl",style:{margin:(ust||14)+"px 0 8px"}},t);
   return h(Sheet,{ik:"🎁",hex:"#b45309",baslik:k.id?"Kampanyayı düzenle":"Yeni kampanya",alt:"",
       onClose:()=>onKaydet(null),cta:bekle?"⏳ Kaydediliyor…":"Kaydet",disabled:!gecerli||bekle,
-      onCta:()=>onKaydet({id:k.id,ad:ad.trim(),hedefTip,hedefUrunId,hedefMiktar:num(hedefMiktar),
+      onCta:()=>onKaydet({id:k.id,ad:ad.trim(),kapsam,hedefTip,hedefUrunId,hedefMiktar:num(hedefMiktar),
         odulUrunId,odulUrunAd:((urunList.find(u=>u.id===odulUrunId)||{}).ad||""),odulAdet:num(odulAdet),
         kime,bas,bit,aktif})},
     lbl("Kampanya adı",0),
     h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Ağustos atağı",style:inp}),
+    lbl("Hedef kim için sayılsın"),
+    h("div",{style:{display:"flex",gap:8}},
+      h(Chip,{on:kapsam==="mekan",onClick:()=>setKapsam("mekan")},"🏬 Her mekan ayrı"),
+      h(Chip,{on:kapsam==="pazarlamaci",onClick:()=>setKapsam("pazarlamaci")},"🎖 Pazarlamacı")),
+    h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:6,lineHeight:1.5}},
+      kapsam==="mekan"
+        ? "Her mekan hedefi kendi doldurur ve her doldurduğunda yeniden hak eder — ödül mekana verilir."
+        : "Pazarlamacının toplam satışı sayılır, ödül bir kez ona verilir."),
     lbl("Hedef neye göre sayılsın"),
     h("div",{style:{display:"flex",gap:8}},
       h(Chip,{on:hedefTip==="adet",onClick:()=>setHedefTip("adet")},"Satılan adet"),
@@ -4547,7 +4612,7 @@ function App(){
   /* 🎁 kampanya kaydı — ödül ürün adı da yazılır ki pazarlamacı tarafı ürün
      listesi gelmeden de doğru gösterebilsin. */
   async function kampanyaKaydet(p2){ if(isBekle) return; setIsBekle(true);
-    try{ await save("kampanya",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,hedefTip:p2.hedefTip,
+    try{ await save("kampanya",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,kapsam:p2.kapsam||"mekan",hedefTip:p2.hedefTip,
         hedefUrunId:p2.hedefUrunId||"",hedefMiktar:num(p2.hedefMiktar),
         odulUrunId:p2.odulUrunId,odulUrunAd:p2.odulUrunAd||"",odulAdet:num(p2.odulAdet),
         kime:p2.kime||[],bas:p2.bas||"",bit:p2.bit||"",aktif:p2.aktif!==false,
@@ -4560,21 +4625,37 @@ function App(){
     catch(e){ console.error(e); say("Silinemedi"); } }
   /* Ödül elle verilir: ürün atölyeden pazarlamacının ödül stoğuna geçer ve bu da
      bir 'al' hareketi olarak kayda geçer — veriliş 0, yani satarsa tamamı onun. */
-  async function kampanyaOdulVer(k,u){ if(!k||!u||isBekle) return;
+  async function kampanyaOdulVer(k,hedef){ if(!k||!hedef||isBekle) return;
     const ad2=num(k.odulAdet); const urun=(urunler||[]).find(x=>x.id===k.odulUrunId);
     if(!urun||ad2<=0) return alert("Ödül ürünü bulunamadı.");
     const kalan=num(urun.stokta)-ad2;
-    if(!confirm("🎁 "+(u.ad||"")+" için "+ad2+" × "+(urun.ad||"")+" ödülü verilsin mi?\n\n"
+    const mekanMi=kampanyaMekanMi(k);
+    const kime=mekanMi?(hedef.ad||"mekan"):(hedef.ad||"");
+    if(!confirm("🎁 "+kime+" için "+ad2+" × "+(urun.ad||"")+" ödülü verilsin mi?\n\n"
       +"Atölye stoğu: "+num(urun.stokta)+" → "+kalan+(kalan<0?"  ⚠ eksiye düşüyor":"")
-      +"\nVeriliş 0 yazılır — satarsa tutarın tamamı hakedişi olur.")) return;
+      +(mekanMi?"\nMekana hediye olarak yazılır — borç doğmaz."
+              :"\nVeriliş 0 yazılır — satarsa tutarın tamamı hakedişi olur."))) return;
     setIsBekle(true);
     try{
-      await save("stok_urun",{id:urun.id,stokta:increment(-ad2),odulStokK:{[u.id]:increment(ad2)}});
-      await save("pazarlama_hareket",{kullaniciId:u.id,kullaniciAd:u.ad||"",tip:"al",kaynak:"kampanya",
-        kampanyaId:k.id,kampanyaAd:k.ad||"",urunId:urun.id,urunAd:urun.ad||"",adet:ad2,
-        alisFiyat:0,maliyetBirim:num(urun.maliyetGuncel),tarih:new Date().toISOString()});
-      await save("kampanya",{id:k.id,verilen:{[u.id]:{tarih:new Date().toISOString(),adet:ad2}}});
-      say("🎁 Ödül verildi · "+(u.ad||"")); }
+      if(mekanMi){
+        /* Mekan ödülü: kaleye hediye olarak yazılır, borç doğurmaz. Hak ediş
+           tekrarlanabildiği için sayaç artırılır — aynı kale ikinci kez de alabilir. */
+        await save("stok_urun",{id:urun.id,stokta:increment(-ad2),hediye:increment(ad2)});
+        await save("pazarlama_hareket",{kullaniciId:hedef.kullaniciId||"",kullaniciAd:hedef.kullaniciAd||"",
+          tip:"hediye",kaynak:"kampanya",kampanyaId:k.id,kampanyaAd:k.ad||"",
+          urunId:urun.id,urunAd:urun.ad||"",adet:ad2,alisFiyat:0,satisFiyat:0,
+          maliyetBirim:num(urun.maliyetGuncel),yer:hedef.ad||"",musteriId:hedef.musteriId||"",
+          tarih:new Date().toISOString()});
+        await save("kampanya",{id:k.id,verilen:{[hedef.key]:{kez:num(hedef.verilen)+1,
+          tarih:new Date().toISOString(),ad:hedef.ad||""}}});
+      } else {
+        await save("stok_urun",{id:urun.id,stokta:increment(-ad2),odulStokK:{[hedef.id]:increment(ad2)}});
+        await save("pazarlama_hareket",{kullaniciId:hedef.id,kullaniciAd:hedef.ad||"",tip:"al",kaynak:"kampanya",
+          kampanyaId:k.id,kampanyaAd:k.ad||"",urunId:urun.id,urunAd:urun.ad||"",adet:ad2,
+          alisFiyat:0,maliyetBirim:num(urun.maliyetGuncel),tarih:new Date().toISOString()});
+        await save("kampanya",{id:k.id,verilen:{[hedef.id]:{tarih:new Date().toISOString(),adet:ad2}}});
+      }
+      say("🎁 Ödül verildi · "+kime); }
     catch(e){ console.error(e); say("Ödül verilemedi"); } finally{ setIsBekle(false); } }
   async function gorevKaydet(g){ try{ await save("hedef",{tip:"gorev",ad:g.ad,poly:g.poly,lat:g.lat,lng:g.lng,r:g.r,duraklar:g.duraklar,
       kullaniciId:g.kullaniciId||"",kullaniciAd:(kullanicilar||[]).find(u=>u.id===g.kullaniciId)?((kullanicilar||[]).find(u=>u.id===g.kullaniciId).ad):"",tarih:new Date().toISOString()});

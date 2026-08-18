@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v107";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v108";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -334,6 +334,35 @@ function kampanyaIlerleme(kmp,har,uid){
   return t;
 }
 const kampanyaKapsar=(kmp,uid)=>!!kmp&&kmp.aktif!==false&&(!((kmp.kime||[]).length)||(kmp.kime||[]).indexOf(uid)>=0);
+/* 🏬 Mekan kapsamlı kampanya: hedef her kale için ayrı sayılır ve TEKRARLANIR —
+   200 alan kale 100'lük hedefi iki kez hak eder. Ödül kaleye verilir. */
+const kmpKaleKey=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
+function kampanyaMekanlar(kmp,har){
+  if(!kmp) return [];
+  const b0=kmp.bas?(new Date(kmp.bas+"T00:00:00").getTime()||0):0;
+  const b1=kmp.bit?(new Date(kmp.bit+"T23:59:59").getTime()||Infinity):Infinity;
+  const kime=kmp.kime||[];
+  const M={};
+  (har||[]).forEach(x=>{
+    if(!x||x.tip!=="satis"||x.gerilla) return;                 // seyyar satışın mekanı yok
+    if(kime.length&&kime.indexOf(x.kullaniciId||"")<0) return;
+    const ts=new Date(x.tarih).getTime()||0; if(ts<b0||ts>b1) return;
+    if(kmp.hedefUrunId&&(x.urunId||"")!==kmp.hedefUrunId) return;
+    const key=kmpKaleKey(x); if(key==="y:?") return;
+    const o=M[key]||(M[key]={key,ad:x.yer||"",musteriId:x.musteriId||"",
+      kullaniciId:x.kullaniciId||"",kullaniciAd:x.kullaniciAd||"",ilerleme:0,son:0});
+    o.ilerleme+=(kmp.hedefTip==="ciro")?num(x.adet)*num(x.satisFiyat):num(x.adet);
+    if(ts>o.son){ o.son=ts; o.ad=x.yer||o.ad; o.kullaniciId=x.kullaniciId||o.kullaniciId;
+      o.kullaniciAd=x.kullaniciAd||o.kullaniciAd; } });
+  const hedef=Math.max(1,num(kmp.hedefMiktar));
+  return Object.values(M).map(o=>{
+    const hak=Math.floor(o.ilerleme/hedef);
+    const verilen=num((((kmp.verilen||{})[o.key])||{}).kez);
+    return {...o,hak,verilen,bekleyen:Math.max(0,hak-verilen),
+      kalan:Math.max(0,hedef*(hak+1)-o.ilerleme)}; })
+    .sort((a,b)=>b.bekleyen-a.bekleyen||b.ilerleme-a.ilerleme);
+}
+const kampanyaMekanMi=kmp=>!kmp||kmp.kapsam!=="pazarlamaci";   // varsayılan: mekan kapsamı
 const kampanyaVerildi=(kmp,uid)=>!!(((kmp&&kmp.verilen)||{})[uid]);
 const ASKER_TIER=[[0,1],[50,2],[100,3],[250,5],[1000,9]];
 const SILAH_TIER=[[0,1],[500,2],[1000,3],[2500,5],[5000,9]];
@@ -626,21 +655,39 @@ function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tab
   const fir=[]; // fırsat radarı (istihbarat — emir değil)
   /* 🎁 kampanyalar — ilerleme çubuğu; hedef dolunca ödül komutadan beklenir */
   const kmpKart=(kampanyalar||[]).map(k=>{
-    const ilr=kampanyaIlerleme(k,tumHar,d.emir.id);
     const hedef=Math.max(1,num(k.hedefMiktar));
+    const odulEt=num(k.odulAdet)+" × "+(k.odulUrunAd||"ürün");
+    const hedefEt=(k.hedefTip==="ciro"?tl(k.hedefMiktar):(num(k.hedefMiktar)+" adet"));
+    const ustSatir=(ek,renk)=>h("div",{style:{display:"flex",alignItems:"baseline",gap:9,marginBottom:7}},
+      h("span",{style:{fontSize:16,flexShrink:0}},"🎁"),
+      h("span",{style:{fontSize:13.5,fontWeight:800,flex:1,minWidth:0,overflow:"hidden",
+        textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad||"Kampanya"),
+      h("span",{style:{fontSize:12,fontWeight:800,color:renk,flexShrink:0}},ek));
+    if(kampanyaMekanMi(k)){
+      /* Mekan kampanyasında tek çubuk yok — hangi kale nerede, kalesinde görünür.
+         Burada özet: kaç mekan hak etti, kaçına verildi, en yakını ne kadar kaldı. */
+      const M=kampanyaMekanlar(k,(tumHar||[]).filter(x=>(x.kullaniciId||"")===d.emir.id));
+      const bekleyen=M.filter(m=>m.bekleyen>0).length;
+      const verilen=M.reduce((s2,m)=>s2+num(m.verilen),0);
+      const yakin=M.filter(m=>m.bekleyen<=0).sort((a,b)=>a.kalan-b.kalan)[0];
+      return h("div",{key:k.id,className:"card",style:{padding:"13px 15px",marginBottom:8,boxShadow:"none"}},
+        ustSatir(bekleyen>0?(bekleyen+" mekan hak etti"):(verilen>0?(verilen+" ödül verildi"):"sürüyor"),
+          bekleyen>0?"var(--gold)":(verilen>0?"var(--green)":"var(--mut)")),
+        h("div",{style:{fontSize:12.5,fontWeight:700,color:"var(--txt)"}},
+          "Her mekan "+hedefEt+" alınca  →  "+odulEt),
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:5,fontWeight:700}},
+          yakin?("En yakın: "+(yakin.ad||"—")+" · "+(k.hedefTip==="ciro"?tl(yakin.kalan):num(yakin.kalan)+" adet")+" kaldı")
+            :(M.length?"Hak eden mekanlar komutadan ödül bekliyor":"Henüz satış yok")));
+    }
+    const ilr=kampanyaIlerleme(k,tumHar,d.emir.id);
     const oran=Math.max(0,Math.min(100,Math.round(ilr/hedef*100)));
     const doldu=ilr>=num(k.hedefMiktar);
     const verildi=kampanyaVerildi(k,d.emir.id);
-    const odulEt=num(k.odulAdet)+" × "+(k.odulUrunAd||"ürün");
     const durum=verildi?["🎁 Ödül verildi","var(--green)"]
       :(doldu?["✅ Tamamlandı — ödül komutadan","var(--gold)"]
-      :[(k.hedefTip==="ciro"?tl(ilr):num(ilr))+" / "+(k.hedefTip==="ciro"?tl(k.hedefMiktar):num(k.hedefMiktar)),"var(--mut)"]);
+      :[(k.hedefTip==="ciro"?tl(ilr):num(ilr))+" / "+hedefEt,"var(--mut)"]);
     return h("div",{key:k.id,className:"card",style:{padding:"13px 15px",marginBottom:8,boxShadow:"none"}},
-      h("div",{style:{display:"flex",alignItems:"baseline",gap:9,marginBottom:7}},
-        h("span",{style:{fontSize:16,flexShrink:0}},"🎁"),
-        h("span",{style:{fontSize:13.5,fontWeight:800,flex:1,minWidth:0,overflow:"hidden",
-          textOverflow:"ellipsis",whiteSpace:"nowrap"}},k.ad||"Kampanya"),
-        h("span",{style:{fontSize:12,fontWeight:800,color:durum[1],flexShrink:0}},durum[0])),
+      ustSatir(durum[0],durum[1]),
       h("div",{style:{height:7,borderRadius:7,background:"var(--line)",overflow:"hidden"}},
         h("div",{style:{height:"100%",width:oran+"%",borderRadius:7,
           background:verildi?"var(--green)":(doldu?"var(--gold)":"var(--cyan)"),transition:"width .4s"}})),
@@ -1225,11 +1272,15 @@ function ZiyaretSheet({k,list,onClose,say}){
       h("span",{style:{fontSize:17,color:"var(--mut2)",flexShrink:0}},"›")))
       :h("div",{style:{padding:"22px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},"Bu kalede henüz işlem yok."));
 }
-function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ const D=k.durum;
+function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen,kampanyalar,tumHar}){ const D=k.durum;
   const zt=k.son?(k.gunGecti===0?"bugün":k.gunGecti+" gün önce"):"hiç";
   const telDig=(k.telefon||"").replace(/\D/g,"");
   const [panel,setPanel]=useState(null);   // "hareket" | "hakedis" | "ziyaret"
   const ziy=useMemo(()=>ziyaretler(kaleHar),[kaleHar]);
+  /* 🎁 bu kalenin mekan kampanyalarındaki durumu — hedefe ne kadar kaldığı */
+  const kmpDurum=useMemo(()=>(kampanyalar||[]).filter(x=>kampanyaMekanMi(x)).map(kmp=>{
+    const m=kampanyaMekanlar(kmp,tumHar).find(x=>x.key===k.key);
+    return m?{kmp,m}:null; }).filter(Boolean),[kampanyalar,tumHar,k.key]);
   // en son ziyaretin defteri müşterinin bugüne dek satın aldıklarını taşır
   const mulkKalem=useMemo(()=>ziy.length?rafSat(ziy[0].mulk,ziy[0].mulkD):[],[ziy]);
   const mulkAdet=mulkKalem.reduce((s2,c)=>s2+num(c.adet),0);
@@ -1260,6 +1311,26 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen}){ cons
         h(Stat,{ik:"⚔️",v:k.satisAdet+" satış",l:"İlişki gücü",renk:"var(--txt)"})),
       k.not?h("div",{className:"card",style:{padding:"11px 14px",marginBottom:12,boxShadow:"none",background:"#fffbeb",border:"1px solid #fde68a"}},
         h("span",{style:{fontSize:12.5,fontWeight:700,color:"#92400e"}},"📝 "+k.not)):null,
+      kmpDurum.length?h("div",{className:"card",style:{padding:"14px 16px",marginBottom:12}},
+        h("div",{className:"lbl",style:{marginBottom:10}},"🎁 Kampanya durumu"),
+        kmpDurum.map(({kmp,m},i)=>{
+          const hedef=Math.max(1,num(kmp.hedefMiktar));
+          const tam=m.bekleyen>0;
+          const oran=Math.max(0,Math.min(100,Math.round((m.ilerleme%hedef)/hedef*100)));
+          return h("div",{key:kmp.id,style:{paddingTop:i?11:0,marginTop:i?11:0,
+              borderTop:i?"1px solid var(--line)":"none"}},
+            h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}},
+              h("span",{style:{fontSize:13.5,fontWeight:800,flex:1,minWidth:0,overflow:"hidden",
+                textOverflow:"ellipsis",whiteSpace:"nowrap"}},kmp.ad||"Kampanya"),
+              h("span",{style:{fontSize:12,fontWeight:800,flexShrink:0,
+                color:tam?"var(--gold)":"var(--mut)"}},
+                tam?(m.bekleyen+" ödül hak etti"):((kmp.hedefTip==="ciro"?tl(m.kalan):num(m.kalan)+" adet")+" kaldı"))),
+            h("div",{style:{height:7,borderRadius:7,background:"var(--line)",overflow:"hidden"}},
+              h("div",{style:{height:"100%",width:(tam?100:oran)+"%",borderRadius:7,
+                background:tam?"var(--gold)":"var(--cyan)",transition:"width .4s"}})),
+            h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:6,fontWeight:700}},
+              "Ödül: "+num(kmp.odulAdet)+" × "+(kmp.odulUrunAd||"ürün")
+              +(m.verilen>0?("  ·  "+m.verilen+" kez verildi"):""))); })):null,
       k.konsKalem.length>0&&h("div",{className:"card",style:{padding:"14px 16px",marginBottom:12}},
         h("div",{className:"lbl",style:{marginBottom:10}},"🏬 Bu kalede duran konsinye"),
         k.konsKalem.map((c,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:14}},
@@ -2216,8 +2287,9 @@ function GorevFerman({g,d,onOk,bekle,onHarita}){
 }
 /* 🎁 kampanya fermanı — komuta yeni bir kampanya tanımladığında */
 function KampanyaFerman({k,d,onOk,bekle}){
-  const hedefEt=(k.hedefTip==="ciro"?tl(k.hedefMiktar):(num(k.hedefMiktar)+" adet"))
-    +(k.hedefUrunId?"":" ürün")+" sat";
+  const mekanMi=kampanyaMekanMi(k);
+  const hedefEt=(mekanMi?"Her mekan ":"")+(k.hedefTip==="ciro"?tl(k.hedefMiktar):(num(k.hedefMiktar)+" adet"))
+    +(k.hedefUrunId?"":" ürün")+(mekanMi?" alınca":" sat");
   const urunEt=k.hedefUrunId?((d.cephane.find(u=>u.id===k.hedefUrunId)||{}).ad||""):"";
   const odulEt=num(k.odulAdet)+" × "+(k.odulUrunAd||(d.cephane.find(u=>u.id===k.odulUrunId)||{}).ad||"ürün");
   const sure=(k.bas||k.bit)?((k.bas||"")+" – "+(k.bit||"süresiz")):"";
@@ -2233,9 +2305,12 @@ function KampanyaFerman({k,d,onOk,bekle}){
         h("div",{style:{fontSize:11,fontWeight:800,letterSpacing:1,color:"#b45309"}},"ÖDÜLÜN"),
         h("div",{style:{fontSize:17,fontWeight:800,marginTop:4,color:"#7c2d12"}},odulEt))),
     h("div",{style:{height:1,background:"var(--line)",margin:"12px 0 4px"}}),
-    fermanMadde("📈","İlerlemeni Üs ekranından takip edebilirsin."),
-    fermanMadde("🎁","Hedefi tutturunca ödülü komuta verir; çantana bedelsiz geçer."),
-    fermanMadde("🫰","Ödül ürünü satarsan veriliş 0 yazılır — tutarın tamamı senin hakedişin."));
+    mekanMi?fermanMadde("🏬","Her mekan hedefi kendi doldurur — bir kerelik değil, her doldurduğunda yeniden hak eder.")
+           :fermanMadde("📈","İlerlemeni Üs ekranından takip edebilirsin."),
+    mekanMi?fermanMadde("📈","Hangi kalenin ne kadar kaldığını kale sayfasından görürsün.")
+           :fermanMadde("🎁","Hedefi tutturunca ödülü komuta verir; çantana bedelsiz geçer."),
+    mekanMi?fermanMadde("🎁","Ödül mekana hediye olarak verilir; borç doğurmaz.")
+           :fermanMadde("🫰","Ödül ürünü satarsan veriliş 0 yazılır — tutarın tamamı senin hakedişin."));
 }
 function Sheet({ik,hex,baslik,alt,onClose,children,cta,onCta,disabled}){
   useBackClose(onClose);   // 🔙 geri tuşu bu pencereyi kapatsın
@@ -3480,7 +3555,7 @@ function App(){
   const kaleOv=kaleGuncel?ov.filter(x=>kkOf(x)===kaleGuncel.key).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
   const kaleHar=kaleGuncel?emirHar.filter(x=>kkOf(x)===kaleGuncel.key&&["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi"].includes(x.tip)).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)):[];
   let ekran;
-  if(kaleGuncel) ekran=h(KaleDetay,{k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar,
+  if(kaleGuncel) ekran=h(KaleDetay,{kampanyalar:benimKampanya,tumHar:emirHar,k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar,
     openDuzen:k=>setYeniKale({kayit:{id:k.musteriId||"",key:k.key,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}})});
   else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,openBrif:()=>setBrifAcik(true),goView:go,openBilgi,toplanacak,tablaTopla,tablaUc,hedefler:emirHedef,goHarita:()=>go("harita"),kampanyalar:benimKampanya,tumHar:emirHar});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say,onYeniKale:()=>setYeniKale(true),adaylar:adayGoster,openAday:a=>setAdaySec(a),
