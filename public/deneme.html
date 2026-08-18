@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v110";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v111";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -565,14 +565,18 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const tablaKazTop=(hareketler||[]).filter(x=>x.tip==="tabla").reduce((s,x)=>s+num(x.tutar),0);
   const tablaOdenenTop=(hareketler||[]).filter(x=>x.tip==="tablaOde").reduce((s,x)=>s+num(x.tutar),0);
   const tablaKalanTop=Math.max(0,tablaKazTop-tablaOdenenTop);
-  /* 🎖 sınırsız cephane: komuta yetkisi ya da en az Paşa rütbesi.
-     elde = sahada işlenebilecek ürünler; sınırsızda atölye stoğu da dahil. */
+  /* 🎖 sınırsız cephane: komuta yetkisi, şirket pazarlamacısı ya da en az Paşa rütbesi.
+     Bu grupta çanta akışı tümüyle askıda — işlem doğrudan atölye stoğundan geçer. */
   const gercekKul=(kullanicilar||[]).find(u=>u.id===REAL_ID)||{};
-  const sinirsiz=gercekKul.rol==="admin"||toplamGuc>=PASA_GUC;
-  // ödül stoğu da sahada işlenebilir — çantası boş olsa bile listeye girer
-  const elde=sinirsiz?cephane.filter(u=>u.stokta>0||u.canta>0||u.odul>0):cephane.filter(u=>u.canta>0||u.odul>0);
+  const sinirsiz=gercekKul.rol==="admin"||!!gercekKul.sirketPaz||toplamGuc>=PASA_GUC;
+  /* elde = sahada işlenebilecek ürünler.
+     Sınırsızda TÜM ürünler listede: montajı biten ama programa henüz girmemiş bir
+     ürün sıfır görünürken satılmış olabilir — engellemek yerine stok eksiye düşer,
+     Cephane'de uyarı çıkar ve elle düzeltilir. */
+  const elde=sinirsiz?cephane.slice():cephane.filter(u=>u.canta>0||u.odul>0);
+  const eksiStok=sinirsiz?cephane.filter(u=>u.stokta<0).sort((a,b)=>a.stokta-b.stokta):[];
   return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,hafGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
-    sinirsiz,elde,
+    sinirsiz,elde,eksiStok,
     gorevHaf,rozetler,lider,emirSira,toplamCiro,hakedisTop,tablaKazTop,tablaOdenenTop,tablaKalanTop,bugunSat,bugunCiro,bugunTah,vurkac,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
     borcTop:kaleler.reduce((s,k)=>s+k.borc,0)};
@@ -1565,7 +1569,7 @@ function Harita({d,openKale,say,adaylar,openAday,onYeniKale,onYeniKaleAt,digerKa
 }
 
 /* ————— CEPHANE ————— */
-function Cephane({d,say,cantaAc,openUrun}){
+function Cephane({d,say,cantaAc,openUrun,onStokDuzelt,bekle}){
   // 🗂 seri süzgeci — komutadan atanan ürün serileri; seri yoksa çubuk hiç çıkmaz
   const [seri,setSeri]=useState("");
   const seriAd=(()=>{ const m={}; (d.cephane||[]).forEach(u=>(u.seriler||[]).forEach(sr=>{
@@ -1576,13 +1580,32 @@ function Cephane({d,say,cantaAc,openUrun}){
   const yeniler=enYeniUrunler(d.cephane,YENI_SAY);
   const liste=seri==="yeni"?yeniler
     :(!seri?(d.cephane||[]):(seri==="_"?(d.cephane||[]).filter(u=>!(u.seriler||[]).length):(d.cephane||[]).filter(uye)));
-  const seriCanta=liste.reduce((s,u)=>s+num(u.canta),0);
+  const SZ=!!d.sinirsiz;   // 🏭 çanta askıda — doğrudan atölye stoğu
+  // eksideki ürün "varlık" saymaz — toplam yalnız gerçekten elde olanı sayar
+  const seriCanta=liste.reduce((s,u)=>s+Math.max(0,num(SZ?u.stokta:u.canta)),0);
+  const stokTop=(d.cephane||[]).reduce((s,u)=>s+Math.max(0,num(u.stokta)),0);
+  const eksi=(d.eksiStok||[]);
   const cubuk=(d.cephane||[]).length>0;   // seri olmasa da "En yeniler" sekmesi için çubuk çıkar
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:14}},
-      h("div",{style:{fontSize:24,fontWeight:800}},"🎒 Cephane"),
+      h("div",{style:{fontSize:24,fontWeight:800}},(SZ?"🏭":"🎒")+" Cephane"),
       h("div",{style:{fontSize:13,color:"var(--mut)",fontWeight:600}},
-        seri?(liste.length+" ürün · çantanda "+seriCanta):("çantanda "+d.cantaTop+" varlık"))),
+        SZ?(seri?(liste.length+" ürün · atölyede "+seriCanta):("atölyede "+stokTop+" varlık"))
+          :(seri?(liste.length+" ürün · çantanda "+seriCanta):("çantanda "+d.cantaTop+" varlık")))),
+    /* ⚠️ Eksi stok: montajı fiilen biten ama programda hâlâ montajda görünen ürün
+       satılmış demektir. İşlem engellenmez, burada bildirilir ve elle düzeltilir. */
+    (SZ&&eksi.length)?h("div",{style:{padding:"12px 13px",borderRadius:14,marginBottom:14,
+      background:"#fef2f2",border:"1px solid #fca5a5"}},
+      h("div",{style:{fontSize:12.5,fontWeight:800,color:"#b91c1c",marginBottom:2}},"⚠️ Stokta görünmeyen ürün satıldı"),
+      h("div",{style:{fontSize:11.5,color:"#9a3412",fontWeight:600,lineHeight:1.5,marginBottom:9}},
+        eksi.length+" üründe atölye stoğu eksiye düştü. Montajı biten ama programa girmemiş olabilir — sayıp düzelt."),
+      eksi.map((u,i)=>h("div",{key:u.id||i,style:{display:"flex",alignItems:"center",gap:9,padding:"7px 0",
+        borderTop:i?"1px solid #fecaca":"none"}},
+        h("div",{style:{flex:1,minWidth:0,fontSize:13,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+        h("span",{style:{fontSize:13.5,fontWeight:800,color:"#b91c1c",flexShrink:0}},num(u.stokta)+" ad"),
+        h("button",{onClick:()=>onStokDuzelt&&onStokDuzelt(u),disabled:bekle,
+          style:{flexShrink:0,padding:"5px 11px",borderRadius:9,background:"#b91c1c",color:"#fff",fontSize:11.5,fontWeight:800,
+            opacity:bekle?.5:1}},"⚖️ Düzelt")))):null,
     cubuk?h("div",{style:{display:"flex",gap:7,overflowX:"auto",paddingBottom:8,marginBottom:12}},
       h(Chip,{on:!seri,onClick:()=>setSeri("")},"Tümü"),
       yeniler.length?h(Chip,{on:seri==="yeni",onClick:()=>setSeri(seri==="yeni"?"":"yeni")},"🆕 En yeniler"):null,
@@ -1592,19 +1615,21 @@ function Cephane({d,say,cantaAc,openUrun}){
       "En son eklenen "+liste.length+" ürün · yeniden eskiye"):null,
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,paddingBottom:84}},
       liste.map((u,i)=>h("button",{key:u.id||i,onClick:()=>openUrun(u),className:"card",style:{padding:"15px 14px",position:"relative",overflow:"hidden",textAlign:"left"}},
-        u.canta>0&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"var(--gold)",background:"#d97b1218",padding:"2px 8px",borderRadius:8}},"🎒 "+u.canta),
-        num(u.odul)>0&&h("span",{style:{position:"absolute",top:u.canta>0?32:10,right:10,fontSize:10.5,fontWeight:800,color:"#7c2d12",background:"#d97b1230",padding:"2px 8px",borderRadius:8}},"🎁 "+num(u.odul)),
+        (!SZ&&u.canta>0)&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"var(--gold)",background:"#d97b1218",padding:"2px 8px",borderRadius:8}},"🎒 "+u.canta),
+        (SZ&&u.stokta<0)&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"#b91c1c",background:"#fee2e2",padding:"2px 8px",borderRadius:8}},"⚠️ eksi"),
+        num(u.odul)>0&&h("span",{style:{position:"absolute",top:((!SZ&&u.canta>0)||(SZ&&u.stokta<0))?32:10,right:10,fontSize:10.5,fontWeight:800,color:"#7c2d12",background:"#d97b1230",padding:"2px 8px",borderRadius:8}},"🎁 "+num(u.odul)),
         h("div",{style:{fontSize:26,marginBottom:8}},"📦"),
         h("div",{style:{fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
         (!seri&&seriMetin(u))?h("div",{style:{fontSize:10,color:"var(--mut2)",fontWeight:700,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🗂 "+seriMetin(u)):null,
         h("div",{style:{display:"flex",gap:10,marginTop:8,fontSize:12,color:"var(--mut)"}},
-          h("span",null,h("b",{style:{color:"var(--txt)",fontSize:15}},u.stokta)," atölye"),
+          h("span",null,h("b",{style:{color:u.stokta<0?"#b91c1c":"var(--txt)",fontSize:15}},u.stokta)," atölye"),
           u.fiyat>0&&h("span",{style:{marginLeft:"auto",color:"var(--green)",fontWeight:700}},tl(u.fiyat)))))),
-    // 🎒 cephane ekle — orta altta yüzen buton
-    h("button",{onClick:cantaAc,style:{position:"fixed",left:"50%",transform:"translateX(-50%)",zIndex:35,
+    /* 🎒 cephane ekle — sınırsız yetkide çanta yok, düğme de yok.
+       Eski çantasında ürün kalmışsa yalnız "boşalt" için çıkar. */
+    (!SZ||num(d.cantaTop)>0)?h("button",{onClick:cantaAc,style:{position:"fixed",left:"50%",transform:"translateX(-50%)",zIndex:35,
       bottom:"calc(env(safe-area-inset-bottom,0px) + 104px)",padding:"14px 26px",borderRadius:99,
       background:"linear-gradient(90deg,#f4a63a,#d97b12)",color:"#2a1408",fontSize:15,fontWeight:800,
-      boxShadow:"0 10px 26px rgba(217,123,18,.4)"}},"🎒 Cephane ekle"));
+      boxShadow:"0 10px 26px rgba(217,123,18,.4)"}},SZ?("📤 Çantandaki "+d.cantaTop+" ürünü atölyeye bırak"):"🎒 Cephane ekle"):null);
 }
 
 /* ————— RAPOR ————— */
@@ -2177,7 +2202,9 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
       :h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde kayıt yok.")));
 }
 function CantaSheet({d,onClose,onConfirm,bekle}){
-  const [mod,setMod]=useState("doldur");   // doldur = atölye→çanta · bosalt = çanta→atölye (iade)
+  /* 🏭 Sınırsız yetkide çanta doldurma askıda — sheet yalnız eski çantayı boşaltmak için açılır */
+  const SZ=!!d.sinirsiz;
+  const [mod,setMod]=useState(SZ?"bosalt":"doldur");   // doldur = atölye→çanta · bosalt = çanta→atölye (iade)
   const [lines,setLines]=useState({});
   const bosalt=mod==="bosalt";
   const liste=bosalt?d.cephane.filter(u=>num(u.canta)>0):d.cephane;
@@ -2211,7 +2238,10 @@ function CantaSheet({d,onClose,onConfirm,bekle}){
     alt:bosalt?"sahadan atölyeye ürün iade et":"atölyeden sahaya ürün al",onClose,
     cta:bekle?"⏳…":(bosalt?("📤 "+toplam+" ürünü atölyeye bırak"):("🎒 "+toplam+" ürünü çantaya al")),disabled:!secili.length||bekle,
     onCta:()=>onConfirm(secili.map(u=>({id:u.id,ad:u.ad,adet:num(lines[u.id])})),mod)},
-    h("div",{style:{display:"flex",gap:8,marginBottom:12}},tb("doldur","🎒","Doldur"),tb("bosalt","📤","Boşalt")),
+    SZ?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#fff7ed",border:"1px solid #fdba74",
+      fontSize:11.5,fontWeight:700,color:"#9a3412",marginBottom:12,lineHeight:1.45}},
+      "Artık atölyeye doğrudan erişiyorsun; çantaya doldurmana gerek yok. Çantanda kalanı buradan atölyeye bırak.")
+     :h("div",{style:{display:"flex",gap:8,marginBottom:12}},tb("doldur","🎒","Doldur"),tb("bosalt","📤","Boşalt")),
     liste.length?h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10}},
       h("input",{type:"number",inputMode:"numeric",placeholder:"adet",value:toplu,onChange:e=>setToplu(e.target.value),
         style:{...inp,width:88,textAlign:"center",padding:"11px 8px",fontSize:15}}),
@@ -2321,20 +2351,21 @@ const fermanMadde=(ik,t)=>h("div",{key:t,style:{display:"flex",gap:11,alignItems
   h("span",{style:{fontSize:14,lineHeight:1.55,fontWeight:600}},t));
 /* 🏰 cephane fermanı — sınırsız stok erişimi açıldığında bir kez */
 function FermanSheet({d,onOk,bekle}){
-  const komutaMi=num(d.toplamGuc)<PASA_GUC;   // eşiğin altındaysa yetki komuta rolünden
+  const rutbeli=num(d.toplamGuc)>=PASA_GUC;   // eşiği geçmişse yetki rütbeden
   const rutbe=d.komutan||["","Paşa","🏰"];
   return h(FermanKabuk,{r1:"#7c2d12",r2:"#b45309",ust:"FERMAN",fon:"🏰",
       baslik:"Cephane sana açıldı",alt:(d.emir&&d.emir.ad?d.emir.ad+" · ":"")+rutbe[2]+" "+rutbe[1],
       onOk,bekle,cta:"Fermanı kabul et"},
     h("div",{style:{fontSize:14.5,lineHeight:1.6,fontWeight:600,marginBottom:6}},
-      komutaMi
-        ? "Komuta yetkinle atölyedeki tüm stok artık doğrudan emrinde."
-        : (rutbe[1]+" rütbesine ulaştın. Bu fermanla atölyedeki tüm stok doğrudan emrine verildi.")),
+      rutbeli
+        ? (rutbe[1]+" rütbesine ulaştın. Bu fermanla atölyedeki tüm stok doğrudan emrine verildi.")
+        : "Yetkinle atölyedeki tüm stok artık doğrudan emrinde."),
     h("div",{style:{height:1,background:"var(--line)",margin:"12px 0 4px"}}),
-    fermanMadde("🎒","Çantanı önceden doldurma zorunluluğu kalktı."),
-    fermanMadde("🏭","Satış, konsinye ve hediye işlemlerinde atölyedeki bütün ürünlere doğrudan erişiyorsun."),
-    fermanMadde("🧾","Kullandığın ürün atölye stoğundan kendiliğinden düşülür, kaydı otomatik tutulur."),
-    fermanMadde("⚖️","Stok defteri eskisi gibi işler; hakediş ve borç hesabında hiçbir şey değişmez."));
+    fermanMadde("🎒","Çanta kalktı: artık ürünü önce çantaya alıp sonra satmıyorsun."),
+    fermanMadde("🏭","Satış, konsinye ve hediye işlemini doğrudan atölye stoğundan yapıyorsun."),
+    fermanMadde("🧾","Kullandığın ürün atölye stoğundan anında düşer; ayrıca sayım yapmana gerek yok."),
+    fermanMadde("⚠️","Stokta görünmeyen bir ürünü sattıysan işlem yine geçer; Cephane'de uyarı çıkar, elle düzeltirsin."),
+    fermanMadde("⚖️","Hakediş ve borç hesabında hiçbir şey değişmez."));
 }
 /* 🎯 görev fermanı — komuta yeni bir görev atadığında */
 function GorevFerman({g,d,onOk,bekle,onHarita}){
@@ -2930,7 +2961,7 @@ function urunKartCiz(u,tanitim,fotoData){ return new Promise(res=>{
   else { x.save(); rr(); x.fillStyle="#ffffff"; x.fill(); x.restore();
     x.font="300px system-ui"; x.textAlign="center"; x.fillText("📦",W/2,py+ps/2+100); devam(); }
 }); }
-function UrunSheet({u,recs,kaleler,fotolar,kisiler,onClose,onFiyat,onTanitim,onFotoEkle,onFotoSil,say}){
+function UrunSheet({u,recs,kaleler,fotolar,kisiler,onClose,onFiyat,onTanitim,onFotoEkle,onFotoSil,say,sinirsiz}){
   const sat=recs.filter(x=>x.tip==="satis");
   const satAdet=sat.reduce((s,x)=>s+num(x.adet),0);
   const ciro=sat.reduce((s,x)=>s+num(x.adet)*num(x.satisFiyat),0);
@@ -2972,7 +3003,9 @@ function UrunSheet({u,recs,kaleler,fotolar,kisiler,onClose,onFiyat,onTanitim,onF
     }catch(e){ console.error(e); if(String(e&&e.name)!=="AbortError") say&&say("⚠ Paylaşım olmadı — tekrar dene"); }
     finally{ setPyuk(false); }
   }
-  return h(Sheet,{ik:"📦",hex:"#d97b12",baslik:u.ad,alt:(seriMetin(u)?("🗂 "+seriMetin(u)+" · "):"")+"🎒 çantanda "+u.canta+(num(u.odul)>0?(" · 🎁 ödül "+num(u.odul)):"")+" · 🏭 atölyede "+u.stokta,onClose,cta:"Kapat",onCta:onClose},
+  return h(Sheet,{ik:"📦",hex:"#d97b12",baslik:u.ad,alt:(seriMetin(u)?("🗂 "+seriMetin(u)+" · "):"")
+      +(sinirsiz?"":("🎒 çantanda "+u.canta+" · "))
+      +(num(u.odul)>0?("🎁 ödül "+num(u.odul)+" · "):"")+"🏭 atölyede "+u.stokta,onClose,cta:"Kapat",onCta:onClose},
     // 🖼 foto galerisi — kare, yatay kaydırmalı; + ile ekle
     h("div",{style:{display:"flex",gap:9,overflowX:"auto",paddingBottom:6,marginBottom:12}},
       (fotolar||[]).map(f=>h("div",{key:f.id,style:{position:"relative",flexShrink:0,marginTop:6}},
@@ -3318,29 +3351,35 @@ function App(){
   const go=v=>{ setKale(null); setView(v); window.scrollTo(0,0); };
   const openSheet=(type,k)=>setSheet({type,k});
   const kkOf=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
-  /* 🎖 Sınırsız yetkide çanta doldurma zorunluluğu yok: sahada bir işlem için
-     çantadaki yetmiyorsa eksik kadarı atölyeden çantaya otomatik alınır ve bu da
-     tıpkı elle alım gibi bir 'al' hareketi olarak kayda geçer. Böylece stok
-     defteri (atölye → çanta → saha) hiç kopmaz, mevcut muhasebe olduğu gibi çalışır. */
-  async function otoAl(id,ad2,adet){
-    const n=Math.round(num(adet)); if(!id||n<=0) return;
-    await cantaDelta(id,ad2,+n,-n);
-    const sid=(aktifSefer&&aktifSefer.id)||"";
-    await save("pazarlama_hareket",{kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"",
-      tip:"al",kaynak:"canta",urunId:id,urunAd:ad2||"",adet:n,oto:true,
-      ...(sid?{seferId:sid}:{}),tarih:new Date().toISOString()});
-  }
-  // çantayı ATOMİK değiştir — ana uygulamadaki bagDelta ile birebir (pazStokK[emir])
+  /* 🏭 Saha işleminin stok ayağı.
+     Sınırsız yetkide çanta akışı askıdadır: işlem doğrudan atölye stoğunu oynatır,
+     çanta (pazStokK) hiç kullanılmaz. Sıradan pazarlamacıda eskisi gibi çanta düşer.
+     stokDelta dolu olan çağrı zaten atölye↔çanta taşımasıdır, o her zaman çantaya yazar. */
   async function cantaDelta(id,ad2,delta,stokDelta){ try{
-    /* stokDelta dolu olan çağrı zaten atölye↔çanta taşımasıdır — özyineleme olmaz */
-    if(d&&d.sinirsiz&&stokDelta==null&&num(delta)<0&&id){
-      const u=(d.cephane||[]).find(c=>c.id===id);
-      const eksik=Math.round(-num(delta)-num(u&&u.canta));
-      if(eksik>0) await otoAl(id,ad2,eksik);
-    }
-    const obj={id,pazStokK:{[emirId]:increment(Math.round(num(delta)))}};
+    const n=Math.round(num(delta)); if(!id||(!n&&stokDelta==null)) return;
+    if(d&&d.sinirsiz&&stokDelta==null){ await save("stok_urun",{id,stokta:increment(n)}); return; }
+    const obj={id,pazStokK:{[emirId]:increment(n)}};
     if(stokDelta!=null) obj.stokta=increment(Math.round(num(stokDelta)));
     await save("stok_urun",obj); }catch(e){ console.error(e); } }
+  /* ⚖️ Eksi stoğu elle düzelt — montajı biten ama programa girmemiş ürün satılınca
+     stok eksiye düşer; gerçek sayım buradan yazılır, düzeltme stok defterine geçer. */
+  async function stokDuzelt(u){
+    if(!u||!u.id||sbekle) return;
+    const c=prompt("⚖️ "+(u.ad||"ürün")+" · atölyedeki gerçek adet\n\n"
+      +"Program "+num(u.stokta)+" adet gösteriyor.\n"
+      +"Sayıp bulduğun adedi yaz:",String(Math.max(0,num(u.stokta))));
+    if(c==null) return;
+    const yeni=Math.round(num(String(c).replace(",",".")));
+    if(!(yeni>=0)) return say("⚠ Geçerli bir adet gir");
+    const fark=yeni-Math.round(num(u.stokta));
+    if(!fark) return;
+    setSbekle(true);
+    try{ await save("stok_urun",{id:u.id,stokta:yeni});
+      await save("stok_hareket",{urunId:u.id,urunAd:u.ad||"",delta:fark,sebep:"elle",
+        kullaniciAd:(d&&d.emir&&d.emir.ad)||"",tarih:new Date().toISOString()});
+      say("⚖️ "+u.ad+" · "+num(u.stokta)+" → "+yeni); }
+    catch(e){ console.error(e); say("⚠ Düzeltilemedi"); }
+    finally{ setSbekle(false); } }
   // deneme işlemini izole (demo_) kaydet — gerçek defter korunur
   async function performWrite(p){
     const k=p.k, key=k?k.key:null;
@@ -3662,7 +3701,7 @@ function App(){
   else if(view==="harita") ekran=h(Harita,{d,openKale,say,adaylar:adayGoster,openAday:a=>setAdaySec(a),
     digerKaleler,hedefDuraklar,
     onYeniKale:()=>setYeniKale(true),onYeniKaleAt:(la,lo)=>setYeniKale({lat:la,lng:lo})});
-  else if(view==="cephane") ekran=h(Cephane,{d,say,cantaAc:()=>setCantaSheet(true),openUrun:u=>setUrunSec(u)});
+  else if(view==="cephane") ekran=h(Cephane,{d,say,cantaAc:()=>setCantaSheet(true),openUrun:u=>setUrunSec(u),onStokDuzelt:stokDuzelt,bekle:sbekle});
   else ekran=h(Rapor,{d,say,raporVer,hareketler:emirHar,ovList:ov,geriAl:geriAlKayit,odemeEmirleri,onOdemeAl:tablaOdemeAl,
     hakDonemler:hakedisKayit,onHakGonder:hakedisGonder,benId:emirId,onNakitTeslim:nakitTeslimEt});
 
@@ -3709,7 +3748,7 @@ function App(){
       onOk:gorevOkundu,onHarita:()=>{ const g=okunmamisGorev; gorevOkundu(); setRotaGorev(g); }}),
     (!fermanGerek&&!okunmamisGorev&&okunmamisKampanya)&&h(KampanyaFerman,{k:okunmamisKampanya,d,
       bekle:sbekle,onOk:kampanyaOkundu}),
-    urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),
+    urunSec&&h(UrunSheet,{u:(d.cephane.find(c=>c.id===urunSec.id)||urunSec),sinirsiz:!!(d&&d.sinirsiz),
       recs:emirHar.filter(x=>["satis","konsinye","iade"].includes(x.tip)&&(x.urunId===urunSec.id||(x.urunAd&&x.urunAd===urunSec.ad))),
       kaleler:d.kaleler,say,
       kisiler:(()=>{ const tm={}; (tumMus||[]).forEach(m=>{const t=(m.telefon||"").trim(); if(t) tm[m.id]=t;});

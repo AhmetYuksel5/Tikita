@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L31";   // komuta (admin) deneme sürümü
+const SURUM="L32";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -2238,6 +2238,26 @@ function StokUyariSheet({d,onClose,onGit}){
       h("span",{style:{fontSize:15,fontWeight:800,flexShrink:0,color:u.stokta<=0?"var(--red)":"var(--gold)"}},u.stokta+" ad"))
     ):h("div",{style:{padding:"18px 0",textAlign:"center",color:"var(--mut)"}},"Listelenecek ürün yok."));
 }
+/* ⚠️ EKSİ STOK — sahada doğrudan stoktan satan pazarlamacı, programda hâlâ montajda
+   görünen ama fiilen montajı bitmiş bir ürünü satınca stok eksiye düşer.
+   Burada hangi ürün ne kadar eksik ve montajda karşılığı var mı görünür. */
+function EksiStokSheet({liste,onClose,onAc}){
+  return h(Sheet,{ik:IK("stok","#e0483c",22),hex:"#e0483c",baslik:"Stok eksiye düştü",
+    alt:liste.length+" ürün · sahada satılmış ama stoğa girmemiş",onClose,cta:"Kapat",onCta:onClose},
+    h("div",{style:{padding:"10px 12px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",
+      fontSize:11.5,fontWeight:700,color:"#9a3412",marginBottom:12,lineHeight:1.5}},
+      "Montajı biten ürün programa girmeden sahada satılmış olabilir. Montajda karşılığı varsa oradan stoğa aktar; yoksa stoğu elle düzelt."),
+    liste.map((u,i)=>h("button",{key:u.id||i,onClick:()=>onAc(u),
+      style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"11px 0",
+        borderTop:i?"1px solid var(--line)":"none"}},
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},
+          num(u.montajda)>0?(num(u.montajda)+" adet montajda — stoğa aktarılabilir")
+            :(num(u.basimda)>0?(num(u.basimda)+" adet basımda"):"üretimde karşılığı yok — elle düzelt"))),
+      h("span",{style:{fontSize:15,fontWeight:800,color:"var(--red)",flexShrink:0}},num(u.stokta)+" ad"),
+      h("span",{style:{fontSize:13,color:"var(--mut2)",flexShrink:0}},"›"))));
+}
 // ⚠️ AÇIK ALACAK — pazarlamacı bazında döküm
 function AlacakUyariSheet({d,onClose,onGit}){
   const rows=(d.ekip||[]).filter(e=>e.alacak>0.5).slice().sort((a,b)=>b.alacak-a.alacak);
@@ -3158,6 +3178,9 @@ function AnlasmaSheet({list,bekle,onKaldir,onClose}){
 function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat,anlasmaSay}){
   const fiyatsiz=useMemo(()=>d.stok.filter(u=>u.fiyat<=0),[d.stok]);
   const uEks=fiyatsiz.length;
+  // ⚠️ eksi stok — doğrudan stoktan satış yapan pazarlamacı stoğu aşmış olabilir
+  const eksiStok=useMemo(()=>d.stok.filter(u=>num(u.stokta)<0).sort((a,b)=>num(a.stokta)-num(b.stokta)),[d.stok]);
+  const [eksiAcik,setEksiAcik]=useState(false);
   const [degerAcik,setDegerAcik]=useState(false);
   const [planAcik,setPlanAcik]=useState(false);
   const [fiyatAcik,setFiyatAcik]=useState(false);
@@ -3194,6 +3217,10 @@ function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat,anlasmaSay}){
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
       h(Stat,{ik:"📦",v:tl(d.stokDeger),l:"stok değeri · "+SD.adet+" adet ›",renk:"var(--green)",onClick:()=>setDegerAcik(true)}),
       h(Stat,{ik:IK("baski","var(--cyan)",18),v:d.planAdet+" ad",l:"bu hafta üretim ("+tl(d.planDeger)+") ›",renk:"var(--cyan)",onClick:()=>setPlanAcik(true)})),
+    eksiStok.length?h("button",{onClick:()=>setEksiAcik(true),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12,fontWeight:700,color:"#b91c1c",marginBottom:14}},
+      "⚠️ "+eksiStok.length+" üründe stok eksiye düştü — stokta görünmeden satılmış, düzelt ›"):null,
+    eksiAcik&&eksiStok.length?h(EksiStokSheet,{liste:eksiStok,onClose:()=>setEksiAcik(false),
+      onAc:u=>{ setEksiAcik(false); ac({tip:"stok",u}); }}):null,
     num(d.gecikSay)>0?h("button",{onClick:()=>setPlanAcik(true),style:{display:"block",width:"100%",textAlign:"left",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412",marginBottom:14}},
       "⏳ "+d.gecikSay+" iş gecikmiş · "+d.gecikAdet+" adet, planlanan günü geçti hiç başlamadı ›"):null,
     SD.malsizUrun>0?h("div",{style:{padding:"9px 13px",borderRadius:12,background:"#eff8fd",border:"1px solid #a5d8f3",fontSize:12,fontWeight:700,color:"#0369a1",marginBottom:14}},
