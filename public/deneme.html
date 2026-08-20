@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v113";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v114";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -3430,12 +3430,17 @@ function App(){
       const acik=emirHar.filter(x=>x.tip==="satis"&&!x.gerilla&&kkOf(x)===key)
         .map(x=>{const bek=num(x.adet)*num(x.satisFiyat);const onceki=x.tahsil==null?bek:num(x.tahsil);return {x,bek,onceki,borc:Math.max(0,bek-onceki)};})
         .filter(o=>o.borc>0).sort((a,b)=>new Date(a.x.tarih)-new Date(b.x.tarih));
-      let kalan=Math.min(num(p.tut),k?k.borc:num(p.tut)),uP=0,pP=0,uyg=0;   // kalenin güncel borcunu aşma
+      /* 🧾 SIRA ÖNEMLİ: önce dağıtım planı çıkarılır (hiçbir şey yazılmaz), sonra
+         TAHSİLAT KAYDI yazılır, en son satış satırlarına işlenir.
+         Eskiden tersiydi: satırların tahsil'i artıyor, tahsilat kaydı yazılamazsa
+         (bağlantı koparsa) borç kapanmış görünüyor ama para hiçbir raporda çıkmıyordu.
+         Bu sırayla yarıda kalırsa para görünür, borç açık kalır — yani düzeltilebilir. */
+      let kalan=Math.min(num(p.tut),k?k.borc:num(p.tut)),uP=0,pP=0,uyg=0; const plan=[];   // kalenin güncel borcunu aşma
       for(const o of acik){ if(kalan<=0)break; const dd=Math.min(o.borc,kalan);
-        await save("pazarlama_hareket",{id:o.x.id,tahsil:increment(dd)});   // atomik — satışın borcu gerçekten kapanır (ana uygulama ile aynı)
-        const b=payBol(o.x,dd,o.onceki); uP+=b.u;pP+=b.p; kalan-=dd; uyg+=dd; }
+        const b=payBol(o.x,dd,o.onceki); uP+=b.u;pP+=b.p; kalan-=dd; uyg+=dd; plan.push({id:o.x.id,dd}); }
       if(uyg<=0) return {iptal:"Bu kalede açık borç yok."};
       await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:uyg,ureticiPay:uP,pazPay:pP,...yerB,...gecEk,tarih:now});
+      for(const it of plan) await save("pazarlama_hareket",{id:it.id,tahsil:increment(it.dd)});   // atomik — satışın borcu gerçekten kapanır
     } else if(p.type==="satis"){
       const u=p.urun||{}; const gerilla=!k; const satisId=uid();
       if(sembolik(p.fiyat)){
@@ -3471,9 +3476,10 @@ function App(){
           urunAd:u.ad||"",tarih:now,kimden:emirId}}});
       // satışta anında alınan: satışın tahsil'i artar (borç kapanır) + tahsilat kaydı (önce üretici) — ana uygulama ile aynı
       if(!gerilla&&num(p.alinan)>0){ const alin=Math.min(num(p.alinan),num(p.adet)*num(p.fiyat));
-        await save("pazarlama_hareket",{id:satisId,tahsil:increment(alin)});
         const b=payBol({adet:p.adet,alisFiyat:num(u.pazFiyat)},alin,0);
-        await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:alin,ureticiPay:b.u,pazPay:b.p,...yerB,...gecEk,tarih:now}); }
+        // önce tahsilat kaydı, sonra satırın tahsil'i — yarıda kalırsa para kaybolmasın
+        await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:alin,ureticiPay:b.u,pazPay:b.p,...yerB,...gecEk,tarih:now});
+        await save("pazarlama_hareket",{id:satisId,tahsil:increment(alin)}); }
     } else if(p.type==="stant"){
       await save("pazarlama_hareket",{...kul,tip:"stant",mod:p.mod,fiyat:p.mod==="satis"?num(p.fiyat):0,adet:1,urunAd:"Stant",...yerB,...gecEk,tarih:now});
     } else if(p.type==="gerilla"){
