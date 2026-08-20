@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v115";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v116";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -423,25 +423,67 @@ function liderHesap(hareketler,kullanicilar){
     const ka=kad[uid]||{}; return {uid,ad:ka.ad||"?",simge:ka.simge||"🎖️",guc,ciro,komutan:katOf(KOMUTAN,guc)}; })
     .filter(x=>x.guc>0).sort((a,b)=>b.guc-a.guc); }
 
-// günün eğlenceli + işlevsel sorusu — pazarlamacının kendi verisinden üretilir
-function gunlukSoru(kaleler){
-  if(!kaleler||kaleler.length<2) return null;
+/* ————— 🎲 GÜNÜN SORULARI — pazarlamacının kendi verisinden üretilir —————
+   Her açılışta 5 soru çıkar. Havuzdaki tüm sorular üretilip karıştırılır, ilk 5'i
+   alınır; brifing tekrar açılınca tur numarası değiştiği için karışım da değişir. */
+const SORU_SAY=5;
+/* Tohumlu karıştırma — aynı turda kararlı, tur değişince farklı.
+   xorshift32: her adım 32 bitte kalır. (Çarpımlı üreteç 2^53'ü aşınca düşük
+   bitleri kaybedip yanlı karıştırıyor, havuzdaki bir soru hiç seçilmiyordu.) */
+function soruKaris(arr,tohum){ const a=arr.slice();
+  let s=(num(tohum)>>>0)||1;
+  const rnd=()=>{ s^=s<<13; s>>>=0; s^=s>>>17; s^=s<<5; s>>>=0; return s; };
+  for(let i=a.length-1;i>0;i--){ const j=rnd()%(i+1); const t=a[i]; a[i]=a[j]; a[j]=t; }
+  return a; }
+function gunlukSorular(d,tur){
+  const K=(d&&d.kaleler)||[];
   const gun=new Date().getDate();
-  const byCiro=[...kaleler].sort((a,b)=>b.ciro-a.ciro);
-  const byGuc=[...kaleler].sort((a,b)=>b.guc-a.guc);
-  const byKons=[...kaleler].filter(k=>k.acikKons>0).sort((a,b)=>b.acikKons-a.acikKons);
-  const byIhmal=[...kaleler].filter(k=>k.gunGecti<900&&k.gunGecti>0).sort((a,b)=>b.gunGecti-a.gunGecti);
-  const yap=(arr,correct,q)=>{ if(!correct) return null;
-    const others=arr.filter(k=>k.key!==correct.key).slice(0,3); if(!others.length) return null;
-    const opts=[{t:correct.ad,ok:true},...others.map(k=>({t:k.ad,ok:false}))];
-    const rot=gun%opts.length; return {q,opts:opts.slice(rot).concat(opts.slice(0,rot))}; };
-  const types=[
-    ()=>yap(byCiro,byCiro[0],"💰 En çok ciro yaptığın kale hangisi?"),
-    ()=>yap(byGuc,byGuc[0],"💪 En güçlü kalen hangisi?"),
-    ()=>byKons.length?yap(byKons,byKons[0],"🏬 En çok açık konsinye hangi kalede duruyor?"):null,
-    ()=>byIhmal.length?yap(byIhmal,byIhmal[0],"⚔️ En uzun süredir uğramadığın kale hangisi?"):null];
-  for(let i=0;i<types.length;i++){ const s=types[(gun+i)%types.length](); if(s&&s.opts.length>=2) return s; }
-  return null;
+  const tohum=((gun*97)+(num(tur)*4099)+13)&0x7fffffff;
+  /* "hangi kale" sorusu — tepe değer ikinciyle eşitse soru belirsizdir, sorulmaz.
+     Çeldiriciler sorunun GEÇERLİ olduğu kale evreninden gelir: böylece "en çok borcu
+     olan" gibi az kaleyi ilgilendiren soruda da dört şık çıkar, ama süzgeçli soruda
+     (örn. hiç uğranmamış kaleler hariç) yanlışlıkla daha doğru bir şık üretilmez. */
+  const kaleSoru=(q,deg,suz)=>{
+    const evren=suz?K.filter(suz):K;
+    const L=evren.filter(k=>num(deg(k))>0);
+    if(!L.length) return null;
+    const S=L.slice().sort((a,b)=>num(deg(b))-num(deg(a)));
+    if(S.length>1&&num(deg(S[0]))===num(deg(S[1]))) return null;
+    const dogru=S[0];
+    const dig=evren.filter(k=>k.key!==dogru.key)
+      .sort((a,b)=>num(deg(b))-num(deg(a))).slice(0,3);
+    if(dig.length<2) return null;   // en az üç şık olsun
+    return {q,opts:[{t:dogru.ad,ok:true},...dig.map(k=>({t:k.ad,ok:false}))]}; };
+  /* sayı sorusu — doğru değerin çevresine makul şıklar üretilir */
+  const sayiSoru=(q,dogru,bic)=>{
+    const v=Math.round(num(dogru)); if(!(v>0)) return null;
+    const ad=[v,Math.round(v*0.55),Math.round(v*1.5),Math.round(v*2.2),v+Math.max(1,Math.round(v*0.2))];
+    const set=[]; ad.forEach(x=>{ const n=Math.max(0,Math.round(x)); if(set.indexOf(n)<0) set.push(n); });
+    if(set.length<3) return null;
+    const f=bic||(n=>String(n));
+    return {q,opts:set.slice(0,4).map(n=>({t:f(n),ok:n===v}))}; };
+  const uret=[
+    ()=>kaleSoru("💰 En çok ciro yaptığın kale hangisi?",k=>k.ciro),
+    ()=>kaleSoru("💪 En güçlü kalen hangisi?",k=>k.guc),
+    ()=>kaleSoru("🏬 En çok açık konsinye hangi kalede duruyor?",k=>k.acikKons),
+    ()=>kaleSoru("⚔️ En uzun süredir uğramadığın kale hangisi?",k=>k.gunGecti,k=>k.gunGecti<900&&k.gunGecti>0),
+    ()=>kaleSoru("📦 En çok adet sattığın kale hangisi?",k=>k.satisAdet),
+    ()=>kaleSoru("🧾 En çok borcu olan kale hangisi?",k=>k.borc),
+    ()=>kaleSoru("🫰 En çok hakediş kazandığın kale hangisi?",k=>k.hakedis),
+    ()=>sayiSoru("📈 Bu hafta ne kadar ciro yaptın?",d&&d.hafCiro,tl),
+    ()=>sayiSoru("🫰 Bu haftaki hakedişin ne kadar?",d&&d.hafKar,tl),
+    ()=>sayiSoru("🏬 Sahada toplam kaç ürünün duruyor?",d&&d.konsToplam,n=>n+" adet"),
+    ()=>sayiSoru("🧾 Kalelerinin toplam borcu ne kadar?",d&&d.borcTop,tl),
+    ()=>sayiSoru("🏰 Kaç kalen var?",K.length,n=>n+" kale"),
+    ()=>sayiSoru("💪 Toplam gücün ne kadar?",d&&d.toplamGuc,n=>n.toLocaleString("tr-TR")+" güç"),
+    ()=>{ const s2=d&&d.sonraki; if(!s2) return null;
+      return sayiSoru("🎖 "+s2[1]+" rütbesine kaç güç kaldı?",num(s2[0])-num(d.toplamGuc),n=>n.toLocaleString("tr-TR")+" güç"); },
+  ];
+  const hepsi=[];
+  uret.forEach(f=>{ let q=null; try{ q=f(); }catch(e){ q=null; }
+    if(q&&q.opts&&q.opts.length>=2) hepsi.push(q); });
+  return soruKaris(hepsi,tohum).slice(0,SORU_SAY)
+    .map((q,i)=>({...q,opts:soruKaris(q.opts,tohum+i*7919)}));
 }
 
 let VERI_HATA=false; const hataDinle=new Set();
@@ -827,8 +869,11 @@ function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tab
           h("button",{onClick:()=>tablaTopla(t),style:{flexShrink:0,padding:"10px 14px",borderRadius:12,background:"var(--gold)",color:"#fff",fontSize:12.5,fontWeight:800}},"🧹 +"+tl(tablaUc)))))));
 }
 // GÜNLÜK BRİFİNG — komutandan görevler + haftalık özet + eğlenceli soru
-function Briefing({d,hedefler,soru,onClose,say}){
-  const [cevap,setCevap]=useState(null);
+function Briefing({d,hedefler,sorular,onClose,say}){
+  const S=sorular||[];
+  const [cevaplar,setCevaplar]=useState({});   // soru sırası -> seçilen şık
+  const cevapli=Object.keys(cevaplar).length;
+  const dogru=Object.keys(cevaplar).filter(i=>S[i]&&S[i].opts[cevaplar[i]]&&S[i].opts[cevaplar[i]].ok).length;
   const primary=d.gorevler[0];
   const bugun=new Date().toLocaleDateString("tr-TR",{weekday:"long",day:"numeric",month:"long"});
   return h(Sheet,{ik:"📋",hex:"#7c2d12",baslik:"Günlük brifing",alt:bugun,onClose,cta:"Anlaşıldı, komutanım ✓",onCta:onClose},
@@ -852,17 +897,33 @@ function Briefing({d,hedefler,soru,onClose,say}){
       [["💰",tl(d.hafCiro),"ciro"],["🫰",tl(d.hafKar),"hakediş"],["🔥",d.streak+"g","seri"]].map((s,i)=>
         h("div",{key:i,style:{textAlign:"center",padding:"10px 4px",background:"var(--surf2)",borderRadius:12}},
           h("div",{style:{fontSize:15}},s[0]),h("div",{style:{fontSize:13.5,fontWeight:800,marginTop:2}},s[1]),h("div",{style:{fontSize:10,color:"var(--mut)",marginTop:1}},s[2])))),
-    // günün sorusu
-    soru&&h("div",{className:"card",style:{padding:"15px 16px",boxShadow:"none",background:"linear-gradient(150deg,#fff8ee,#fff)"}},
-      h("div",{style:{fontSize:11,fontWeight:800,color:"var(--gold)",letterSpacing:.4,marginBottom:8}},"🎲 GÜNÜN SORUSU"),
-      h("div",{style:{fontSize:14.5,fontWeight:700,marginBottom:12}},soru.q),
-      h("div",{style:{display:"grid",gap:8}},
-        soru.opts.map((o,i)=>{ const secildi=cevap!=null;
-          const bg=!secildi?"var(--surf2)":o.ok?"#e9f9ee":(i===cevap?"#fdecea":"var(--surf2)");
-          const bd=!secildi?"var(--line)":o.ok?"var(--green)":(i===cevap?"var(--red)":"var(--line)");
-          return h("button",{key:i,disabled:secildi,onClick:()=>{ setCevap(i); say(o.ok?"🎉 Doğru! +10 XP":"Yakındı — doğrusu işaretli"); },
-            style:{padding:"12px 14px",borderRadius:12,textAlign:"left",fontSize:14,fontWeight:700,background:bg,border:"1.5px solid "+bd,color:"var(--txt)"}},
-            o.t+(secildi&&o.ok?"  ✓":(secildi&&i===cevap?"  ✕":""))); }))));
+    // günün soruları
+    S.length?h("div",null,
+      h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}},
+        h("div",{className:"lbl",style:{flex:1}},"🎲 Günün soruları"),
+        h("div",{style:{fontSize:11.5,fontWeight:800,color:cevapli?"var(--gold)":"var(--mut)"}},
+          cevapli?(dogru+"/"+S.length+" doğru"):(S.length+" soru"))),
+      h("div",{style:{display:"grid",gap:10}},
+        S.map((q,si)=>{ const cevap=cevaplar[si]; const secildi=cevap!=null;
+          return h("div",{key:si,className:"card",style:{padding:"14px 15px",boxShadow:"none",
+            background:secildi?"var(--surf2)":"linear-gradient(150deg,#fff8ee,#fff)"}},
+            h("div",{style:{display:"flex",gap:8,marginBottom:10}},
+              h("span",{style:{fontSize:11,fontWeight:800,color:"var(--gold)",flexShrink:0}},(si+1)+"."),
+              h("span",{style:{fontSize:14.5,fontWeight:700,flex:1,minWidth:0}},q.q)),
+            h("div",{style:{display:"grid",gap:7}},
+              q.opts.map((o,i)=>{
+                const bg=!secildi?"var(--surf2)":o.ok?"#e9f9ee":(i===cevap?"#fdecea":"var(--surf2)");
+                const bd=!secildi?"var(--line)":o.ok?"var(--green)":(i===cevap?"var(--red)":"var(--line)");
+                return h("button",{key:i,disabled:secildi,
+                  onClick:()=>{ setCevaplar(c=>({...c,[si]:i})); say(o.ok?"🎉 Doğru! +10 XP":"Yakındı — doğrusu işaretli"); },
+                  style:{padding:"11px 13px",borderRadius:12,textAlign:"left",fontSize:13.5,fontWeight:700,
+                    background:bg,border:"1.5px solid "+bd,color:"var(--txt)"}},
+                  o.t+(secildi&&o.ok?"  ✓":(secildi&&i===cevap?"  ✕":""))); }))); })),
+      cevapli===S.length?h("div",{style:{marginTop:10,padding:"11px 13px",borderRadius:12,textAlign:"center",
+        fontSize:13,fontWeight:800,background:dogru===S.length?"#e9f9ee":"var(--surf2)",
+        color:dogru===S.length?"#166534":"var(--mut)"}},
+        dogru===S.length?("🏆 Tamamı doğru — "+S.length+"/"+S.length):(dogru+"/"+S.length+" doğru · brifingi tekrar aç, yeni sorular gelir")):null)
+      :null);
 }
 function LiderSatir({u,sira,ben,onClick}){ const madalya=["🥇","🥈","🥉"][sira]||("#"+(sira+1));
   return h("button",{onClick,style:{display:"flex",alignItems:"center",gap:11,padding:"10px 12px",borderRadius:12,width:"100%",textAlign:"left",background:ben?"var(--surf2)":"transparent"}},
@@ -3349,7 +3410,9 @@ function App(){
       say("🎯 Görev alındı · "+(g.ad||"")); }
     catch(e){ console.error(e); say("⚠ Kaydedilemedi, tekrar dene"); }
     finally{ setSbekle(false); } }
-  const soru=useMemo(()=>d?gunlukSoru(d.kaleler):null,[d]);
+  /* brifing her açılışta yeni tur → sorular yeniden karışır, aynı soru tekrar etmez */
+  const [brifTur,setBrifTur]=useState(0);
+  const sorular=useMemo(()=>d?gunlukSorular(d,brifTur):[],[d,brifTur]);
   // 🧹 toplanacak tablalar — ana uygulama ile aynı kural (en son başlayan baskı bitti + toplanmadı)
   const tablaUc=(()=>{ const a=(ayarlar||[]).find(x=>x.id==="genel")||{}; return a.tablaUcret!=null?num(a.tablaUcret):5; })();
   const toplanacak=useMemo(()=>{ const nowT=Date.now(); const out=[];
@@ -3764,7 +3827,7 @@ function App(){
   let ekran;
   if(kaleGuncel) ekran=h(KaleDetay,{kampanyalar:benimKampanya,tumHar:emirHar,onFiyatDuzelt:konsFiyatDuzelt,k:kaleGuncel,back:()=>setKale(null),say,openSheet,ovList:kaleOv,geriAl:geriAlKayit,kaleHar,
     openDuzen:k=>setYeniKale({kayit:{id:k.musteriId||"",key:k.key,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}})});
-  else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,openBrif:()=>setBrifAcik(true),goView:go,openBilgi,toplanacak,tablaTopla,tablaUc,hedefler:emirHedef,goHarita:()=>go("harita"),kampanyalar:benimKampanya,tumHar:emirHar,openRota:setRotaGorev});
+  else if(view==="us") ekran=h(Home,{d,say,openKale,openSheet,openBrif:()=>{ setBrifTur(t=>t+1); setBrifAcik(true); },goView:go,openBilgi,toplanacak,tablaTopla,tablaUc,hedefler:emirHedef,goHarita:()=>go("harita"),kampanyalar:benimKampanya,tumHar:emirHar,openRota:setRotaGorev});
   else if(view==="kaleler") ekran=h(Kaleler,{d,openKale,say,onYeniKale:()=>setYeniKale(true),adaylar:adayGoster,openAday:a=>setAdaySec(a),
     onDuzen:k=>setYeniKale({kayit:{id:k.musteriId||"",key:k.key,ad:k.ad,bolge:k.bolge||"",telefon:k.telefon||"",not:k.not||"",lat:k.lat||"",lng:k.lng||""}}),
     kesifRedSet:redSet,kesifEkle:async r=>{ try{ await save("musteri",{ad:r.ad,bolge:r.bolge||"",lat:String(r.lat),lng:String(r.lng),kesif:true,kullaniciId:emirId,tarih:new Date().toISOString()}); say("🧭 Aday eklendi · "+r.ad); }catch(e){ say("⚠ Eklenemedi"); } },
@@ -3840,7 +3903,7 @@ function App(){
         try{await save("kesif_red",{id:a.id,ad:a.ad});}catch(e){} setAdaySec(null); say("🙈 Gizlendi · "+a.ad);}}),
     seferSheet&&h(SeferRaporSheet,{mod:seferSheet.mod,veri:seferSheet.veri,recs:seferSheet.recs,bekle:sbekle,onClose:()=>setSeferSheet(null),onOnay:seferOnay}),
     cantaSheet&&h(CantaSheet,{d,bekle:sbekle,onClose:()=>setCantaSheet(false),onConfirm:cantaEkle}),
-    brifAcik&&h(Briefing,{d,hedefler:emirHedef,soru,say,onClose:()=>setBrifAcik(false)}),
+    brifAcik&&h(Briefing,{d,hedefler:emirHedef,sorular,say,onClose:()=>setBrifAcik(false)}),
     bilgi&&h(Sheet,{ik:bilgi.ik,hex:bilgi.hex||"#d97b12",baslik:bilgi.baslik,alt:bilgi.alt,onClose:()=>setBilgi(null),cta:"Kapat",onCta:()=>setBilgi(null)},
       (bilgi.govde||[]).map((g,i)=>typeof g==="string"?h("div",{key:i,style:{fontSize:14.5,lineHeight:1.5,color:"var(--txt)",padding:"4px 0",borderTop:i?"1px solid var(--line)":"none"}},g):g)),
     reward&&h(Reward,{xp:reward.xp,mesaj:reward.mesaj,onDone:()=>{const m=reward.mesaj;setReward(null);say("✅ "+m);}}));
