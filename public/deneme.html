@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v112";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v113";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -2872,6 +2872,8 @@ function GecmisSheet({k,d,fgList,onClose,onFire}){
   const [veris,setVeris]=useState(num((d.cephane[0]||{}).pazFiyat));   // veriliş (o günkü maliyet) — elle girilebilir
   const konsList=(k&&k.konsKalem)||[];
   const [kkalem,setKkalem]=useState(konsList[0]||{ad:"",adet:0});
+  /* raftaki malın satıldığı GERÇEK birim fiyat — varsayılan bırakış fiyatı, elle değişir */
+  const [ksfiyat,setKsfiyat]=useState(String(Math.round(num((konsList[0]||{}).birim))||""));
   const [tut,setTut]=useState("");
   const [smod,setSmod]=useState("hediye"); const [sfiyat,setSfiyat]=useState("");
   const [bekle,setBekle]=useState(false);
@@ -2887,14 +2889,20 @@ function GecmisSheet({k,d,fgList,onClose,onFire}){
       d.cephane.map((u,i)=>h(Chip,{key:i,on:urun.ad===u.ad,onClick:()=>{setUrun(u);setElleFiyat(false);}},u.ad))));
   const kalemSec=h("div",{style:{marginBottom:14}},h("div",{className:"lbl",style:{marginBottom:8}},"Ürün (bu kaledeki konsinyeden)"),
     konsList.length?h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
-      konsList.map((c,i)=>h(Chip,{key:i,on:kkalem.ad===c.ad,onClick:()=>{setKkalem(c);setAdet(c.adet);}},c.ad+" ("+c.adet+")")))
+      konsList.map((c,i)=>h(Chip,{key:i,on:kkalem.ad===c.ad,
+        onClick:()=>{setKkalem(c);setAdet(c.adet);setKsfiyat(String(Math.round(num(c.birim))||""));}},
+        c.ad+" ("+c.adet+")")))
       :h("div",{style:{padding:"10px 12px",borderRadius:12,background:"var(--surf2)",fontSize:12.5,color:"var(--mut)"}},"Bu kalede açık konsinye görünmüyor."));
   const adetIn=h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Adet"),
     h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:inp}));
   let gecerli=!!tarih, ctaTxt="📅 Geçmişe kaydet", payload=null;
   if(tip==="satis"){ gecerli=gecerli&&!!urun.ad&&adet>0; payload={type:"satis",urun,adet,fiyat,veris}; ctaTxt="📅 "+tl(adet*fiyat)+" satış ekle (borç yazar)"; }
-  else if(tip==="konsinye"){ gecerli=gecerli&&!!urun.ad&&adet>0; payload={type:"konsinye",kmod:"birak",urun,adet}; ctaTxt="📅 Konsinye ekle"; }
-  else if(tip==="konsatis"){ gecerli=gecerli&&konsList.length>0&&adet>0; payload={type:"konsinye",kmod:"satis",kkalem,adet}; ctaTxt="📅 Kons. satışı ekle"; }
+  else if(tip==="konsinye"){ gecerli=gecerli&&!!urun.ad&&adet>0&&num(fiyat)>0;
+    payload={type:"konsinye",kmod:"birak",urun,adet,fiyat,veris};
+    ctaTxt="📅 "+adet+" adet konsinye ekle · "+tl(adet*num(fiyat)); }
+  else if(tip==="konsatis"){ gecerli=gecerli&&konsList.length>0&&adet>0&&num(ksfiyat)>0;
+    payload={type:"konsinye",kmod:"satis",kkalem,adet,fiyat:num(ksfiyat)};
+    ctaTxt="📅 "+tl(adet*num(ksfiyat))+" kons. satışı ekle"; }
   else if(tip==="iade"){ gecerli=gecerli&&konsList.length>0&&adet>0; payload={type:"konsinye",kmod:"iade",kkalem,adet}; ctaTxt="📅 İade ekle"; }
   else if(tip==="tahsilat"){ gecerli=gecerli&&num(tut)>0; payload={type:"tahsilat",tut:num(tut)}; ctaTxt="📅 "+tl(num(tut))+" tahsilat ekle"; }
   else { gecerli=gecerli&&(smod==="hediye"||num(sfiyat)>0); payload={type:"stant",mod:smod,fiyat:num(sfiyat)}; ctaTxt="📅 Stant ekle"; }
@@ -2917,7 +2925,27 @@ function GecmisSheet({k,d,fgList,onClose,onFire}){
         (tarih&&etkin.eski&&!elleFiyat)?h("div",{style:{fontSize:11,color:"var(--green)",marginTop:6,fontWeight:700}},"📈 O tarihteki fiyat otomatik uygulandı (fiyat geçmişinden). Gerekirse değiştir."):null,
         null),
       (num(fiyat)>0||num(veris)>0)?h("div",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",marginTop:8}},"🫰 Hakediş: "+tl(num(adet)*Math.max(0,num(fiyat)-num(veris)))):null):null,
-    (tip==="konsinye"||tip==="konsatis"||tip==="iade")?adetIn:null,
+    /* 🏬 Konsinye bırakış: rafa hangi fiyattan bırakıldığı burada donuyor —
+       sonraki sayımlar ve raf bedeli bu fiyattan hesaplanıyor. */
+    tip==="konsinye"?h(React.Fragment,null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+        adetIn,
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Bırakış ₺/ad"),
+          h("input",{type:"number",inputMode:"numeric",value:fiyat||"",onChange:e=>{setFiyat(num(e.target.value));setElleFiyat(true);},style:inp}))),
+      h("div",{style:{marginTop:12}},h("div",{className:"lbl",style:{marginBottom:8}},"Veriliş ₺/ad · o günkü maliyet"),
+        h("input",{type:"number",inputMode:"numeric",value:veris||"",onChange:e=>{setVeris(num(e.target.value));setElleFiyat(true);},style:inp}),
+        (tarih&&etkin.eski&&!elleFiyat)?h("div",{style:{fontSize:11,color:"var(--green)",marginTop:6,fontWeight:700}},"📈 O tarihteki fiyat otomatik uygulandı (fiyat geçmişinden). Gerekirse değiştir."):null)):null,
+    /* 💵 Konsinye satışı: raftan kaça satıldığı. Varsayılan bırakış fiyatı, farklıysa değiştirilir. */
+    tip==="konsatis"?h(React.Fragment,null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+        adetIn,
+        h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Satış ₺/ad"),
+          h("input",{type:"number",inputMode:"numeric",value:ksfiyat,onChange:e=>setKsfiyat(e.target.value),placeholder:"kaça satıldı?",style:inp}))),
+      (num(kkalem.birim)>0&&Math.abs(num(ksfiyat)-num(kkalem.birim))>0.5)?h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:6,fontWeight:700}},
+        "Rafa "+tl(num(kkalem.birim))+" bırakılmıştı"):null,
+      (num(ksfiyat)>0&&num(kkalem.alis)>0)?h("div",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",marginTop:8}},
+        "🫰 Hakediş: "+tl(num(adet)*Math.max(0,num(ksfiyat)-num(kkalem.alis)))):null):null,
+    tip==="iade"?adetIn:null,
     tip==="tahsilat"?h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Tahsil edilen ₺"),
       h("input",{type:"number",inputMode:"numeric",value:tut,onChange:e=>setTut(e.target.value),style:inp})):null,
     tip==="stant"?h("div",null,
@@ -3480,7 +3508,9 @@ function App(){
           ureticiPay:0,pazPay:0,...yerB,...gecEk,tarih:now});
         return {};
       }
-      if(p.kmod==="birak"){ const items=p.items||[{urun:p.urun||{},adet:p.adet}]; const kmod2=p.mod||"konsinye";
+      /* tekil çağrıda fiyat/veriliş üst seviyede gelir — kaleme taşınmazsa ürünün
+         GÜNCEL fiyatı yazılır ve geçmiş tarihli kayıt yanlış fiyatla donar */
+      if(p.kmod==="birak"){ const items=p.items||[{urun:p.urun||{},adet:p.adet,fiyat:p.fiyat,veris:p.veris}]; const kmod2=p.mod||"konsinye";
         for(const it of items){ const u=it.urun||{}; const ad=num(it.adet); if(ad<=0) continue;
           const birim=(it.fiyat!=null&&num(it.fiyat)>0)?num(it.fiyat):num(u.fiyat);   // pazarlamacının belirlediği bırakış fiyatı
           if(kmod2==="hediye"){
@@ -3490,10 +3520,13 @@ function App(){
             if(u.id&&!p.gecTarih){ await cantaDelta(u.id,u.ad,-ad); await save("stok_urun",{id:u.id,hediye:increment(ad)}); }
           } else {
             /* 🤝 rafa bırakılan malın fiyatı BURADA donuyor; sayımda bu fiyatlar kullanılıyor.
-               Anlaşmalı veriliş varsa o yazılır, yoksa genel veriliş. */
+               Veriliş elle verildiyse (geçmiş tarihli kayıtta o günkü maliyet) o yazılır;
+               yoksa anlaşmalı veriliş, o da yoksa genel veriliş. */
             const anl2=anlasmaOf(k,u.id);
+            const verisB=(it.veris!=null&&num(it.veris)>0)?num(it.veris)
+              :(anl2?num(anl2.veris):num(u.pazFiyat));
             await save("pazarlama_hareket",{...kul,tip:"konsinye",urunId:u.id||"",urunAd:u.ad||"?",adet:ad,kalan:ad,
-              konsMod:"konsinye",alisFiyat:(anl2?num(anl2.veris):num(u.pazFiyat)),maliyetBirim:num(u.maliyet),satisFiyat:birim,...yerB,...gecEk,tarih:now});
+              konsMod:"konsinye",alisFiyat:verisB,maliyetBirim:num(u.maliyet),satisFiyat:birim,...yerB,...gecEk,tarih:now});
             if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-ad);
           } }
       } else {
