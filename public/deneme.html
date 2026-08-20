@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v114";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v115";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -304,6 +304,19 @@ function raporHesap(hareketler,kod){ const [b0,ad]=donemAralik(kod);
 const OV="";  // canlı bağlandı — koleksiyonlar asıl adlarıyla
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,OV+coll,id),dd,{merge:true}); return id; }
+/* 🕘 KAYDIN GİRİLDİĞİ AN — 'tarih' işlemin OLDUĞU gündür; geçmiş tarihli işlemde
+   bu geriye alınır. "Son işlemlerin" listesi kaydın ne zaman GİRİLDİĞİNE bakmalı,
+   yoksa dün girilen geçmiş kayıt listede hiç görünmez ve geri alınamaz.
+   Sıra: girildi alanı → uid'nin zaman ön eki (Date.now().toString(36)) → tarih. */
+const UID_RE=/^[0-9a-z]{14}$/;
+const kayitMs=x=>{ if(!x) return 0;
+  const g=x.girildi?new Date(x.girildi).getTime():0; if(g) return g;
+  const id=String(x.id||"");
+  if(UID_RE.test(id)){ const t=parseInt(id.slice(0,8),36);
+    if(t>1600000000000&&t<4000000000000) return t; }
+  return new Date(x.tarih).getTime()||0; };
+// 'girildi' YALNIZCA geçmişe girilen kayda yazılır — varlığı tek başına işarettir
+const gecmisKayit=x=>!!x&&(!!x.girildi||x.kaynak==="gecmis");
 async function remove(coll,id){ await deleteDoc(doc(db,OV+coll,id)); }
 // bir tahsilatın üretici(önce)/pazarlamacı(sonra) bölüşümü — birebir ana uygulama
 const payBol=(x,d,onceki)=>{ const K=num(x.adet)*num(x.alisFiyat); const o=num(onceki);
@@ -1413,7 +1426,7 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen,kampany
       h("button",{onClick:()=>openSheet("gecmis",k),style:{width:"100%",padding:"12px 0 2px",fontSize:12.5,fontWeight:700,color:"var(--mut2)"}},"📅 Geçmiş tarihli işlem ekle →"),
       (ovList&&ovList.length>0)&&h("div",{className:"card",style:{padding:"14px 16px",margin:"14px 0 8px",boxShadow:"none",background:"var(--surf2)"}},
         h("div",{className:"lbl",style:{marginBottom:2,display:"flex",alignItems:"center",gap:6}},"🕘 Bu kaledeki son işlemlerin"),
-        h("div",{style:{fontSize:11,color:"var(--mut)",margin:"2px 0 6px"}},"son 48 saat · hatalıysa tek dokunuşla geri al"),
+        h("div",{style:{fontSize:11,color:"var(--mut)",margin:"2px 0 6px"}},"son 48 saatte girilenler · hatalıysa tek dokunuşla geri al"),
         ovList.map((x,i)=>h(OvSatir,{key:x.id||i,x,geriAl})))),
     panel==="hareket"&&h(HareketPanel,{k,kaleHar,onClose:()=>setPanel(null),geriAl,onFiyatDuzelt}),
     panel==="hakedis"&&h(HakedisPanel,{k,kaleHar,onClose:()=>setPanel(null)}),
@@ -1797,7 +1810,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
       h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:2}},
         h("span",{style:{fontSize:20}},"🕘"),
         h("div",{style:{flex:1,minWidth:0}},h("div",{style:{fontSize:13.5,fontWeight:800}},"Son işlemlerin · "+ovN),
-          h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},"son 48 saat · hatalıysa tek dokunuşla geri al"))),
+          h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},"son 48 saatte girilenler · hatalıysa tek dokunuşla geri al"))),
       ovList.slice(0,12).map((x,i)=>h(OvSatir,{key:x.id||i,x,geriAl}))));
 }
 
@@ -2017,11 +2030,20 @@ function ovOzet(x){
 function OvSatir({x,geriAl}){ const o=ovOzet(x);
   const t2=new Date(x.tarih);
   const saat=isNaN(+t2)?"":t2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+t2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
+  /* 📅 Geçmişe girilen işlem: satırda işlemin OLDUĞU gün yazar, altında ne zaman
+     girildiği. İkisi karışmasın diye ayrı ayrı gösteriliyor. */
+  const gec=gecmisKayit(x);
+  const gun=isNaN(+t2)?"":t2.toLocaleDateString("tr-TR",{day:"2-digit",month:"long"});
+  const gt=new Date(kayitMs(x));
+  const girisEt=gec&&!isNaN(+gt)?("girildi "+once(+gt)):"";
   return h("div",{style:{display:"flex",alignItems:"center",gap:11,padding:"10px 0",borderTop:"1px solid var(--line)"}},
     h("span",{style:{fontSize:18}},o.ik),
     h("div",{style:{flex:1,minWidth:0}},
-      h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},o.t+(o.v?(" · "+o.v):"")),
-      h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(x.yer||"—")+(saat?(" · 🕘 "+saat):""))),
+      h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+        gec?h("span",{style:{fontSize:10.5,fontWeight:800,color:"#334155",background:"#e2e8f0",padding:"1px 6px",borderRadius:6,marginRight:6}},"📅 geçmiş"):null,
+        o.t+(o.v?(" · "+o.v):"")),
+      h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+        (x.yer||"—")+(gec?(gun?(" · 🕘 "+gun):""):(saat?(" · 🕘 "+saat):""))+(girisEt?(" · "+girisEt):""))),
     h("button",{onClick:()=>geriAl(x),style:{padding:"7px 11px",borderRadius:10,fontSize:12,fontWeight:800,
       background:"#fff",border:"1px solid var(--line)",color:"var(--red)",flexShrink:0}},"↩️ Geri al"));
 }
@@ -3272,8 +3294,9 @@ function App(){
       say("📍 Konum komutaya iletildi"); }catch(e){ console.error(e); say("⚠ İletilemedi"); } }
   // Emir'in kendi hareketleri + hızlı geri alma listesi (son 48 saat)
   const emirHar=useMemo(()=>hareketler.filter(x=>(x.kullaniciId||"")===emirId),[hareketler,emirId]);
-  const ov=useMemo(()=>emirHar.filter(x=>new Date(x.tarih).getTime()>=Date.now()-48*3600e3)
-    .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,30),[emirHar]);
+  /* pencere kaydın GİRİLDİĞİ ana bakar — geçmişe girilen işlem de burada çıkar */
+  const ov=useMemo(()=>emirHar.filter(x=>kayitMs(x)>=Date.now()-48*3600e3)
+    .sort((a,b)=>kayitMs(b)-kayitMs(a)).slice(0,30),[emirHar]);
   const aktifSefer=(seferler||[]).filter(s=>s.durum==="acik"&&(s.kullaniciId||"")===emirId).sort((a,b)=>new Date(b.baslangic)-new Date(a.baslangic))[0]||null;
   // 🏰 rütbe fermanı: yetki açıldı ama pazarlamacı henüz "anlaşıldı" dememiş
   const fermanGerek=!AS_ID&&!!(d&&d.sinirsiz)&&!!(d&&d.emir&&d.emir.id)&&!(d&&d.emir&&d.emir.fermanCephane);
@@ -3423,7 +3446,11 @@ function App(){
   async function performWrite(p){
     const k=p.k, key=k?k.key:null;
     const now=p.gecTarih?new Date(p.gecTarih+"T12:00:00").toISOString():new Date().toISOString();   // 📅 geçmiş kayıt: seçilen gün
-    const gecEk=p.gecTarih?{kaynak:"gecmis"}:{};
+    /* 📅 geçmiş kayıt: 'tarih' seçilen gün, 'girildi' fiilen ne zaman girildiği.
+       kaynak'ı "konsinye" olması gereken satırlarda yalnız girEk eklenir — orada
+       kaynak raf defterini sürdüğü için ezilemez. */
+    const girEk=p.gecTarih?{girildi:new Date().toISOString()}:{};
+    const gecEk=p.gecTarih?{kaynak:"gecmis",...girEk}:{};
     const kul={kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir"};
     const yerB=k?{yer:k.ad,bolge:k.bolge||"",musteriId:k.musteriId||""}:{};
     if(p.type==="tahsilat"){
@@ -3562,7 +3589,7 @@ function App(){
             const hUrunId=rec.urunId||urunGuncel.id||"";
             // kaynak:"konsinye" → geri alınırsa raftaki "kalan" doğru yere döner (çanta oynamaz)
             await save("pazarlama_hareket",{id:satisId,...kul,tip:"hediye",kaynak:"konsinye",urunId:hUrunId,urunAd:ad,
-              adet:num(p.adet),alisFiyat:alisOrt,maliyetBirim:malOrt,satisFiyat:0,tahsil:0,...yerB,tarih:now});
+              adet:num(p.adet),alisFiyat:alisOrt,maliyetBirim:malOrt,satisFiyat:0,tahsil:0,...yerB,...girEk,tarih:now});
             if(hUrunId&&!p.gecTarih) await save("stok_urun",{id:hUrunId,hediye:increment(num(p.adet))});
             return {};
           }
@@ -3573,14 +3600,14 @@ function App(){
           await save("pazarlama_hareket",{id:satisId,...kul,tip:"satis",kaynak:"konsinye",urunId:rec.urunId||urunGuncel.id||"",urunAd:ad,
             adet:num(p.adet),alisFiyat:alisOrt,maliyetBirim:malOrt,
             satisFiyat:birimF,   // GERÇEK satış fiyatı — pazarlamacının girdiği
-            tahsil:0,...yerB,tarih:now});
+            tahsil:0,...yerB,...girEk,tarih:now});
         }
         else { const iid=rec.urunId||urunGuncel.id||"";
-          await save("pazarlama_hareket",{...kul,tip:"iade",urunId:iid,urunAd:ad,adet:num(p.adet),kaynak:"konsinye",...yerB,tarih:now});
+          await save("pazarlama_hareket",{...kul,tip:"iade",urunId:iid,urunAd:ad,adet:num(p.adet),kaynak:"konsinye",...yerB,...girEk,tarih:now});
           if(iid&&!p.gecTarih) await cantaDelta(iid,ad,+num(p.adet)); }
       }
     } else { // ziyaret
-      await save("pazarlama_hareket",{...kul,tip:"diplomasi",not:p.not||"",...yerB,tarih:now});
+      await save("pazarlama_hareket",{...kul,tip:"diplomasi",not:p.not||"",...yerB,...gecEk,tarih:now});
     }
     return {};
   }
