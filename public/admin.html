@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L42";   // komuta (admin) deneme sürümü
+const SURUM="L43";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -388,7 +388,10 @@ function planEffBas(plan,now){
     arr.forEach(p=>{ if(p.basladi){ const gs=new Date(p.gercekBaslangic||p.baslangic).getTime(); if(gs>sonBas) sonBas=gs; } });
     let cursor=-Infinity;
     arr.forEach(p=>{ const ps=new Date(p.baslangic).getTime(), dur=num(p.sureDk)*60000;
-      const geride=!p.basladi && ps<sonBas;
+      /* 🔁 "geride" artık iş emrini gizlemiyor: geç kalmış iş kuyruğun önüne alınıp
+         normal sırayla diziliyor. Eskiden bu bayrak, üzerinden başka iş başlatılmış
+         bekleyen işleri takvimden tamamen düşürüyordu. */
+      const geride=false;
       let s;
       if(p.basladi){ s=new Date(p.gercekBaslangic||p.baslangic).getTime(); }
       else if(geride) s=ps;
@@ -421,7 +424,7 @@ function makineTimeline(makineId,plan,baslaMs,bitMs,now){
   let sonBaslamaMs=-Infinity;
   all.forEach(({p,ps})=>{ if(p.basladi){ const gs=p.gercekBaslangic?new Date(p.gercekBaslangic).getTime():ps; if(gs>sonBaslamaMs) sonBaslamaMs=gs; } });
   let cursor=-Infinity;
-  const eff=all.map(({p,ps,dk})=>{ const geride=!p.basladi&&ps<sonBaslamaMs; let s;
+  const eff=all.map(({p,ps,dk})=>{ const geride=false; let s;   /* bkz. planEffBas — bekleyen iş gizlenmez */
     if(p.basladi){ s=ps; } else if(geride){ s=ps; } else { s=Math.max(ps,cursor); if(ps<now) s=Math.max(now,cursor); }
     const e=s+dk*60000; if(!geride) cursor=Math.max(cursor,e); return {p,s,e,kaymis:s!==ps,geride}; });
   const js=eff.filter(x=>x.e>baslaMs&&x.s<bitMs).sort((a,b)=>a.s-b.s);
@@ -972,6 +975,53 @@ const planKayit=(x,parti,urunler)=>{
    Bir tabladan diğerine geçerken makinedeki makara değişiyorsa vakit kaybı olur.
    Bu yüzden aynı filamentleri kullanan işler arka arkaya dizilir. */
 const PLAN_DEGISIM_DK=10;                                  // makara başına ortalama değişim
+/* ————— MAKARA (RULO) PLANI —————
+   Bir planı uygulamak için kaç rulo gerektiği, toplam gramı ruloya bölmekle bulunmaz:
+   aynı filament aynı anda birkaç makinede döndüğü için HER MAKİNEYE ayrı bir rulo takılır.
+   Bu yüzden ihtiyaç makine makine hesaplanır, sonra toplanır. */
+const RULO_GRAM=1000;                                      // varsayılan makara ağırlığı (gram)
+const flRuloGram=fl=>{ const g=num(fl&&fl.ruloGram); return g>0?g:RULO_GRAM; };
+function makaraPlani(isler,filamentler){
+  const flById={}; (filamentler||[]).forEach(f=>{ if(f&&f.id) flById[f.id]=f; });
+  const ruloOf=id=>{ const f=flById[id]; return f?flRuloGram(f):RULO_GRAM; };
+  const AYR="::";
+  const zin={}, mkAd={};
+  (isler||[]).forEach(x=>{ if(!x) return;
+    const mid=String(x.makineId||("#"+x.mak));
+    if(x.makineAd&&!mkAd[mid]) mkAd[mid]=x.makineAd;
+    (x.filPay||x.filList||[]).forEach(f=>{ if(!f||!f.filamentId||!(num(f.gram)>0)) return;
+      const k=mid+AYR+f.filamentId;
+      (zin[k]=zin[k]||[]).push({gram:num(f.gram),t:x.baslangic||null,is:x.urun||x.ad||""}); }); });
+  const makine={}, filament={}, olay=[];
+  Object.keys(zin).forEach(k=>{ const i=k.indexOf(AYR); const mid=k.slice(0,i), fid=k.slice(i+AYR.length);
+    const R=ruloOf(fid); const L=zin[k];
+    if(L[0]&&L[0].t) L.sort((a,b)=>new Date(a.t)-new Date(b.t));
+    const gram=L.reduce((s2,x)=>s2+x.gram,0);
+    const rulo=Math.max(1,Math.ceil(gram/R));
+    const m=makine[mid]=makine[mid]||{makineId:mid,ad:mkAd[mid]||"",kalem:[],gram:0,rulo:0};
+    m.kalem.push({filamentId:fid,gram,rulo}); m.gram+=gram; m.rulo+=rulo;
+    const f=filament[fid]=filament[fid]||{filamentId:fid,gram:0,rulo:0,makineSay:0,ruloGram:R};
+    f.gram+=gram; f.rulo+=rulo; f.makineSay++;
+    /* bu makinedeki makara ne zaman bitecek — kümülatif tüketim ruloyu aşınca yenisi takılır */
+    let kalan=R, no=1;
+    L.forEach(x=>{ if(x.gram>kalan){ no++; olay.push({makineId:mid,ad:mkAd[mid]||"",filamentId:fid,no,t:x.t,is:x.is}); kalan=R; }
+      kalan-=x.gram; }); });
+  const filList=Object.values(filament).sort((a,b)=>b.gram-a.gram);
+  filList.forEach(f=>{ f.naifRulo=Math.max(1,Math.ceil(f.gram/f.ruloGram)); });
+  const makList=Object.values(makine).sort((a,b)=>b.gram-a.gram);
+  makList.forEach(m=>m.kalem.sort((a,b)=>b.gram-a.gram));
+  olay.sort((a,b)=>(a.t&&b.t)?(new Date(a.t)-new Date(b.t)):0);
+  return {filList,makList,olay,
+    ruloTop:filList.reduce((s2,f)=>s2+f.rulo,0),
+    naifTop:filList.reduce((s2,f)=>s2+f.naifRulo,0),
+    gramTop:filList.reduce((s2,f)=>s2+f.gram,0)};
+}
+/* planlama özetindeki işleri makara planının beklediği biçime çevirir */
+const makaraOzetten=(ozet,filamentler)=>{ if(!ozet) return null;
+  const ML=ozet.makList||[];
+  return makaraPlani((ozet.isler||[]).map(x=>{ const m=ML[x.mak]||{};
+    return {makineId:m.id||("#"+x.mak),makineAd:m.ad||m.tur||("Makine "+(num(x.mak)+1)),
+      filPay:x.filPay,urun:x.urun}; }),filamentler); };
 const filSet=v=>{ const s={};
   ((v&&v.filPay)||[]).forEach(f=>{ if(f.filamentId) s[f.filamentId]=1; }); return s; };
 const filAnahtar=v=>Object.keys(filSet(v)).sort().join("|");
@@ -1080,9 +1130,10 @@ function planOzet(secim,BMT,turler,makList,bekleme,filamentler,hedef,degisimDk){
   const turDagilim={}; const urunDokum={};
   A.forEach(x=>{ turDagilim[x.tur]=(turDagilim[x.tur]||0)+1;
     const k=x.is.urunId||x.is.urun;
-    const o=urunDokum[k]=urunDokum[k]||{id:k,ad:x.is.urun,tabla:0,gram:0,baskiDk:0,turler:{},renkler:{}};
+    const o=urunDokum[k]=urunDokum[k]||{id:k,ad:x.is.urun,tabla:0,gram:0,baskiDk:0,turler:{},renkler:{},makineler:{}};
     o.tabla++; o.gram+=num(x.v.gram); o.baskiDk+=num(x.v.baski);
     o.turler[x.tur]=(o.turler[x.tur]||0)+1;
+    o.makineler[x.mak]=(o.makineler[x.mak]||0)+1;   /* aynı ürün kaç ayrı makineye dağıldı */
     if(x.is.renkAd) o.renkler[x.is.renkAd]=(o.renkler[x.is.renkAd]||0)+num(x.is.adet); });
   /* çalışan parkta hiçbir makine bu ürünü basamıyorsa sessizce yok sayılmasın */
   const atlanan=(secim||[]).filter(x=>x&&x.u&&Math.round(num(x.adet))>0
@@ -1146,15 +1197,20 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
     const basl=jobs.filter(p=>p.basladi).sort((a,b)=>new Date(b.gercekBaslangic||b.baslangic)-new Date(a.gercekBaslangic||a.baslangic));
     const son=basl[0]||null;
     const kuyruk=jobs.filter(p=>!p.basladi).sort((a,b)=>new Date(a.baslangic)-new Date(b.baslangic));
+    /* 🧹 bitmiş ama toplanmamış BÜTÜN tablalar — yalnız en son başlatılan iş değil.
+       Eskiden sadece son işe bakılıyordu; altta kalan tablalar hiçbir ekranda görünmüyordu. */
+    const bekTablalar=basl.filter(p=>!p.tablaAlindi
+      &&new Date(p.gercekBaslangic||p.baslangic).getTime()+num(p.sureDk)*60000<=now)
+      .sort((a,b)=>new Date(a.gercekBaslangic||a.baslangic)-new Date(b.gercekBaslangic||b.baslangic));
     let durum="bos",pct=0,kalanDk=0;
     if(son){ const bs=new Date(son.gercekBaslangic||son.baslangic).getTime(); const sure=num(son.sureDk)*60000;
       if(bs+sure>now){ durum="basiyor"; pct=Math.min(99,Math.round((now-bs)/sure*100)); kalanDk=(bs+sure-now)/60000; }
-      else if(!son.tablaAlindi) durum="tabla";
     }
-    return {mk,son,kuyruk,durum,pct,kalanDk};
+    if(durum!=="basiyor"&&bekTablalar.length) durum="tabla";
+    return {mk,son,kuyruk,durum,pct,kalanDk,bekTablalar};
   });
   const aktifBaski=makDurum.filter(m=>m.durum==="basiyor").length;
-  const tablaBek=makDurum.filter(m=>m.durum==="tabla").length;
+  const tablaBek=makDurum.reduce((s2,m)=>s2+m.bekTablalar.length,0);
   // — ekip (pazarlamacılar) —
   const musById={}; (musteriler||[]).forEach(m=>musById[m.id]=m);
   const kk=x=>x.musteriId?("m:"+x.musteriId):("y:"+((x.yer||"?").toLocaleLowerCase("tr")));
@@ -2117,7 +2173,7 @@ function ganttRenk(durum){
   return {bg:"var(--surf2)",bd:"1px solid var(--line)",tx:"var(--txt)"};
 }
 // iş detayı — klasik modal
-function IsSheet({x,onClose,onBaslat,onSil,onDuzen,foto}){
+function IsSheet({x,onClose,onBaslat,onSil,onDuzen,onTabla,foto}){
   const p=x.p; const c=ganttRenk(x.durum);
   const etiket={bitti:"Bitti",basiyor:"Basıyor",sirada:"⏭ Sırada",gecikti:"⏰ Gecikti — şimdiye kaydı",geride:"Geride kaldı (üzerinden iş başlatıldı)"}[x.durum]||x.durum;
   const rows=[
@@ -2135,9 +2191,12 @@ function IsSheet({x,onClose,onBaslat,onSil,onDuzen,foto}){
     (x.durum==="bitti")?["Tabla",p.tablaAlindi?"toplandı":"bekliyor"]:null,
   ].filter(Boolean);
   const basla=!p.basladi;
+  /* 🧹 bitmiş ama toplanmamış tabla — gantt'taki düğmeyi bulamayan buradan da toplayabilsin */
+  const tablaBekliyor=(x.durum==="bitti")&&!p.tablaAlindi;
   const silinebilir=basla||x.durum==="basiyor";   // bitmiş işler silinmez (üretim geçmişi/tabla bozulmasın)
   return h(Sheet,{ik:foto?h(Foto,{src:foto,s:46,r:12}):null,hex:"#0e8fce",baslik:p.ad||"İş",alt:etiket,onClose,
-    cta:basla?"İşi şimdi başlat":null,onCta:basla?onBaslat:null},
+    cta:basla?"İşi şimdi başlat":(tablaBekliyor?"🧹 Tablayı topladım":null),
+    onCta:basla?onBaslat:(tablaBekliyor?onTabla:null)},
     rows.map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
       h("span",{style:{color:"var(--mut)",fontWeight:600,flexShrink:0}},r[0]),
       h("span",{style:{fontWeight:800,textAlign:"right"}},r[1]))),
@@ -3077,7 +3136,9 @@ function HudOzetSheet({tip,d,onClose,onGit}){
     rows=d.makDurum.filter(m=>m.durum==="basiyor").map(m=>sat((mkParca(m.mk).no?mkParca(m.mk).no+" · ":"")+(mkParca(m.mk).ad||"Makine"),(m.son&&m.son.ad)||"iş",dk(m.kalanDk)+" kaldı","var(--cyan)"));
     bos="Şu an basan makine yok."; }
   else if(tip==="tabla"){ ik=IK("tabla","#7c46e6",22); baslik="Bekleyen tabla"; gitAd="Üretime git";
-    rows=d.makDurum.filter(m=>m.durum==="tabla").map(m=>sat((mkParca(m.mk).no?mkParca(m.mk).no+" · ":"")+(mkParca(m.mk).ad||"Makine"),(m.son&&m.son.ad)||"baskı bitti","toplanacak","var(--violet)"));
+    rows=d.makDurum.flatMap(m=>(m.bekTablalar||[]).map(p=>sat(
+      (mkParca(m.mk).no?mkParca(m.mk).no+" · ":"")+(mkParca(m.mk).ad||"Makine"),
+      (p.ad||"baskı bitti")+(num(p.adet)>0?(" · "+num(p.adet)+" ad"):""),"toplanacak","var(--violet)")));
     bos="Bekleyen tabla yok."; }
   else { ik=IK("ciro","#16a34a",22); baslik="Bugün ciro"; gitAd="Rapora git";
     rows=[sat("Kale satışı",d.bugun.adet+" adet",tl(d.bugun.ciro),"var(--green)"),
@@ -3185,7 +3246,7 @@ function RenkSecSheet({u,roller,filamentler,mevcut,onKaydet,onClose}){
       style:{...GS.ibtn,width:"100%",padding:12,fontWeight:800,color:"#c2410c"}},"＋ Renk çeşidi ekle"));
 }
 /* 📅 Planı üretim takvimine taşı — tarih/saat seç, tablalar makinelere dizilir */
-function PlanAktarSheet({ozet,bekleme,degisim,plan,urunler,onKaydet,onClose,bekle}){
+function PlanAktarSheet({ozet,bekleme,degisim,plan,urunler,filamentler,onKaydet,onClose,bekle}){
   const yerel=ms=>{ const d2=new Date(ms); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset());
     return d2.toISOString().slice(0,16); };
   const yuvarla=ms=>{ const d2=new Date(ms); d2.setSeconds(0,0);
@@ -3197,6 +3258,10 @@ function PlanAktarSheet({ozet,bekleme,degisim,plan,urunler,onKaydet,onClose,bekl
   const son=takvim.length?Math.max.apply(null,takvim.map(x=>new Date(x.bitis).getTime())):basMs;
   const makSay={}; takvim.forEach(x=>{ const k=x.makineAd||x.makineId||"?"; makSay[k]=(makSay[k]||0)+1; });
   const makinesiz=takvim.filter(x=>!x.makineId).length;
+  /* 🧵 bu planı uygulamak için kaç rulo, hangi makinede hangi makara ne zaman bitiyor */
+  const makara=useMemo(()=>makaraPlani(takvim,filamentler),[takvim,filamentler]);
+  const flAdi=id=>{ const f=(filamentler||[]).find(x=>x&&x.id===id);
+    return f?((flKod(f)?flKod(f)+" ":"")+flAd(f)):"filament seçilmemiş"; };
   const gunBtn=(sa,lbl)=>h("button",{onClick:()=>{ const d2=new Date();
       d2.setSeconds(0,0); d2.setMinutes(0); d2.setHours(d2.getHours()+sa);
       setBas(yerel(d2.getTime())); },style:{...GS.ibtn,fontSize:12}},lbl);
@@ -3220,7 +3285,8 @@ function PlanAktarSheet({ozet,bekleme,degisim,plan,urunler,onKaydet,onClose,bekl
       [["İlk tabla",takvim.length?(gTarih(new Date(takvim[0].baslangic))+" "+gSaat(new Date(takvim[0].baslangic))):"—"],
        ["Son tabla biter",gTarih(son)+" "+gSaat(son)],
        ["Toplam",planSure((son-basMs)/60000)],
-       ["Makara değişimi",num(ozet&&ozet.degisim)+" kez"]]
+       ["Makara değişimi",num(ozet&&ozet.degisim)+" kez"],
+       ["🧵 Gereken makara",makara.ruloTop+" rulo"]]
         .map(([a2,b2],i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,
           padding:"6px 0",borderTop:i?"1px solid "+GC.line:"none",fontSize:12.5}},
           h("span",{style:{color:GC.mut,fontWeight:600}},a2),
@@ -3231,6 +3297,33 @@ function PlanAktarSheet({ozet,bekleme,degisim,plan,urunler,onKaydet,onClose,bekl
         padding:"5px 0",borderTop:i?"1px solid "+GC.line:"none",fontSize:12.5}},
         h("span",{style:{fontWeight:700}},k),
         h("span",{style:{fontWeight:800,color:GC.mut}},makSay[k]+" tabla")))),
+    makara.filList.length?h(React.Fragment,null,
+      h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:8}},"🧵 Makara ihtiyacı"),
+      h("div",{style:{...GS.card,padding:"11px 13px",marginBottom:12}},
+        makara.filList.map((f,i)=>h("div",{key:f.filamentId||i,style:{display:"flex",gap:8,
+          padding:"5px 0",borderTop:i?"1px solid "+GC.line:"none",fontSize:12.5}},
+          h("span",{style:{flex:1,minWidth:0,fontWeight:700,overflow:"hidden",
+            textOverflow:"ellipsis",whiteSpace:"nowrap"}},flAdi(f.filamentId)),
+          h("span",{style:{fontWeight:700,color:GC.mut,flexShrink:0}},kgYaz(f.gram/1000)),
+          h("span",{style:{fontWeight:800,color:"#7c46e6",flexShrink:0,width:56,textAlign:"right"}},
+            f.rulo+" rulo"))),
+        h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:600,marginTop:8,paddingTop:8,
+          borderTop:"1px solid "+GC.line,lineHeight:1.45}},
+          "Her makineye kendi makarası takılır. Toplam gramı ruloya bölmek "
+          +makara.naifTop+" rulo derdi; gerçek ihtiyaç "+makara.ruloTop+" rulo."))):null,
+    makara.olay.length?h(React.Fragment,null,
+      h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:8}},
+        "🔁 Makara bitiş takvimi · "+makara.olay.length+" değişim"),
+      h("div",{style:{...GS.card,padding:"11px 13px",marginBottom:12}},
+        makara.olay.slice(0,12).map((o,i)=>h("div",{key:i,style:{display:"flex",gap:8,padding:"5px 0",
+          borderTop:i?"1px solid "+GC.line:"none",fontSize:11.5}},
+          h("span",{style:{color:GC.mut,fontWeight:700,width:88,flexShrink:0}},
+            o.t?(gTarih(new Date(o.t))+" "+gSaat(new Date(o.t))):"—"),
+          h("span",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",
+            whiteSpace:"nowrap",fontWeight:700}},(o.ad||"makine")+" · "+flAdi(o.filamentId)),
+          h("span",{style:{fontWeight:800,flexShrink:0,color:"#9a3412"}},o.no+". rulo"))),
+        makara.olay.length>12?h("div",{style:{fontSize:11,color:GC.mut,textAlign:"center",paddingTop:8}},
+          "+"+(makara.olay.length-12)+" değişim daha"):null)):null,
     h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:8}},
       "İlk 12 tabla"),
     h("div",{style:{...GS.card,padding:"11px 13px"}},
@@ -3265,6 +3358,8 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
   const [renkAc,setRenkAc]=useState(null);     // renk çeşidi sayfası açık ürün
   const [degisim,setDegisim]=useState(PLAN_DEGISIM_DK);   // makara değişimi (dk)
   const [aktarAc,setAktarAc]=useState(false);            // takvime taşıma sayfası
+  const [makaraAc,setMakaraAc]=useState(false);          // makine makine makara dökümü açık mı
+  const [silOnay,setSilOnay]=useState("");               // silinmesi onaylanmayı bekleyen parti
   const [dokum,setDokum]=useState(false);
   const hedefDk=num(gun)*1440+num(saat)*60;
   /* ürün hangi türlerde basılabiliyor — hedefe göre temsilci değer seçilir */
@@ -3506,6 +3601,44 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
           h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:13.5}},
             h("span",{style:{fontWeight:800}},"Toplam maliyet"),
             h("span",{style:{fontWeight:800,color:"#166534"}},tlk(ozet.maliyet)))),
+        (()=>{ const mk=makaraOzetten(ozet,filamentler);
+          if(!mk||!mk.filList.length) return null;
+          const flAdi=id=>{ const f=(filamentler||[]).find(x=>x&&x.id===id);
+            return f?((flKod(f)?flKod(f)+" ":"")+flAd(f)):"filament seçilmemiş"; };
+          return h("div",{style:{...GS.card,padding:"13px 14px",marginBottom:12}},
+            h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:3}},
+              h("div",{style:{flex:1,fontSize:12,fontWeight:800,color:GC.txt}},"🧵 Makara planı"),
+              h("div",{style:{fontSize:18,fontWeight:800,color:"#7c46e6"}},mk.ruloTop),
+              h("div",{style:{fontSize:11.5,fontWeight:800,color:"#7c46e6"}},"rulo")),
+            h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:600,marginBottom:9,lineHeight:1.45}},
+              "Aynı filament birkaç makinede aynı anda döndüğü için her makineye ayrı makara takılır. "
+              +"Toplam gramı ruloya bölmek "+mk.naifTop+" rulo derdi."),
+            mk.filList.map((f,i)=>h("div",{key:f.filamentId||i,style:{display:"flex",alignItems:"center",gap:9,
+              padding:"7px 0",borderTop:i?"1px solid "+GC.line:"none"}},
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",
+                  textOverflow:"ellipsis",whiteSpace:"nowrap"}},flAdi(f.filamentId)),
+                h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:600,marginTop:1}},
+                  kgYaz(f.gram/1000)+" · "+f.makineSay+" makinede · makara "
+                  +(Math.round(f.ruloGram/10)/100)+" kg")),
+              h("span",{style:{fontSize:15,fontWeight:800,color:"#7c46e6",flexShrink:0}},f.rulo),
+              h("span",{style:{fontSize:11,fontWeight:700,color:GC.mut,flexShrink:0}},"rulo"))),
+            h("button",{onClick:()=>setMakaraAc(a2=>!a2),
+              style:{...GS.ibtn,width:"100%",marginTop:10,fontSize:12,fontWeight:800}},
+              makaraAc?"makine dökümünü gizle":"🖨 hangi makineye ne takılacak"),
+            makaraAc?h("div",{style:{marginTop:8}},
+              mk.makList.map((m,i)=>h("div",{key:m.makineId,style:{padding:"7px 0",
+                borderTop:i?"1px solid "+GC.line:"none"}},
+                h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt}},
+                  (m.ad||m.makineId)+" · "+m.rulo+" makara"),
+                h("div",{style:{fontSize:11,color:GC.mut,fontWeight:600,marginTop:2,lineHeight:1.5}},
+                  m.kalem.map(k=>flAdi(k.filamentId)+" "+kgYaz(k.gram/1000)
+                    +(k.rulo>1?(" ×"+k.rulo):"")).join(" · "))))):null,
+            mk.olay.length?h("div",{style:{marginTop:10,padding:"9px 11px",borderRadius:11,
+              background:"#fff7ed",border:"1px solid #fed7aa",fontSize:11.5,fontWeight:700,
+              color:"#9a3412",lineHeight:1.5}},
+              "⚠ Plan sürerken "+mk.olay.length+" makara bitecek, yenisi takılacak. "
+              +"Saatleri “Üretim planına taşı” sayfasında yazıyor."):null); })(),
         h("div",{style:{...GS.card,padding:"13px 14px",marginBottom:12}},
           h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:8}},"📦 Ürün dökümü"),
           sonuc.map((x,i)=>{ const o1=(ozet.urunDokum||{})[x.u.id]||{tabla:0,gram:0,baskiDk:0,turler:{}};
@@ -3521,6 +3654,9 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
                   overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},(T?"🖨 ":"")+x.u.ad),
                 h("div",{style:{fontSize:10.5,color:T?"#6d3fbe":GC.mut,fontWeight:600,marginTop:1}},
                   o1.tabla+" tabla · "+Math.round(o1.gram)+" gr"
+                  /* aynı ürün birden çok makineye dağılır — kaç makinede basılacağı yazsın */
+                  +(Object.keys(o1.makineler||{}).length>1
+                    ?(" · "+Object.keys(o1.makineler).length+" makinede"):"")
                   +(tl.length?(" · "+tl.map(t=>(t||"makine")+(tl.length>1?(" "+o1.turler[t]):"")).join(" + ")):"")
                   +(Object.keys(o1.renkler||{}).length
                     ?("\n🎨 "+Object.keys(o1.renkler).map(r=>o1.renkler[r]+" "+r).join(" · ")):""))),
@@ -3574,11 +3710,16 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
               (g.ilk?(gTarih(g.ilk)+" "+gSaat(g.ilk)):"—")
               +" → "+(g.son?(gTarih(g.son)+" "+gSaat(g.son)):"—")
               +" · "+ur.slice(0,3).join(", ")+(ur.length>3?(" +"+(ur.length-3)):""))),
-          h("button",{onClick:()=>onGeriAl&&onGeriAl(g.parti),disabled:bekle||g.basladi>=g.say,
-            style:{...GS.ibtn,flexShrink:0,padding:"6px 11px",fontSize:12,fontWeight:800,
-              color:g.basladi>=g.say?GC.mut:GC.kirmiziB,
+          /* ⚠ tek dokunuşta bütün parti silinmesin — önce arm, sonra sil */
+          h("button",{onClick:()=>{ if(silOnay!==g.parti){ setSilOnay(g.parti); return; }
+              setSilOnay(""); onGeriAl&&onGeriAl(g.parti); },
+            disabled:bekle||g.basladi>=g.say,
+            style:{...GS.ibtn,flexShrink:0,padding:"8px 11px",fontSize:12,fontWeight:800,
+              color:g.basladi>=g.say?GC.mut:(silOnay===g.parti?"#fff":GC.kirmiziB),
+              background:silOnay===g.parti?GC.kirmiziB:"#fff",
+              borderColor:silOnay===g.parti?GC.kirmiziB:GC.line,
               opacity:(bekle||g.basladi>=g.say)?.5:1}},
-            g.basladi>=g.say?"başladı":"geri al")),
+            g.basladi>=g.say?"başladı":(silOnay===g.parti?"⚠ SİL — emin misin?":"partiyi sil"))),
         /* tek tek geri alma */
         h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginTop:7}},
           (plan||[]).filter(p2=>p2.parti===g.parti).slice(0,8).map(p2=>
@@ -3589,7 +3730,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
               (p2.basladi?"▶ ":"✕ ")+gSaat(new Date(p2.baslangic))+" "
               +String(p2.ad||"").slice(0,10)))),
         ); })):null,
-    aktarAc&&ozet?h(PlanAktarSheet,{ozet,bekleme,degisim,plan,urunler,bekle,
+    aktarAc&&ozet?h(PlanAktarSheet,{ozet,bekleme,degisim,plan,urunler,filamentler,bekle,
       onClose:()=>setAktarAc(false),
       onKaydet:async takvim=>{ if(onAktar){ await onAktar(takvim,urunler); }
         setAktarAc(false); }}):null,
@@ -3755,8 +3896,10 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
           mlist.length===0?h("div",{style:{padding:20,color:GC.mut,textAlign:"center"}},"Makine yok. Makineler'den ekle.")
           :mlist.map((mk,mi)=>{ const tl=timelines[mk.id]||{js:[],bos:[]};
             const mjobs=(plan||[]).filter(p=>p.makineId===mk.id&&p.basladi);
-            const sonBaski=mjobs.slice().sort((a,b)=>new Date(b.gercekBaslangic||b.baslangic).getTime()-new Date(a.gercekBaslangic||a.baslangic).getTime())[0]||null;
-            const tablaIs=(sonBaski&&!sonBaski.tablaAlindi&&new Date(sonBaski.baslangic).getTime()+num(sonBaski.sureDk)*60000<=now)?sonBaski:null;
+            /* 🧹 bitmiş ve toplanmamış BÜTÜN tablalar — tek düğmeyle toplanır */
+            const tablaIsler=mjobs.filter(p=>!p.tablaAlindi
+              &&new Date(p.gercekBaslangic||p.baslangic).getTime()+num(p.sureDk)*60000<=now)
+              .sort((a,b)=>new Date(a.gercekBaslangic||a.baslangic)-new Date(b.gercekBaslangic||b.baslangic));
             const basiyorMu=(tl.eff||[]).some(x=>x.p&&x.p.basladi&&x.e>now);   // şu an baskıda mı (görünen pencereden bağımsız)
             return h("div",{key:mk.id,ref:mi===0?satirRef:undefined,style:{display:"flex",borderBottom:"1px solid "+GC.line,minHeight:rowH}},
               h("div",{style:{width:LABEL_W,flexShrink:0,padding:"1px 4px",position:"sticky",left:0,background:basiyorMu?"#dde3ec":"#fff",zIndex:2,borderRight:"1px solid "+GC.line,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden"}},
@@ -3765,7 +3908,7 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
                     pr.no?h("span",{style:{fontWeight:800,fontSize:18,lineHeight:1.05,color:GC.txt}},pr.no):null,
                     null),
                   h("div",{style:{fontSize:9.5,fontWeight:700,color:GC.mut,lineHeight:1.15,marginTop:1,overflow:"hidden",whiteSpace:"nowrap"}},pr.ad||mk.ad)); })(),
-                tablaIs?h("button",{onClick:()=>onTabla&&onTabla(tablaIs),style:{marginTop:5,fontSize:10,fontWeight:800,color:"#7a3e00",background:"#ffe2b8",border:"1px solid #fb8c00",borderRadius:6,padding:"2px 4px",lineHeight:1.2,alignSelf:"stretch",display:"flex",alignItems:"center",justifyContent:"center",gap:3}},h(Icn,{n:"tabla",c:"#7a3e00",s:12}),"topla"):null),
+                tablaIsler.length?h("button",{onClick:()=>onTabla&&onTabla(tablaIsler),style:{marginTop:5,fontSize:10,fontWeight:800,color:"#7a3e00",background:"#ffe2b8",border:"1px solid #fb8c00",borderRadius:6,padding:"7px 4px",lineHeight:1.2,alignSelf:"stretch",display:"flex",alignItems:"center",justifyContent:"center",gap:3}},h(Icn,{n:"tabla",c:"#7a3e00",s:12}),"topla"+(tablaIsler.length>1?(" "+tablaIsler.length):"")):null),
               h("div",{style:{position:"relative",width:toplamW,flexShrink:0,backgroundImage:"repeating-linear-gradient(90deg,#c8d3e0 0 1px,transparent 1px "+GUN_W+"px),repeating-linear-gradient(90deg,#eef2f7 0 1px,transparent 1px "+(GUN_W*step/24)+"px),"+isikArka(GUN_W,.8)}},
                 tl.bos.flatMap((b,i)=>{ const parts=[]; const pe=Math.min(b.end,now); if(pe>b.start) parts.push({k:"k"+i,s:b.start,e:pe,kayip:true});
                   const fs=Math.max(b.start,now); if(b.end>fs) parts.push({k:"f"+i,s:fs,e:b.end,kayip:false});
@@ -4008,6 +4151,8 @@ function FilamentDuzenSheet({fl,filamentler,onKaydet,onSil,onAlim,bekle}){
   const [renk,setRenk]=useState(duzen?flRenk(fl):"");
   const [kg,setKg]=useState((fl&&num(fl.kgFiyat)>0)?String(num(fl.kgFiyat)):"");
   const [stokKg,setStokKg]=useState(duzen?String(num(fl.stokKg)||""):"");
+  /* makara ağırlığı — planlamada kaç rulo gerektiği buradan çıkar */
+  const [rulo,setRulo]=useState(String(fl?flRuloGram(fl):RULO_GRAM));
   const [elleKod,setElleKod]=useState(duzen?flKod(fl):"");
   /* marka kodu elle belirlenir; renkler onun üzerinden numaralanır */
   const [mKod,setMKod]=useState(()=>flKodTemiz(fl&&fl.markaKod)||flMarkaKod(filamentler,fl?flMarka(fl):""));
@@ -4030,6 +4175,7 @@ function FilamentDuzenSheet({fl,filamentler,onKaydet,onSil,onAlim,bekle}){
     cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!tamAd||!!cakisma||bekle,
     onCta:()=>onKaydet({id:duzen?fl.id:null,kod,markaKod:marka.trim()?markaKod:"",no:"",ad:tamAd,tur:tur.trim(),
       marka:marka.trim(),renk:renk.trim(),kgFiyat:num(kg),stokKg:num(stokKg),
+      ruloGram:Math.max(1,Math.round(num(rulo)||RULO_GRAM)),
       sayim:duzen&&Math.abs(num(stokKg)-num(fl.stokKg))>0.0005})},
     /* — tür: en üst sınıf — */
     h("div",{className:"lbl",style:{marginBottom:8}},"Tür"),
@@ -4083,6 +4229,12 @@ function FilamentDuzenSheet({fl,filamentler,onKaydet,onSil,onAlim,bekle}){
         h("input",{type:"number",inputMode:"decimal",step:"any",value:kg,onChange:e=>setKg(e.target.value),placeholder:"örn. 700",style:inp})),
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Stok kg"),
         h("input",{type:"number",inputMode:"decimal",step:"any",value:stokKg,onChange:e=>setStokKg(e.target.value),placeholder:"0",style:inp}))),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12,alignItems:"end"}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Makara ağırlığı (gr)"),
+        h("input",{type:"text",inputMode:"numeric",value:rulo,onChange:e=>setRulo(e.target.value),
+          placeholder:String(RULO_GRAM),style:inp})),
+      h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700,lineHeight:1.4,paddingBottom:9}},
+        "Bir rulonun kaç gram olduğu. Planlamada kaç makara alınacağı buradan hesaplanır.")),
     (duzen&&num(stokKg)>0&&num(kg)>0)?h("div",{style:{textAlign:"right",fontSize:12,fontWeight:800,color:"var(--violet)",marginBottom:12}},"Stok değeri "+tlk(num(stokKg)*num(kg))):null,
     duzen?h("div",{style:{display:"grid",gap:6,padding:"11px 13px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700,marginBottom:12}},
       h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayımdan beri düşülen"),h("b",null,(Math.round(num(fl.dusenKg)*100)/100)+" kg")),
@@ -5951,8 +6103,13 @@ function App(){
     const silinir=hedef.filter(p2=>!p2.basladi);
     const basladi=hedef.length-silinir.length;
     if(!silinir.length){ say(basladi?"Baskılar başlamış — geri alınamaz":"Kayıt bulunamadı"); return; }
-    if(!tekId&&!confirm(silinir.length+" tabla üretim planından kaldırılacak."
-      +(basladi?("\n"+basladi+" tanesi başlamış, dokunulmayacak."):"")+"\n\nOnaylıyor musun?")) return;
+    if(!tekId){ const zm=silinir.map(p2=>new Date(p2.baslangic).getTime()).sort((a,b)=>a-b);
+      const ur=[...new Set(silinir.map(p2=>p2.ad).filter(Boolean))];
+      if(!confirm("⚠ "+silinir.length+" tabla üretim planından KALICI olarak silinecek.\n\n"
+        +(zm.length?(gTarih(zm[0])+" "+gSaat(zm[0])+"  →  "+gTarih(zm[zm.length-1])+" "+gSaat(zm[zm.length-1])+"\n"):"")
+        +(ur.length?(ur.slice(0,4).join(", ")+(ur.length>4?(" +"+(ur.length-4)+" ürün daha"):"")+"\n"):"")
+        +(basladi?("\n"+basladi+" tanesi başlamış, dokunulmayacak.\n"):"")
+        +"\n⚠ BU İŞLEM GERİ ALINAMAZ.")) return; }
     setIsBekle(true);
     try{ for(const p2 of silinir) await remove("plan",p2.id);
       say(silinir.length+" tabla geri alındı"); }
@@ -6212,12 +6369,31 @@ function App(){
           mesaj:"Hakediş güncellendi ("+arr.length+" satış):\n"+satirlar}); }
       say("💾 "+changes.length+" fiyat güncellendi · pazarlamacılara bildirildi");
     }catch(e){ console.error(e); say("Kaydedilemedi — tekrar dene"); } }
-  async function isBaslat(x){ if(!confirm("Başlat\n"+(x.p.ad||"iş")+"\n"+x.mkAd)) return;
-    try{ await save("plan",{id:x.p.id,basladi:true,gercekBaslangic:new Date().toISOString()}); setModal(null); say("▶Başladı · "+(x.p.ad||"iş")); }
+  async function isBaslat(x){
+    /* ⚠ dolu tablaya baskı başlatmak makinenin kafasını kırar — önce sor */
+    const bek=(plan||[]).filter(p2=>p2.makineId===x.p.makineId&&p2.id!==x.p.id&&p2.basladi&&!p2.tablaAlindi
+      &&new Date(p2.gercekBaslangic||p2.baslangic).getTime()+num(p2.sureDk)*60000<=Date.now());
+    const msj=bek.length
+      ?("⚠ "+x.mkAd+" makinesinde toplanmamış tabla var:\n"
+        +bek.slice(0,4).map(p2=>"• "+(p2.ad||"baskı")).join("\n")+(bek.length>4?("\n• +"+(bek.length-4)+" daha"):"")
+        +"\n\nTabla çıkarıldı mı?\nOnaylarsan bu tablalar toplandı sayılır ve "+(x.p.ad||"iş")+" başlar.")
+      :("Başlat\n"+(x.p.ad||"iş")+"\n"+x.mkAd);
+    if(!confirm(msj)) return;
+    try{ for(const p2 of bek) await save("plan",{id:p2.id,tablaAlindi:true});
+      await save("plan",{id:x.p.id,basladi:true,gercekBaslangic:new Date().toISOString()}); setModal(null);
+      say((bek.length?(bek.length+" tabla toplandı · "):"")+"▶Başladı · "+(x.p.ad||"iş")); }
     catch(e){ console.error(e); say("Başlatılamadı"); } }
-  async function tablaTopla(p){ if(!p||!p.id) return; if(!confirm("🧹 "+(p.ad||"baskı")+" tablası toplandı olarak işaretlensin mi?")) return;
-    try{ await save("plan",{id:p.id,tablaAlindi:true}); say("Tabla toplandı · "+(p.ad||"iş")); }
-    catch(e){ console.error(e); say("İşlenemedi"); } }
+  async function tablaTopla(p){ const L=(Array.isArray(p)?p:[p]).filter(x=>x&&x.id);
+    if(!L.length||isBekle) return;
+    const msj=L.length>1
+      ?("🧹 "+L.length+" tabla toplandı olarak işaretlensin mi?\n"
+        +L.slice(0,6).map(x=>"• "+(x.ad||"baskı")).join("\n")+(L.length>6?("\n• +"+(L.length-6)+" daha"):""))
+      :("🧹 "+(L[0].ad||"baskı")+" tablası toplandı olarak işaretlensin mi?");
+    if(!confirm(msj)) return;
+    setIsBekle(true);
+    try{ for(const x of L) await save("plan",{id:x.id,tablaAlindi:true});
+      setModal(null); say(L.length>1?(L.length+" tabla toplandı"):("Tabla toplandı · "+(L[0].ad||"iş"))); }
+    catch(e){ console.error(e); say("İşlenemedi"); } finally{ setIsBekle(false); } }
   const [silinen,setSilinen]=useState(null); const silT=useRef(null);
   async function isSil(x){
     const msj=(x.p.basladi&&x.durum==="basiyor")
@@ -6280,6 +6456,7 @@ function App(){
       h("button",{onClick:silGeriAl,style:{flexShrink:0,padding:"7px 12px",borderRadius:10,background:"var(--cyan)",color:"#fff",fontSize:12.5,fontWeight:800}},"Geri al")):null,
     h(Toast,{msg:toastMsg}),
     modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,foto:(fotoMap[(modal.x.p||{}).urunId]||{}).data,onClose:()=>setModal(null),onBaslat:()=>isBaslat(modal.x),onSil:()=>isSil(modal.x),
+      onTabla:()=>tablaTopla(modal.x.p),
       onDuzen:()=>setModal({tip:"isEkle",kayit:modal.x.p})}),
     modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,filamentler,bekle:isBekle,onKaydet:isKaydet,kayit:modal.kayit||null,pre:modal.pre||null}),
     modal&&modal.tip==="makineYonet"&&h(MakineYonetimSheet,{makineler,onClose:()=>setModal(null),onAc:setModal}),
