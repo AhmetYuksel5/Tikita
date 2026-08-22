@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L51";   // komuta (admin) deneme sürümü
+const SURUM="L52";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1171,6 +1171,37 @@ const planKayit=(x,parti,urunler)=>{
    Bir tabladan diğerine geçerken makinedeki makara değişiyorsa vakit kaybı olur.
    Bu yüzden aynı filamentleri kullanan işler arka arkaya dizilir. */
 const PLAN_DEGISIM_DK=10;                                  // makara başına ortalama değişim
+/* 💾 PLANLAMA TASLAĞI — araçtan çıkıp dönünce seçimler yerinde durur.
+   Yalnız "Temizle" düğmesiyle silinir; sayfa kapansa da tarayıcıda kalır.
+   Kaydedilenler: ne seçildiği ve ayarlar. Açık/kapalı sayfa gibi geçici
+   durumlar taşınmaz — onlar her açılışta sıfırdan başlar. */
+const PLAN_TASLAK_ANAHTAR="tk_planTaslak";
+const PLAN_TASLAK_BOS={mod:"adet",hedef:"hiz",makine:null,secMak:null,bekleme:15,
+  gun:1,saat:0,sec:{},renkler:{},degisim:PLAN_DEGISIM_DK};
+function planTaslakOku(){
+  try{ const ham=localStorage.getItem(PLAN_TASLAK_ANAHTAR); if(!ham) return null;
+    const o=JSON.parse(ham); if(!o||typeof o!=="object") return null;
+    const nesne=x=>(x&&typeof x==="object"&&!Array.isArray(x))?x:null;
+    const say={}; const S=nesne(o.sec)||{};
+    Object.keys(S).forEach(k=>{ const v=Math.max(0,Math.round(num(S[k]))); if(v>0) say[k]=v; });
+    const sm=nesne(o.secMak);
+    return {mod:o.mod==="sure"?"sure":"adet",
+      hedef:PLAN_HEDEF.some(x=>x.k===o.hedef)?o.hedef:"hiz",
+      makine:num(o.makine)>0?Math.round(num(o.makine)):null,
+      secMak:sm&&Object.keys(sm).length?sm:null,
+      bekleme:Math.max(0,num(o.bekleme)),
+      gun:Math.max(0,Math.round(num(o.gun))),saat:Math.max(0,Math.round(num(o.saat))),
+      sec:say,renkler:nesne(o.renkler)||{},
+      degisim:Math.max(0,num(o.degisim))};
+  }catch(e){ return null; }
+}
+function planTaslakYaz(o){
+  try{ localStorage.setItem(PLAN_TASLAK_ANAHTAR,JSON.stringify(o||{})); }catch(e){}
+}
+function planTaslakSil(){ try{ localStorage.removeItem(PLAN_TASLAK_ANAHTAR); }catch(e){} }
+/* taslakta gerçekten bir şey var mı — boş taslak için "Temizle" gösterilmez */
+const planTaslakDolu=t=>!!(t&&(Object.keys(t.sec||{}).length||t.secMak
+  ||Object.keys(t.renkler||{}).length));
 /* ————— MAKARA (RULO) PLANI —————
    Bir planı uygulamak için kaç rulo gerektiği, toplam gramı ruloya bölmekle bulunmaz:
    aynı filament aynı anda birkaç makinede döndüğü için HER MAKİNEYE ayrı bir rulo takılır.
@@ -3777,24 +3808,44 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
     TURLER.forEach(t=>{ o[t.tur]=planBirim(urunler,plan,filamentler,t.tur,makineler); }); return o; },
     [urunler,plan,filamentler,TURLER,makineler]);
   const MAK=Math.max(1,TURLER.reduce((s2,t)=>s2+t.say,0));
-  const [mod,setMod]=useState("adet");        // adet → süre · sure → adet
-  const [hedef,setHedef]=useState("hiz");     // hız · filament · denge
-  const [makine,setMakine]=useState(MAK);
+  /* 💾 araçtan çıkıp dönünce seçimler yerinde dursun — taslak tarayıcıda tutulur */
+  const T0=useRef(planTaslakOku()).current;
+  const [mod,setMod]=useState((T0&&T0.mod)||"adet");   // adet → süre · sure → adet
+  const [hedef,setHedef]=useState((T0&&T0.hedef)||"hiz");
+  const [makine,setMakine]=useState((T0&&T0.makine)?Math.min(MAK,T0.makine):MAK);
   /* 🖨 elle makine seçimi — null iken sayıyla (eski davranış), doluyken tam olarak bunlar */
-  const [secMak,setSecMak]=useState(null);
+  const [secMak,setSecMak]=useState((T0&&T0.secMak)||null);
   const [makSecAc,setMakSecAc]=useState(false);
-  const [bekleme,setBekleme]=useState(15);
-  const [gun,setGun]=useState(1); const [saat,setSaat]=useState(0);
+  const [bekleme,setBekleme]=useState(T0?T0.bekleme:15);
+  const [gun,setGun]=useState(T0?T0.gun:1); const [saat,setSaat]=useState(T0?T0.saat:0);
   const [ara,setAra]=useState("");
-  const [sec,setSec]=useState({});             // urunId -> adet / oran
-  const [renkler,setRenkler]=useState({});     // urunId -> [{renk:{rol:filamentId},adet}]
+  const [sec,setSec]=useState((T0&&T0.sec)||{});       // urunId -> adet / oran
+  const [renkler,setRenkler]=useState((T0&&T0.renkler)||{});
   const [renkAc,setRenkAc]=useState(null);     // renk çeşidi sayfası açık ürün
-  const [degisim,setDegisim]=useState(PLAN_DEGISIM_DK);   // makara değişimi (dk)
+  const [degisim,setDegisim]=useState(T0?T0.degisim:PLAN_DEGISIM_DK);   // makara değişimi (dk)
   const [aktarAc,setAktarAc]=useState(false);            // takvime taşıma sayfası
   const [makaraAc,setMakaraAc]=useState(false);          // makine makine makara dökümü açık mı
   const [silOnay,setSilOnay]=useState("");               // silinmesi onaylanmayı bekleyen parti
   const [dokum,setDokum]=useState(false);
   const hedefDk=num(gun)*1440+num(saat)*60;
+  /* 💾 her değişiklik taslağa düşer — araçtan çıkmak bir şey silmez.
+     İlk açılışta yazmıyoruz: hiçbir şeye dokunmadan taslak oluşmasın. */
+  const ilkRef=useRef(true);
+  useEffect(()=>{ if(ilkRef.current){ ilkRef.current=false; return; }
+    planTaslakYaz({mod,hedef,makine,secMak,bekleme,gun,saat,sec,renkler,degisim}); },
+    [mod,hedef,makine,secMak,bekleme,gun,saat,sec,renkler,degisim]);
+  /* 🧹 taslağı yalnız bu sıfırlar */
+  const taslakTemizle=()=>{
+    if(!confirm("🧹 Planlama temizlensin mi?\n\nSeçilen ürünler ve ayarlar sıfırlanır. "
+      +"Üretim planına taşınmış işler bundan etkilenmez.")) return;
+    planTaslakSil();
+    setMod("adet"); setHedef("hiz"); setMakine(MAK); setSecMak(null);
+    setBekleme(15); setGun(1); setSaat(0); setSec({}); setRenkler({});
+    setDegisim(PLAN_DEGISIM_DK); setAra(""); setMakaraAc(false); setDokum(false);
+    setSilOnay(""); setRenkAc(null);
+  };
+  const taslakVar=Object.keys(sec).some(k=>num(sec[k])>0)||!!secMak
+    ||Object.keys(renkler).length>0;
   /* ürün hangi türlerde basılabiliyor — hedefe göre temsilci değer seçilir */
   const uBilgi=useMemo(()=>{ const o={};
     urunler.forEach(u=>{
@@ -3892,6 +3943,15 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
         style:{...GS.input,width:58,textAlign:"center",fontWeight:800}}),
       h("button",{onClick:()=>ayarla(v+(mod==="adet"?10:1)),style:{...GS.ibtn,padding:"6px 10px"}},"+")); };
   return h("div",null,
+    /* 🧹 taslak yalnız buradan sıfırlanır */
+    taslakVar?h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10,
+      padding:"9px 12px",borderRadius:12,background:"#f4f0ff",border:"1px solid #d8ccff"}},
+      h("span",{style:{fontSize:11.5,fontWeight:800,color:"#5b21b6",flex:1,minWidth:0}},
+        "💾 Taslak duruyor · "+Object.keys(sec).filter(k=>num(sec[k])>0).length+" ürün"
+        +(secMak?(" · "+Object.keys(secMak).filter(k=>secMak[k]).length+" makine seçili"):"")),
+      h("button",{onClick:taslakTemizle,
+        style:{...GS.ibtn,flexShrink:0,fontSize:12,fontWeight:800,color:GC.kirmiziB,
+          borderColor:"#fca5a5",padding:"6px 12px"}},"🧹 Temizle")):null,
     h("div",{style:{display:"flex",gap:8,marginBottom:12}},modBtn("adet","📦 Adet → süre"),modBtn("sure","⏱ Süre → adet")),
     (mod==="adet")?h("div",{style:{fontSize:11,color:GC.mut,fontWeight:700,marginBottom:10,lineHeight:1.45}},
       "Yazdığın sayı kaç ADET istediğin. Tabla yarım basılmadığı için en az o kadar çıkacak şekilde tam tablaya tamamlanır."):null,
