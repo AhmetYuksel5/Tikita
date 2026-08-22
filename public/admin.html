@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L40";   // komuta (admin) deneme sürümü
+const SURUM="L41";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -911,16 +911,61 @@ function planTurSira(TURLER,BMT,secim,hedef){
   const say=t=>((TURLER||[]).find(x=>x.tur===t)||{}).say||0;
   return (TURLER||[]).map(t=>t.tur).sort((a,b)=>sk(a)-sk(b)||say(b)-say(a));
 }
-/* Çalışacak makine parkı: hedefin sevdiği türden başlayarak doldurulur */
-function planMakineler(TURLER,adet,siraTur){
+/* Çalışacak makine parkı: hedefin sevdiği türden başlayarak doldurulur.
+   makineler verilirse yuvalar GERÇEK makinelere bağlanır (takvime aktarım için). */
+function planMakineler(TURLER,adet,siraTur,makineler){
   const S=(siraTur&&siraTur.length)?siraTur:(TURLER||[]).map(t=>t.tur);
   const havuz=[];
-  S.forEach(t=>{ const n=((TURLER||[]).find(x=>x.tur===t)||{}).say||0;
-    for(let i=0;i<n;i++) havuz.push(t); });
-  if(!havuz.length) havuz.push("");
+  const turMak={};
+  (makineler||[]).forEach(m=>{ const t=makTur(m); (turMak[t]=turMak[t]||[]).push(m); });
+  S.forEach(t=>{ const gercek=turMak[t]||[];
+    const n=((TURLER||[]).find(x=>x.tur===t)||{}).say||0;
+    for(let i=0;i<n;i++){ const m=gercek[i];
+      havuz.push({tur:t,id:(m&&m.id)||"",ad:(m&&m.ad)||""}); } });
+  if(!havuz.length) havuz.push({tur:"",id:"",ad:""});
   const N=Math.max(1,Math.min(havuz.length,Math.round(num(adet))||havuz.length));
-  return havuz.slice(0,N).map((t,i)=>({no:i+1,tur:t}));
+  return havuz.slice(0,N).map((x,i)=>({no:i+1,tur:x.tur,id:x.id,ad:x.ad}));
 }
+/* ————— TAKVİME AKTARIM —————
+   Planı gerçek baskı kayıtlarına çevirir: her makinenin kuyruğu seçilen andan
+   itibaren arka arkaya dizilir; bekleme ve makara değişimi araya girer.
+   Makinede iş varsa onun arkasından başlar — üst üste binmez. */
+function planTakvim(ozet,baslangicMs,bekleme,degisimDk,plan){
+  if(!ozet||!ozet.isler||!ozet.isler.length) return [];
+  const bas0=num(baslangicMs)||Date.now();
+  const bk=Math.max(0,num(bekleme)), dg=Math.max(0,num(degisimDk));
+  const M=ozet.makList||[];
+  /* makinenin mevcut kuyruğu ne zaman biter */
+  const doluya=id=>{ let en=bas0;
+    (plan||[]).forEach(pp=>{ if(pp.makineId!==id) return;
+      const b2=new Date(pp.gercekBaslangic||pp.baslangic).getTime();
+      if(!b2) return; const e2=b2+num(pp.sureDk)*60000; if(e2>en) en=e2; });
+    return en; };
+  const saat={}; const out=[];
+  ozet.isler.slice().sort((a,b2)=>(a.mak-b2.mak)||(a.sira-b2.sira)).forEach(j=>{
+    const m=M[j.mak]||{};
+    if(saat[j.mak]==null) saat[j.mak]=m.id?doluya(m.id):bas0;
+    /* makara değişimi bu tabladan ÖNCE yapılır */
+    if(num(j.degisti)>0) saat[j.mak]+=num(j.degisti)*dg*60000;
+    const bs=saat[j.mak];
+    out.push({...j,makineId:m.id||"",makineAd:m.ad||"",baslangic:new Date(bs).toISOString(),
+      bitis:new Date(bs+num(j.baski)*60000).toISOString()});
+    saat[j.mak]=bs+num(j.baski)*60000+bk*60000; });
+  return out;
+}
+/* aktarım kaydı: takvime yazılacak baskı kaydı */
+const planKayit=(x,parti,urunler)=>{
+  const u=(urunler||[]).find(y=>y.id===x.urunId)||null;
+  const parcali=!!(u&&(u.parcalar||[]).length&&x.parca&&u.parcalar.indexOf(x.parca)>=0);
+  return {makineId:x.makineId,ad:x.urun,urunId:x.urunId||"",
+    parcaAd:parcali?x.parca:"",parcaAdlar:parcali?[x.parca]:[],
+    adet:Math.max(1,Math.round(num(x.adet))),
+    baslangic:x.baslangic,sureDk:Math.round(num(x.baski)),planSureDk:Math.round(num(x.baski)),
+    gram:Math.round(num(x.gram)*10)/10,
+    filamentId:((x.filPay||[])[0]||{}).filamentId||"",
+    filList:(x.filPay||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
+      .map(f=>({filamentId:f.filamentId,gram:Math.round(num(f.gram)*10)/10})),
+    ams:true,not:x.renkAd?("🎨 "+x.renkAd):"",basladi:false,parti}; };
 /* ————— FİLAMENT DEĞİŞİMİ —————
    Bir tabladan diğerine geçerken makinedeki makara değişiyorsa vakit kaybı olur.
    Bu yüzden aynı filamentleri kullanan işler arka arkaya dizilir. */
@@ -3137,7 +3182,68 @@ function RenkSecSheet({u,roller,filamentler,mevcut,onKaydet,onClose}){
     h("button",{onClick:()=>setSat(o=>o.concat([bos()])),
       style:{...GS.ibtn,width:"100%",padding:12,fontWeight:800,color:"#c2410c"}},"＋ Renk çeşidi ekle"));
 }
-function PlanlamaAraci({d,plan,makineler,filamentler}){
+/* 📅 Planı üretim takvimine taşı — tarih/saat seç, tablalar makinelere dizilir */
+function PlanAktarSheet({ozet,bekleme,degisim,plan,urunler,onKaydet,onClose,bekle}){
+  const yerel=ms=>{ const d2=new Date(ms); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset());
+    return d2.toISOString().slice(0,16); };
+  const yuvarla=ms=>{ const d2=new Date(ms); d2.setSeconds(0,0);
+    d2.setMinutes(Math.ceil(d2.getMinutes()/15)*15); return d2.getTime(); };
+  const [bas,setBas]=useState(()=>yerel(yuvarla(Date.now()+15*60000)));
+  const basMs=new Date(bas).getTime();
+  const takvim=useMemo(()=>planTakvim(ozet,basMs,bekleme,degisim,plan),
+    [ozet,basMs,bekleme,degisim,plan]);
+  const son=takvim.length?Math.max.apply(null,takvim.map(x=>new Date(x.bitis).getTime())):basMs;
+  const makSay={}; takvim.forEach(x=>{ const k=x.makineAd||x.makineId||"?"; makSay[k]=(makSay[k]||0)+1; });
+  const makinesiz=takvim.filter(x=>!x.makineId).length;
+  const gunBtn=(sa,lbl)=>h("button",{onClick:()=>{ const d2=new Date();
+      d2.setSeconds(0,0); d2.setMinutes(0); d2.setHours(d2.getHours()+sa);
+      setBas(yerel(d2.getTime())); },style:{...GS.ibtn,fontSize:12}},lbl);
+  const yarin=(sa)=>h("button",{onClick:()=>{ const d2=new Date();
+      d2.setDate(d2.getDate()+1); d2.setHours(sa,0,0,0); setBas(yerel(d2.getTime())); },
+    style:{...GS.ibtn,fontSize:12}},"yarın "+sa+":00");
+  return h(Sheet,{ik:"📅",hex:"#0e8fce",baslik:"Üretim planına taşı",
+    alt:takvim.length+" tabla · "+Object.keys(makSay).length+" makine",onClose,
+    cta:bekle?"⏳…":("Takvime yaz · "+takvim.length+" tabla"),
+    disabled:!takvim.length||!!makinesiz||bekle,
+    onCta:()=>onKaydet(takvim)},
+    h("div",{className:"lbl",style:{marginBottom:8}},"Ne zaman başlasın"),
+    h("input",{type:"datetime-local",value:bas,onChange:e=>setBas(e.target.value),
+      style:{...inp,width:"100%",marginBottom:10,fontWeight:800}}),
+    h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}},
+      gunBtn(1,"1 saat sonra"),gunBtn(3,"3 saat sonra"),yarin(8),yarin(18)),
+    makinesiz?h("div",{style:{...GS.card,padding:"11px 13px",marginBottom:12,
+      background:"#fff7ed",border:"1px solid #fed7aa",fontSize:12,fontWeight:800,color:"#9a3412"}},
+      "⚠ "+makinesiz+" tabla için gerçek makine yok — makine sayısını park kadar düşür"):null,
+    h("div",{style:{...GS.card,padding:"13px 14px",marginBottom:12}},
+      [["İlk tabla",takvim.length?(gTarih(new Date(takvim[0].baslangic))+" "+gSaat(new Date(takvim[0].baslangic))):"—"],
+       ["Son tabla biter",gTarih(son)+" "+gSaat(son)],
+       ["Toplam",planSure((son-basMs)/60000)],
+       ["Makara değişimi",num(ozet&&ozet.degisim)+" kez"]]
+        .map(([a2,b2],i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,
+          padding:"6px 0",borderTop:i?"1px solid "+GC.line:"none",fontSize:12.5}},
+          h("span",{style:{color:GC.mut,fontWeight:600}},a2),
+          h("span",{style:{fontWeight:800,color:i===1?"#0369a1":GC.txt}},b2)))),
+    h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:8}},"Makine dağılımı"),
+    h("div",{style:{...GS.card,padding:"11px 13px",marginBottom:12}},
+      Object.keys(makSay).map((k,i)=>h("div",{key:k,style:{display:"flex",justifyContent:"space-between",
+        padding:"5px 0",borderTop:i?"1px solid "+GC.line:"none",fontSize:12.5}},
+        h("span",{style:{fontWeight:700}},k),
+        h("span",{style:{fontWeight:800,color:GC.mut}},makSay[k]+" tabla")))),
+    h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:8}},
+      "İlk 12 tabla"),
+    h("div",{style:{...GS.card,padding:"11px 13px"}},
+      takvim.slice(0,12).map((x,i)=>h("div",{key:i,style:{display:"flex",gap:8,padding:"5px 0",
+        borderTop:i?"1px solid "+GC.line:"none",fontSize:11.5}},
+        h("span",{style:{color:GC.mut,fontWeight:700,width:88,flexShrink:0}},
+          gSaat(new Date(x.baslangic))+" · "+(x.makineAd||"—")),
+        h("span",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",
+          whiteSpace:"nowrap",fontWeight:700}},
+          x.urun+(x.parca&&x.parca!==x.urun?(" · "+x.parca):"")+(x.renkAd?(" · "+x.renkAd):"")),
+        h("span",{style:{fontWeight:800,flexShrink:0}},x.adet+" ad"))),
+      takvim.length>12?h("div",{style:{fontSize:11,color:GC.mut,textAlign:"center",paddingTop:8}},
+        "+"+(takvim.length-12)+" tabla daha"):null));
+}
+function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
   const urunler=(d&&d.stok)||[];
   const TURLER=useMemo(()=>{ const L=makTurler(makineler); return L.length?L:[{tur:"",say:1}]; },[makineler]);
   const turAd=useMemo(()=>TURLER.map(t=>t.tur),[TURLER]);
@@ -3156,6 +3262,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler}){
   const [renkler,setRenkler]=useState({});     // urunId -> [{renk:{rol:filamentId},adet}]
   const [renkAc,setRenkAc]=useState(null);     // renk çeşidi sayfası açık ürün
   const [degisim,setDegisim]=useState(PLAN_DEGISIM_DK);   // makara değişimi (dk)
+  const [aktarAc,setAktarAc]=useState(false);            // takvime taşıma sayfası
   const [dokum,setDokum]=useState(false);
   const hedefDk=num(gun)*1440+num(saat)*60;
   /* ürün hangi türlerde basılabiliyor — hedefe göre temsilci değer seçilir */
@@ -3206,7 +3313,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler}){
   /* hedef makine türü sırasını belirler; kısıtlı makine sayısı önce iyi türe gider */
   const turSira=useMemo(()=>planTurSira(TURLER,BMT,mod==="adet"?secimAdet:oranlar,hedef),
     [TURLER,BMT,JSON.stringify(sec),JSON.stringify(renkler),hedef,mod]);
-  const makList=useMemo(()=>planMakineler(TURLER,makine,turSira),[TURLER,makine,turSira]);
+  const makList=useMemo(()=>planMakineler(TURLER,makine,turSira,makineler),[TURLER,makine,turSira,makineler]);
   const parkOzet=useMemo(()=>{ const m={}; makList.forEach(x=>{ m[x.tur]=(m[x.tur]||0)+1; });
     return Object.keys(m).sort((a,b2)=>m[b2]-m[a]).map(t=>m[t]+" × "+(t||"makine")).join(" · "); },[makList]);
   const kap=useMemo(()=>mod==="sure"?planKapasite(oranlar,BMT,turAd,makList,bekleme,hedefDk,filamentler,hedef,degisim):null,
@@ -3214,6 +3321,16 @@ function PlanlamaAraci({d,plan,makineler,filamentler}){
   const ozet=mod==="adet"?(secili.length?planOzet(secimAdet,BMT,turAd,makList,bekleme,filamentler,hedef,degisim):null):(kap&&kap.ozet);
   const sonuc=mod==="adet"?secimAdet:((kap&&kap.secim)||[]);
   const bitis=ozet?new Date(Date.now()+ozet.makespanDk*60000):null;
+  /* takvime aktarılmış partiler — toplu ya da tek tek geri alınabilir */
+  const partiler=useMemo(()=>{ const g={};
+    (plan||[]).forEach(p2=>{ if(!p2.parti) return;
+      const o=g[p2.parti]=g[p2.parti]||{parti:p2.parti,say:0,basladi:0,ilk:0,son:0,adet:0,urun:{}};
+      o.say++; o.adet+=num(p2.adet); if(p2.basladi) o.basladi++;
+      o.urun[p2.ad||"?"]=(o.urun[p2.ad||"?"]||0)+1;
+      const b2=new Date(p2.baslangic).getTime()||0;
+      if(b2&&(!o.ilk||b2<o.ilk)) o.ilk=b2;
+      if(b2+num(p2.sureDk)*60000>o.son) o.son=b2+num(p2.sureDk)*60000; });
+    return Object.values(g).sort((x,y)=>y.ilk-x.ilk).slice(0,6); },[plan]);
   const st=(v,l,renk)=>h("div",{style:{...GS.card,padding:"12px 13px"}},
     h("div",{style:{fontSize:17,fontWeight:800,color:renk||GC.txt,lineHeight:1.15}},v),
     h("div",{style:{fontSize:11,color:GC.mut,marginTop:3,fontWeight:600}},l));
@@ -3408,6 +3525,12 @@ function PlanlamaAraci({d,plan,makineler,filamentler}){
               h("span",{style:{fontSize:14,fontWeight:800,flexShrink:0}},x.adet+" ad"),
               h("span",{style:{fontSize:12,fontWeight:700,color:GC.mut,flexShrink:0,width:78,textAlign:"right"}},
                 planSure(o1.baskiDk))); })),
+        /* — planı üretim takvimine taşı — */
+        h("button",{onClick:()=>setAktarAc(true),disabled:bekle,
+          style:{width:"100%",padding:"13px",borderRadius:13,marginBottom:10,
+            background:"#0e8fce",color:"#fff",fontSize:14,fontWeight:800,
+            border:"1px solid #0e8fce",opacity:bekle?.6:1}},
+          "📅 Üretim planına taşı · "+ozet.tabla+" tabla"),
         h("button",{onClick:()=>setDokum(v=>!v),style:{...GS.ibtn,width:"100%",padding:"11px",fontWeight:800}},
           dokum?"▲ Makine yükünü gizle":"▼ Makine yükü ve tabla listesi"),
         dokum?h("div",{style:{...GS.card,padding:"13px 14px",marginTop:10}},
@@ -3432,6 +3555,42 @@ function PlanlamaAraci({d,plan,makineler,filamentler}){
             h("span",{style:{fontWeight:800,width:74,textAlign:"right",flexShrink:0}},planSure(j.baski)))),
           ozet.isler.length>40?h("div",{style:{fontSize:11,color:GC.mut,textAlign:"center",paddingTop:8}},
             "+"+(ozet.isler.length-40)+" tabla daha"):null):null),
+    /* — takvime aktarılmış partiler: toplu ya da tek tek geri alma — */
+    partiler.length?h("div",{style:{...GS.card,padding:"13px 14px",marginTop:14}},
+      h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:9}},
+        "📅 Üretim planına taşınanlar"),
+      partiler.map((g,i)=>{ const ur=Object.keys(g.urun);
+        return h("div",{key:g.parti,style:{padding:"9px 0",
+          borderTop:i?"1px solid "+GC.line:"none"}},
+        h("div",{style:{display:"flex",alignItems:"center",gap:9}},
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:12.5,fontWeight:800,overflow:"hidden",
+              textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+              g.say+" tabla · "+g.adet+" ad"+(g.basladi?(" · "+g.basladi+" başladı"):"")),
+            h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:600,marginTop:1,
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+              (g.ilk?(gTarih(g.ilk)+" "+gSaat(g.ilk)):"—")
+              +" → "+(g.son?(gTarih(g.son)+" "+gSaat(g.son)):"—")
+              +" · "+ur.slice(0,3).join(", ")+(ur.length>3?(" +"+(ur.length-3)):""))),
+          h("button",{onClick:()=>onGeriAl&&onGeriAl(g.parti),disabled:bekle||g.basladi>=g.say,
+            style:{...GS.ibtn,flexShrink:0,padding:"6px 11px",fontSize:12,fontWeight:800,
+              color:g.basladi>=g.say?GC.mut:GC.kirmiziB,
+              opacity:(bekle||g.basladi>=g.say)?.5:1}},
+            g.basladi>=g.say?"başladı":"geri al")),
+        /* tek tek geri alma */
+        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginTop:7}},
+          (plan||[]).filter(p2=>p2.parti===g.parti).slice(0,8).map(p2=>
+            h("button",{key:p2.id,onClick:()=>onGeriAl&&onGeriAl(g.parti,p2.id),
+              disabled:bekle||!!p2.basladi,
+              style:{...GS.ibtn,fontSize:11,padding:"4px 8px",
+                color:p2.basladi?GC.mut:GC.txt,opacity:p2.basladi?.5:1}},
+              (p2.basladi?"▶ ":"✕ ")+gSaat(new Date(p2.baslangic))+" "
+              +String(p2.ad||"").slice(0,10)))),
+        ); })):null,
+    aktarAc&&ozet?h(PlanAktarSheet,{ozet,bekleme,degisim,plan,urunler,bekle,
+      onClose:()=>setAktarAc(false),
+      onKaydet:async takvim=>{ if(onAktar){ await onAktar(takvim,urunler); }
+        setAktarAc(false); }}):null,
     renkAc?h(RenkSecSheet,{u:renkAc,roller:uRoller[renkAc.id]||[],filamentler,
       mevcut:renkler[renkAc.id]||[],onClose:()=>setRenkAc(null),
       onKaydet:L=>{ const id=renkAc.id;
@@ -3440,7 +3599,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler}){
         setSec(o=>({...o,[id]:L.reduce((s2,v)=>s2+Math.max(0,Math.round(num(v.adet))),0)}));
         setRenkAc(null); }}):null);
 }
-function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,fotoMap}){
+function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeriAl,bekle,fotoMap}){
   const GERI_MS=4*3600*1000;   // üretim hattı her zaman 4 saat geriden başlar
   const gunBasi=t=>{ const d2=new Date(t); d2.setHours(0,0,0,0); return d2.getTime(); };
   const [bas,setBas]=useState(()=>gunBasi(Date.now()-GERI_MS));
@@ -3565,7 +3724,7 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,fotoMap}){
   const sekmeler=h("div",{style:{display:"flex",gap:8,marginBottom:14}},
     sekmeBtn("plan","📅 Üretim hattı"),sekmeBtn("planlama","🧮 Planlama"));
   if(arac==="planlama") return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
-    sekmeler,h(PlanlamaAraci,{d,plan,makineler,filamentler}));
+    sekmeler,h(PlanlamaAraci,{d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}));
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
     sekmeler,
     filsiz.length?h("button",{onClick:()=>setFilsizAcik(true),style:{display:"block",width:"100%",textAlign:"left",padding:"10px 13px",borderRadius:12,
@@ -5775,6 +5934,27 @@ function App(){
   async function makineSil(mk){ if(!mk||!mk.id||isBekle) return; if(!confirm("🗑 "+(mk.ad||"makine")+" silinsin mi?")) return; setIsBekle(true);
     try{ await remove("makineler",mk.id); setModal(null); say("Makine silindi"); }
     catch(e){ console.error(e); say("Silinemedi"); } finally{ setIsBekle(false); } }
+  /* 📅 planlama sonucunu üretim takvimine yazar — tek parti, tek dokunuşla geri alınır */
+  async function planAktar(takvim,urunListe){ if(!takvim||!takvim.length||isBekle) return null;
+    const parti="pt"+uid();
+    setIsBekle(true);
+    let n=0;
+    try{ for(const x of takvim){ await save("plan",planKayit(x,parti,urunListe||urunler)); n++; }
+      say(n+" tabla üretim planına eklendi"); return parti; }
+    catch(e){ console.error(e); say(n?("Yarım kaldı · "+n+" tabla yazıldı"):"Aktarılamadı"); return parti; }
+    finally{ setIsBekle(false); } }
+  /* aktarılan partiyi geri alır — başlamış baskılara dokunmaz */
+  async function planGeriAl(parti,tekId){ if(isBekle) return;
+    const hedef=(plan||[]).filter(p2=>tekId?(p2.id===tekId):(p2.parti===parti));
+    const silinir=hedef.filter(p2=>!p2.basladi);
+    const basladi=hedef.length-silinir.length;
+    if(!silinir.length){ say(basladi?"Baskılar başlamış — geri alınamaz":"Kayıt bulunamadı"); return; }
+    if(!tekId&&!confirm(silinir.length+" tabla üretim planından kaldırılacak."
+      +(basladi?("\n"+basladi+" tanesi başlamış, dokunulmayacak."):"")+"\n\nOnaylıyor musun?")) return;
+    setIsBekle(true);
+    try{ for(const p2 of silinir) await remove("plan",p2.id);
+      say(silinir.length+" tabla geri alındı"); }
+    catch(e){ console.error(e); say("Geri alınamadı"); } finally{ setIsBekle(false); } }
   /* 🔤 marka kodunu değiştirir ve o markanın renklerini yeniden numaralar */
   async function filamentMarkaKod(marka,kod,plan){ if(isBekle) return; setIsBekle(true);
     try{ const L=(filamentler||[]).filter(f=>flAyni(flMarka(f),marka));
@@ -6076,6 +6256,7 @@ function App(){
   let ekran;
   if(view==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"}),onTalepSil:talepSil});
   else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,filamentler,ac:setModal,onTabla:tablaTopla,fotoMap,
+    bekle:isBekle,onAktar:planAktar,onGeriAl:planGeriAl,
     onFilAta:async(ids,fid)=>{ for(const id of ids){ await save("plan",{id,filamentId:fid}); }
       say(ids.length+" baskıya filament atandı"); }});
   else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap,onPlanSil:x=>isSil({p:x.p,durum:"bekliyor"}),bekle:isBekle,onFiyat:fiyatKaydet,anlasmaSay:anlasmalar.length});
