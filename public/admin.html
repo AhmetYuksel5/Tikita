@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L49";   // komuta (admin) deneme sürümü
+const SURUM="L50";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -241,7 +241,8 @@ const flGruplar=list=>{ const g={};
   return Object.keys(g).sort((a,b)=>g[b].length-g[a].length||a.localeCompare(b,"tr"))
     .map(m=>({marka:m,list:g[m].slice().sort((a,b)=>flKod(a).localeCompare(flKod(b),"tr")
       ||flRenk(a).localeCompare(flRenk(b),"tr")),
-      kg:g[m].reduce((s2,f)=>s2+num(f.stokKg),0),
+      kg:g[m].reduce((s2,f)=>s2+flMakaraKg(f),0),
+      makara:g[m].reduce((s2,f)=>s2+flMakara(f),0),
       kgFiyat:(()=>{ const v=g[m].map(f=>num(f.kgFiyat)).filter(x=>x>0);
         return v.length?Math.round(v.reduce((s2,x)=>s2+x,0)/v.length):0; })()})); };
 /* tür → marka → renk: iki katmanlı kırılım */
@@ -249,7 +250,8 @@ const flTurGrup=list=>{ const g={};
   (list||[]).forEach(f=>{ const t=flTur(f)||FL_TUR_YOK; (g[t]=g[t]||[]).push(f); });
   const sira=t=>{ if(t===FL_TUR_YOK) return 99; const i=FL_TUR.indexOf(t); return i<0?50:i; };
   return Object.keys(g).sort((a,b)=>sira(a)-sira(b)||a.localeCompare(b,"tr"))
-    .map(t=>({tur:t,say:g[t].length,kg:g[t].reduce((s2,f)=>s2+num(f.stokKg),0),
+    .map(t=>({tur:t,say:g[t].length,kg:g[t].reduce((s2,f)=>s2+flMakaraKg(f),0),
+      makara:g[t].reduce((s2,f)=>s2+flMakara(f),0),
       markalar:flGruplar(g[t])})); };
 /* Filamentleri marka koduyla baştan numaralar — karışmış kodları toparlar.
    yalnizMarka verilirse sadece o markanın renkleri yeniden numaralanır. */
@@ -475,8 +477,18 @@ const filRoller=list=>{ let s=0;
 const makTur=mk=>String((mk&&mk.tur)||"").trim()||"Diğer";   // "PS1 Combo " → "PS1 Combo"
 /* 🧵 Makinede şu an takılı makaralar — plan bunu bilirse gereksiz değişim saymaz */
 const MAK_YUVA=4;                                            // AMS yuva sayısı
-const makTakili=mk=>{ const L=(mk&&mk.takiliFilament)||[];
-  return (Array.isArray(L)?L:[]).filter(x=>typeof x==="string"&&x).slice(0,MAK_YUVA); };
+const makTakili=mk=>makMakaralar(mk).map(x=>x.filamentId);
+/* 🧵 Makinedeki makaralar. Yeni biçim takiliMakara; eski takiliFilament dizisi de
+   okunur, oradan gelenler "ölçülmemiş" (kalanı bilinmeyen) sayılır. */
+function makMakaralar(mk){
+  const L=mk&&mk.takiliMakara;
+  if(Array.isArray(L)) return L.filter(x=>x&&typeof x.filamentId==="string"&&x.filamentId)
+    .slice(0,MAK_YUVA).map(x=>({filamentId:x.filamentId,tam:!!x.tam,
+      harcanan:Math.max(0,num(x.harcanan)),tarih:x.tarih||""}));
+  const E=(mk&&mk.takiliFilament)||[];
+  return (Array.isArray(E)?E:[]).filter(x=>typeof x==="string"&&x).slice(0,MAK_YUVA)
+    .map(id=>({filamentId:id,tam:false,harcanan:0,tarih:""}));
+}
 const makTakiliSet=mk=>{ const o={}; makTakili(mk).forEach(id=>{ o[id]=1; }); return o; };
 /* Bir makinede planlama anında hangi makaraların takılı olacağı:
    1) kuyruğundaki SON işin filamentleri (yeni plan onun arkasına diziliyor)
@@ -1109,6 +1121,46 @@ const PLAN_DEGISIM_DK=10;                                  // makara başına or
    Bu yüzden ihtiyaç makine makine hesaplanır, sonra toplanır. */
 const RULO_GRAM=1000;                                      // varsayılan makara ağırlığı (gram)
 const flRuloGram=fl=>{ const g=num(fl&&fl.ruloGram); return g>0?g:RULO_GRAM; };
+/* 📦 DEPO MAKARA OLARAK SAYILIR.
+   Filament kilo ile değil makara ile alınır ve makara ile sayılır. Bir makara
+   depodan ancak MAKİNEYE TAKILDIĞI anda düşer — basılan gram depoyu değil, o
+   makinedeki makarayı eritir. Kapalı takılan makarada kalan tahmin edilebilir;
+   hâlihazırda makinede duran açık makarada kalan bilinmez. */
+const flMakara=fl=>Math.max(0,Math.round(num(fl&&fl.stokMakara)));
+const flMakaraKg=fl=>Math.round(flMakara(fl)*flRuloGram(fl))/1000;
+const flMakaraFiyat=fl=>Math.round(num(fl&&fl.kgFiyat)*flRuloGram(fl)/10)/100;
+/* makinedeki bir makarada kalan gram — null: ölçülmedi, bilinmiyor */
+const makKalan=(sl,fl)=>(sl&&sl.tam)?Math.max(0,flRuloGram(fl)-num(sl.harcanan)):null;
+const makBitmek=(sl,fl)=>{ const k=makKalan(sl,fl); return k!=null&&k<=flRuloGram(fl)*0.12; };
+/* bir makinenin makara dizisini güncelle — yuva sayısıyla sınırlı, temiz alanlar */
+const makaraYaz=L=>(L||[]).filter(x=>x&&x.filamentId).slice(0,MAK_YUVA)
+  .map(x=>({filamentId:x.filamentId,tam:!!x.tam,
+    harcanan:Math.round(Math.max(0,num(x.harcanan))),tarih:x.tarih||""}));
+/* basılan gramı o makineye takılı makaraya yaz; makara yoksa dizi olduğu gibi döner */
+function makaraHarca(mk,pay){
+  const L=makMakaralar(mk); let dokun=false;
+  /* eksi gram da geçerlidir — düzenlenen/silinen bir baskının tüketimi geri alınır */
+  (pay||[]).forEach(f=>{ if(!f||!f.filamentId||!num(f.gram)) return;
+    const sl=L.find(x=>x.filamentId===f.filamentId); if(!sl) return;
+    sl.harcanan=Math.max(0,num(sl.harcanan))+num(f.gram); dokun=true; });
+  return dokun?makaraYaz(L):null;
+}
+/* 🧵 bütün park + depo tek tabloda: nerede kaç makara var, hangisi bitmek üzere */
+function makaraDurum(makineler,filamentler){
+  const fl={}; (filamentler||[]).forEach(f=>{ if(f&&f.id) fl[f.id]=f; });
+  const out={}; const al=id=>(out[id]=out[id]||{filamentId:id,fl:fl[id]||null,
+    depo:fl[id]?flMakara(fl[id]):0,makinede:0,olculmeyen:0,biten:0,yerler:[]});
+  Object.keys(fl).forEach(al);
+  (makineler||[]).forEach(m=>{ makMakaralar(m).forEach(sl=>{
+    const r=al(sl.filamentId); const k=makKalan(sl,fl[sl.filamentId]);
+    r.makinede++; if(!sl.tam) r.olculmeyen++;
+    if(makBitmek(sl,fl[sl.filamentId])) r.biten++;
+    r.yerler.push({makineId:m.id,ad:m.ad||m.tur||"",tam:!!sl.tam,
+      harcanan:Math.round(num(sl.harcanan)),kalan:k}); }); });
+  const L=Object.values(out);
+  L.forEach(r=>{ r.toplam=r.depo+r.makinede; });
+  return L.sort((a,b)=>(b.makinede-a.makinede)||(b.depo-a.depo));
+}
 function makaraPlani(isler,filamentler){
   const flById={}; (filamentler||[]).forEach(f=>{ if(f&&f.id) flById[f.id]=f; });
   const ruloOf=id=>{ const f=flById[id]; return f?flRuloGram(f):RULO_GRAM; };
@@ -1286,9 +1338,12 @@ function planOzet(secim,BMT,turler,makList,bekleme,filamentler,hedef,degisimDk){
     const k=f.filamentId||"?"; gram[k]=(gram[k]||0)+num(f.gram); }); });
   const filList=Object.keys(gram).map(id=>{ const f=(filamentler||[]).find(x=>x.id===id)||null;
     const kg=gram[id]/1000;
+    const dp=f?flMakara(f):null;                       /* depodaki kapalı makara */
+    const gerek=f?Math.ceil(gram[id]/flRuloGram(f)):null;
     return {id,ad:f?(f.ad||"Filament"):"filament seçilmemiş",gram:gram[id],kg,kgFiyat:num(f&&f.kgFiyat),
-      tutar:kg*num(f&&f.kgFiyat),stokKg:f?num(f.stokKg):null,
-      yeter:(f&&num(f.stokKg)>0)?(num(f.stokKg)>=kg):null}; })
+      tutar:kg*num(f&&f.kgFiyat),depo:dp,gerekMakara:gerek,
+      stokKg:f?flMakaraKg(f):null,
+      yeter:(dp!=null&&dp>0)?(dp>=gerek):null}; })
     .sort((a,b)=>b.gram-a.gram);
   const filTutar=filList.reduce((s2,f)=>s2+f.tutar,0);
   const makTutar=baskiDk/60*SAAT_MALIYET;
@@ -2660,12 +2715,12 @@ function GiderYonetimSheet({giderler,sabitler,filamentler,sarflar,b0,b1,onKaydet
       h("div",{className:"lbl",style:{marginBottom:8}},"Hangi filament"),
       h("select",{value:duzen.hedefId||"",onChange:e=>setDuzen(o=>({...o,hedefId:e.target.value})),style:{...inp,fontSize:15,marginBottom:12}},
         h("option",{value:""},"— stoğa işleme —"),
-        (filamentler||[]).slice().sort((x,y)=>(x.ad||"").localeCompare(y.ad||"","tr")).map(f2=>h("option",{key:f2.id,value:f2.id},(flKod(f2)?flKod(f2)+" · ":"")+(flAd(f2)||f2.ad)+" · "+(Math.round(num(f2.stokKg)*10)/10)+" kg"))),
+        (filamentler||[]).slice().sort((x,y)=>(x.ad||"").localeCompare(y.ad||"","tr")).map(f2=>h("option",{key:f2.id,value:f2.id},(flKod(f2)?flKod(f2)+" · ":"")+(flAd(f2)||f2.ad)+" · "+flMakara(f2)+" makara"))),
       duzen.hedefId?h(React.Fragment,null,
-        h("div",{className:"lbl",style:{marginBottom:8}},"Kaç kg"),
-        h("input",{type:"number",inputMode:"decimal",step:"any",value:duzen.miktar||"",onChange:e=>setDuzen(o=>({...o,miktar:e.target.value})),style:{...inp,marginBottom:12}}),
+        h("div",{className:"lbl",style:{marginBottom:8}},"Kaç makara"),
+        h("input",{type:"text",inputMode:"numeric",value:duzen.miktar||"",onChange:e=>setDuzen(o=>({...o,miktar:e.target.value})),style:{...inp,marginBottom:12}}),
         (num(duzen.miktar)>0&&num(duzen.tutar)>0)?h("div",{style:{textAlign:"right",fontSize:12,fontWeight:800,color:"var(--violet)",marginBottom:12}},
-          "Bu alım "+tlk(num(duzen.tutar)/num(duzen.miktar))+"/kg · stok ve ortalama güncellenecek"):null):null):null,
+          "Bu alım "+tlk(num(duzen.tutar)/num(duzen.miktar))+"/makara · depo ve ortalama güncellenecek"):null):null):null,
     (duzen.tur==="Sarf malzemesi alımı"&&!duzen.id)?h(React.Fragment,null,
       h("div",{className:"lbl",style:{marginBottom:8}},"Hangi malzeme"),
       h("select",{value:duzen.hedefId||"",onChange:e=>setDuzen(o=>({...o,hedefId:e.target.value})),style:{...inp,fontSize:15,marginBottom:12}},
@@ -3932,9 +3987,9 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
               h("div",{style:{fontSize:10.5,color:f.yeter===false?"#b91c1c":GC.mut,fontWeight:f.yeter===false?800:600,marginTop:1}},
                 /* miktar sağ sütunda — burada fiyat ve stok durur, tekrar etmesin */
                 (f.kgFiyat>0?(tlk(f.kgFiyat)+"/kg"):"kg fiyatı girilmemiş")
-                /* stok bilgisi hep yazılır; ⚠ yalnız stok pozitif ve YETMİYORSA —
-                   defteri tutulmayan filamentte (eksi bakiye) her planı kırmızıya boyamaz */
-                +(f.stokKg!=null?(" · stokta "+kgYaz(f.stokKg)):"")
+                /* depo makara ile sayılır; ⚠ yalnız depo dolu ve YETMİYORSA —
+                   hiç sayım girilmemiş filamentte her planı kırmızıya boyamaz */
+                +(f.depo!=null?(" · depoda "+f.depo+" makara"):"")
                 +(f.yeter===false?" · ⚠ yetmiyor":""))),
             h("span",{style:{fontSize:13.5,fontWeight:800,flexShrink:0,color:f.yeter===false?GC.kirmiziB:GC.txt}},
               kgYaz(f.kg)),
@@ -3958,16 +4013,24 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
             h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:600,marginBottom:9,lineHeight:1.45}},
               "Aynı filament birkaç makinede aynı anda döndüğü için her makineye ayrı makara takılır. "
               +"Toplam gramı ruloya bölmek "+mk.naifTop+" rulo derdi."),
-            mk.filList.map((f,i)=>h("div",{key:f.filamentId||i,style:{display:"flex",alignItems:"center",gap:9,
+            mk.filList.map((f,i)=>{ const fk=(filamentler||[]).find(x=>x&&x.id===f.filamentId);
+              const dp=fk?flMakara(fk):0, ac=Math.max(0,f.rulo-dp);
+              return h("div",{key:f.filamentId||i,style:{display:"flex",alignItems:"center",gap:9,
               padding:"7px 0",borderTop:i?"1px solid "+GC.line:"none"}},
               h("div",{style:{flex:1,minWidth:0}},
                 h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",
                   textOverflow:"ellipsis",whiteSpace:"nowrap"}},flAdi(f.filamentId)),
-                h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:600,marginTop:1}},
-                  kgYaz(f.gram/1000)+" · "+f.makineSay+" makinede · makara "
-                  +(Math.round(f.ruloGram/10)/100)+" kg")),
+                h("div",{style:{fontSize:10.5,fontWeight:600,marginTop:1,
+                  color:ac>0?"#b91c1c":GC.mut}},
+                  kgYaz(f.gram/1000)+" · "+f.makineSay+" makinede · depoda "+dp
+                  +(ac>0?(" · ⚠ "+ac+" makara al"):" · yeter"))),
               h("span",{style:{fontSize:15,fontWeight:800,color:"#7c46e6",flexShrink:0}},f.rulo),
-              h("span",{style:{fontSize:11,fontWeight:700,color:GC.mut,flexShrink:0}},"rulo"))),
+              h("span",{style:{fontSize:11,fontWeight:700,color:GC.mut,flexShrink:0}},"rulo")); }),
+            (()=>{ const al=mk.filList.reduce((s2,f)=>{ const fk=(filamentler||[]).find(x=>x&&x.id===f.filamentId);
+                return s2+Math.max(0,f.rulo-(fk?flMakara(fk):0)); },0);
+              return al>0?h("div",{style:{marginTop:9,padding:"9px 11px",borderRadius:11,
+                background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12,fontWeight:800,
+                color:"#b91c1c"}},"⚠ Depo yetmiyor — "+al+" makara alınmalı"):null; })(),
             h("button",{onClick:()=>setMakaraAc(a2=>!a2),
               style:{...GS.ibtn,width:"100%",marginTop:10,fontSize:12,fontWeight:800}},
               makaraAc?"makine dökümünü gizle":"🖨 hangi makineye ne takılacak"),
@@ -4225,7 +4288,18 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
     sekmeler,
     filsiz.length?h("button",{onClick:()=>setFilsizAcik(true),style:{display:"block",width:"100%",textAlign:"left",padding:"10px 13px",borderRadius:12,
       background:"#fff7ed",border:"1px solid #fdba74",fontSize:12.5,fontWeight:700,color:"#9a3412",marginBottom:12}},
-      filsiz.length+" baskıda filament seçilmemiş · "+Math.round(filsizGram)+" gr stoktan düşülemedi ›"):null,
+      filsiz.length+" baskıda filament seçilmemiş · "+Math.round(filsizGram)+" gr izlenemiyor ›"):null,
+    /* 🧵 makinede bitmek üzere olan makaralar — kapalı takılanın kalanı hesaplanabiliyor */
+    (()=>{ const B=[];
+      (makineler||[]).forEach(m=>makMakaralar(m).forEach(sl=>{
+        const f=(filamentler||[]).find(x=>x&&x.id===sl.filamentId);
+        if(makBitmek(sl,f)) B.push((m.ad||m.tur||"?")+" · "+(f?(flRenk(f)||flAd(f)):"?")
+          +" ~"+Math.round(makKalan(sl,f))+" g"); }));
+      return B.length?h("div",{style:{padding:"10px 13px",borderRadius:12,
+        background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12.5,fontWeight:700,
+        color:"#b91c1c",marginBottom:12,lineHeight:1.5}},
+        "🧵 "+B.length+" makara bitmek üzere: "+B.slice(0,4).join(" · ")
+        +(B.length>4?(" +"+(B.length-4)):"")):null; })(),
     h("div",{style:{...GS.card,overflow:"hidden",marginBottom:16}},
       h("div",{ref:scrollRef,style:{overflowX:"auto",touchAction:"pan-x pan-y",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}},
         h("div",{style:{minWidth:LABEL_W+toplamW}},
@@ -4378,10 +4452,14 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
         basEk:h("button",{onClick:()=>{ setMkBilgi(null); ac({tip:"makineDuzen",mk:mkBilgi}); },title:"Düzenle",
           style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},h(Icn,{n:"kalem",c:"var(--cyan)",s:17}))},
         satir("Tür",mkBilgi.tur||"—"),
-        satir("🧵 Takılı makara",makTakili(mkBilgi).length
-          ?makTakili(mkBilgi).map(id=>{ const f=(filamentler||[]).find(x=>x.id===id);
-              return f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f))):"?"; }).join(" · ")
-          :"girilmemiş"),
+        makMakaralar(mkBilgi).length
+          ?makMakaralar(mkBilgi).map((sl,i2)=>{ const f=(filamentler||[]).find(x=>x.id===sl.filamentId);
+              const k=makKalan(sl,f);
+              return satir(i2?"":"🧵 Takılı makara",
+                (f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f))):"?")
+                +(k!=null?(" · ~"+Math.round(k)+" g"):" · ölçülmedi"),
+                makBitmek(sl,f)?GC.kirmiziB:null); })
+          :satir("🧵 Takılı makara","girilmemiş"),
         satir(donemAd+" baskı",dkYaz((tl.printMs||0)/60000)),
         satir(donemAd+" filament",gr>0?(gr.toLocaleString("tr")+" gr"):"—"),
         satir("Kayıp zaman",dkYaz((tl.kayipMs||0)/60000),tl.kayipMs>0?GC.kirmiziB:null),
@@ -4405,21 +4483,16 @@ function MakineYonetimSheet({makineler,onClose,onAc}){
           mk.tur?h("div",{style:{fontSize:11,color:"var(--mut)"}},mk.tur):null)),
       h("span",{style:{fontSize:15,color:"var(--mut2)",fontWeight:800}},"›"))):h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)"}},"Makine yok."));
 }
-function MakineDuzenSheet({mk,filamentler,onKaydet,onSil,bekle}){
+function MakineDuzenSheet({mk,filamentler,onKaydet,onSil,onMakara,bekle}){
   const duzen=!!(mk&&mk.id);
   const par=duzen?mkParca(mk):{no:"",ad:""};
   const [no,setNo]=useState(par.no);
   const [ad,setAd]=useState(par.ad);
   const [tur,setTur]=useState(duzen?(mk.tur||""):"");
-  /* 🧵 şu an takılı makaralar — planlama bunu bilirse gereksiz değişim saymaz */
-  const [takili,setTakili]=useState(()=>makTakili(mk));
-  const flList=(filamentler||[]).filter(f=>f&&(f.ad||"").trim());
-  const tikla=id=>setTakili(L=>L.indexOf(id)>=0?L.filter(x=>x!==id)
-    :(L.length>=MAK_YUVA?L:L.concat([id])));
+  const takili=makMakaralar(mk);
   return h(Sheet,{ik:duzen?null:"➕",hex:"#0e8fce",baslik:duzen?("Düzenle · "+(mk.ad||"")):"Yeni makine",onClose:()=>onKaydet(null),
     cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!ad.trim()||bekle,
-    onCta:()=>onKaydet({id:duzen?mk.id:null,no:no.trim(),ad:ad.trim(),tur:tur.trim(),
-      takiliFilament:takili})},
+    onCta:()=>onKaydet({id:duzen?mk.id:null,no:no.trim(),ad:ad.trim(),tur:tur.trim()})},
     h("div",{style:{display:"grid",gridTemplateColumns:"84px 1fr",gap:10,marginBottom:14}},
       h("div",null,
         h("div",{className:"lbl",style:{marginBottom:8}},"No"),
@@ -4429,38 +4502,101 @@ function MakineDuzenSheet({mk,filamentler,onKaydet,onSil,bekle}){
         h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Praga",style:inp}))),
     h("div",{className:"lbl",style:{marginBottom:8}},"Tür / model (ops.)"),
     h("input",{value:tur,onChange:e=>setTur(e.target.value),placeholder:"örn. Bambu P1S",style:{...inp,marginBottom:14}}),
-    /* — şu an takılı makaralar — */
-    h("div",{className:"lbl",style:{marginBottom:6}},"🧵 Şu an takılı makaralar"),
-    h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700,marginBottom:8,lineHeight:1.45}},
-      "En çok "+MAK_YUVA+" yuva. Planlama bunu bilirse ilk tabla için boşuna makara "
-      +"değişimi saymaz ve aynı renkleri bu makinede toplar."),
-    flList.length?h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:6}},
-      flList.map(f=>{ const on=takili.indexOf(f.id)>=0;
-        const dolu=!on&&takili.length>=MAK_YUVA;
-        return h("button",{key:f.id,onClick:()=>tikla(f.id),disabled:dolu,
-          style:{...GS.ibtn,fontSize:12,fontWeight:800,opacity:dolu?.4:1,
-            background:on?"#7c46e6":"#fff",color:on?"#fff":"var(--txt)",
-            borderColor:on?"#7c46e6":"var(--line)"}},
-          (flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f))); }))
-      :h("div",{style:{fontSize:12,color:"var(--mut)",fontWeight:700,marginBottom:6}},"Filament kaydı yok"),
-    h("div",{style:{fontSize:11.5,fontWeight:800,color:takili.length?"#7c46e6":"var(--mut)",
-      marginBottom:duzen?14:0}},
-      takili.length?(takili.length+" / "+MAK_YUVA+" yuva dolu"):"hiçbiri seçilmedi — makine boş sayılır"),
+    /* — makaralar ayrı sayfada: takmak depodan düşürür — */
+    duzen?h("button",{onClick:()=>onMakara(mk),style:{display:"flex",alignItems:"center",gap:10,
+      width:"100%",padding:13,borderRadius:13,marginBottom:14,textAlign:"left",
+      background:"var(--surf2)",border:"1px solid var(--line)"}},
+      h("span",{style:{fontSize:18,flexShrink:0}},"🧵"),
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800}},"Makaralar"),
+        h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:1,
+          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+          takili.length?(takili.map(sl=>{ const f=(filamentler||[]).find(x=>x&&x.id===sl.filamentId);
+            return f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f))):"?"; }).join(" · "))
+            :"yuvalar boş")),
+      h("span",{style:{fontSize:15,color:"var(--mut2)",fontWeight:800,flexShrink:0}},"›")):null,
     duzen?h("button",{onClick:()=>onSil(mk),style:{width:"100%",padding:"12px 0 2px",fontSize:12.5,fontWeight:800,color:"var(--red)"}},"Makineyi sil"):null);
 }
+/* 🧵 MAKARA — bir makinenin yuvaları. Depodan takılan makara depodan düşer;
+   makinede zaten duran açık makara depoya hiç girmemiştir, kalanı da bilinmez. */
+function MakaraSheet({mk,filamentler,bekle,onTak,onCikar,onClose}){
+  const [sec,setSec]=useState(-1);            // hangi yuvaya takılıyor
+  const [ara,setAra]=useState("");
+  const L=makMakaralar(mk);
+  const fById=id=>(filamentler||[]).find(x=>x&&x.id===id)||null;
+  const adi=f=>(flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?");
+  const flList=(filamentler||[]).filter(f=>f&&(f.ad||"").trim())
+    .filter(f=>!ara.trim()||(flAd(f)+" "+flKod(f)).toLocaleLowerCase("tr")
+      .indexOf(ara.trim().toLocaleLowerCase("tr"))>=0)
+    .sort((a,b)=>(flMakara(b)-flMakara(a))||flAd(a).localeCompare(flAd(b),"tr"));
+  const yuva=i=>{ const sl=L[i]||null; const f=sl?fById(sl.filamentId):null;
+    const kalan=sl?makKalan(sl,f):null;
+    const az=sl?makBitmek(sl,f):false;
+    return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 11px",
+      borderRadius:12,marginBottom:7,background:sl?"var(--surf2)":"var(--surf)",
+      border:"1px solid "+(az?"#fca5a5":(sl?"var(--line)":"var(--line)")),
+      borderStyle:sl?"solid":"dashed"}},
+      h("span",{style:{width:22,flexShrink:0,fontSize:11,fontWeight:800,color:"var(--mut2)",
+        textAlign:"center"}},i+1),
+      sl?h(React.Fragment,null,
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",
+            textOverflow:"ellipsis",whiteSpace:"nowrap"}},f?adi(f):"silinmiş filament"),
+          h("div",{style:{fontSize:11,fontWeight:700,marginTop:2,
+            color:az?"#b91c1c":(sl.tam?"#166534":"#9a3412")}},
+            sl.tam
+              ?("kapalı takıldı · kalan ~"+Math.round(kalan)+" g"+(az?" · bitmek üzere":""))
+              :("ölçülmedi · bu makaradan "+Math.round(num(sl.harcanan))+" g basıldı"))),
+        h("button",{onClick:()=>onCikar(mk,i),disabled:bekle,
+          style:{...GS.ibtn,flexShrink:0,fontSize:12,fontWeight:800,color:"#b91c1c",
+            borderColor:"#fca5a5"}},"Çıkar"))
+        :h("button",{onClick:()=>setSec(sec===i?-1:i),disabled:bekle,
+          style:{flex:1,textAlign:"left",fontSize:12.5,fontWeight:800,
+            color:sec===i?"#7c46e6":"var(--mut)",background:"none",border:"none",padding:0}},
+          sec===i?"filament seç ↓":"＋ Makara tak")); };
+  return h(Sheet,{ik:"🧵",hex:"#7c46e6",baslik:"Makaralar · "+((mk&&mk.ad)||""),
+    alt:L.length+" / "+MAK_YUVA+" yuva dolu",onClose,cta:"Kapat",onCta:onClose},
+    [0,1,2,3].slice(0,MAK_YUVA).map(yuva),
+    sec>=0?h("div",{style:{marginTop:12,paddingTop:12,borderTop:"1.5px solid var(--line)"}},
+      h("input",{value:ara,onChange:e=>setAra(e.target.value),placeholder:"filament ara",
+        style:{...inp,marginBottom:10}}),
+      flList.length?flList.slice(0,40).map(f=>{ const dp=flMakara(f);
+        return h("div",{key:f.id,style:{display:"flex",alignItems:"center",gap:7,
+          padding:"8px 0",borderTop:"1px solid var(--line)"}},
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",
+              textOverflow:"ellipsis",whiteSpace:"nowrap"}},adi(f)),
+            h("div",{style:{fontSize:10.5,fontWeight:700,color:dp>0?"var(--mut)":"var(--red)",
+              marginTop:1}},"depoda "+dp+" makara · "+Math.round(flRuloGram(f))+" g")),
+          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,true); },
+            disabled:bekle||dp<=0,
+            style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,opacity:dp>0?1:.35,
+              background:dp>0?"#7c46e6":"#fff",color:dp>0?"#fff":"var(--mut)",
+              borderColor:dp>0?"#7c46e6":"var(--line)"}},"📦 Depodan"),
+          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,false); },
+            disabled:bekle,
+            style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,
+              color:"#9a3412",borderColor:"#fed7aa"}},"🧵 Zaten takılı")); })
+        :h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",
+          fontSize:12.5,fontWeight:700}},"Filament yok")):null);
+}
 // 🧵 FİLAMENT YÖNETİMİ — ad + ₺/kg (maliyet için)
-function FilamentYonetimSheet({filamentler,onClose,onAc,onKodla,onStok,bekle}){
+function FilamentYonetimSheet({filamentler,makineler,onClose,onAc,onKodla,onStok,bekle}){
   const list=(filamentler||[]).slice();
-  const deger=list.reduce((s2,f2)=>s2+num(f2.stokKg)*num(f2.kgFiyat),0);
-  const kgTop=list.reduce((s2,f2)=>s2+num(f2.stokKg),0);
+  const deger=list.reduce((s2,f2)=>s2+flMakaraKg(f2)*num(f2.kgFiyat),0);
+  const depoTop=list.reduce((s2,f2)=>s2+flMakara(f2),0);
   const turler=flTurGrup(list);
   const kodsuz=flYenidenKodla(list);   // kodu marka önekine uymayanlar
-  const stoksuz=list.filter(f2=>num(f2.stokKg)<=0).length;
-  /* stok kg doğrudan bu listeden girilir — id → yazılan değer */
+  const stoksuz=list.filter(f2=>flMakara(f2)<=0).length;
+  /* makinelerde duran makaralar — depoda değil, ayrı sayılır */
+  const mkSay={}; (makineler||[]).forEach(m=>makMakaralar(m)
+    .forEach(sl=>{ mkSay[sl.filamentId]=(mkSay[sl.filamentId]||0)+1; }));
+  const mkTop=Object.values(mkSay).reduce((a,b2)=>a+b2,0);
+  /* depo makarası doğrudan bu listeden sayılır — id → yazılan değer */
   const [duz,setDuz]=useState({});
-  const yazi=fl=>{ const v=duz[fl.id]; return v!=null?v:(num(fl.stokKg)?String(num(fl.stokKg)):""); };
-  const degisti=fl=>duz[fl.id]!=null&&Math.abs(num(duz[fl.id])-num(fl.stokKg))>0.0005;
-  const satir=(fl,i)=>{ const dg=degisti(fl), kg=num(yazi(fl));
+  const yazi=fl=>{ const v=duz[fl.id]; return v!=null?v:(flMakara(fl)?String(flMakara(fl)):""); };
+  const degisti=fl=>duz[fl.id]!=null&&Math.max(0,Math.round(num(duz[fl.id])))!==flMakara(fl);
+  const satir=(fl,i)=>{ const dg=degisti(fl), mkr=Math.max(0,Math.round(num(yazi(fl))));
     return h("div",{key:fl.id||i,style:{display:"flex",alignItems:"center",gap:8,width:"100%",
       padding:"9px 10px",borderRadius:12,background:"var(--surf2)",
       border:"1px solid "+(dg?"#7c46e6":"var(--line)"),marginBottom:7}},
@@ -4474,20 +4610,20 @@ function FilamentYonetimSheet({filamentler,onClose,onAc,onKodla,onStok,bekle}){
           h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
             flRenk(fl)||flAd(fl)||"?")),
         h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut)",marginTop:2}},
-          (num(fl.kgFiyat)>0?(tl(fl.kgFiyat)+"/kg"):"fiyat yok")
-          +(num(fl.kgFiyat)>0&&num(fl.stokKg)>0?(" · "+tlk(num(fl.stokKg)*num(fl.kgFiyat))):"")
-          +" · "+Math.max(1,Math.round(flRuloGram(fl)))+" g/makara"))),
-    h("input",{value:yazi(fl),type:"text",inputMode:"decimal",placeholder:"0",
+          (num(fl.kgFiyat)>0?(tlk(flMakaraFiyat(fl))+"/makara"):"fiyat yok")
+          +" · "+Math.max(1,Math.round(flRuloGram(fl)))+" g"
+          +(mkSay[fl.id]?(" · makinede "+mkSay[fl.id]):"")))),
+    h("input",{value:yazi(fl),type:"text",inputMode:"numeric",placeholder:"0",
       onChange:e=>{ const v=e.target.value; setDuz(o=>({...o,[fl.id]:v})); },
-      style:{width:64,flexShrink:0,padding:"7px 8px",borderRadius:10,textAlign:"right",
+      style:{width:52,flexShrink:0,padding:"7px 8px",borderRadius:10,textAlign:"right",
         background:"var(--surf)",border:"1px solid "+(dg?"#7c46e6":"var(--line)"),
         fontSize:13,fontWeight:800,
-        color:kg>0?"var(--violet)":"var(--red)"}}),
-    h("span",{style:{fontSize:11,fontWeight:800,color:"var(--mut)",flexShrink:0}},"kg"),
-    dg?h("button",{onClick:()=>onStok&&onStok(fl,kg),disabled:bekle,
+        color:mkr>0?"var(--violet)":"var(--red)"}}),
+    h("span",{style:{fontSize:11,fontWeight:800,color:"var(--mut)",flexShrink:0}},"makara"),
+    dg?h("button",{onClick:()=>onStok&&onStok(fl,mkr),disabled:bekle,
       style:{flexShrink:0,padding:"7px 10px",borderRadius:10,background:"#7c46e6",color:"#fff",
         fontSize:13,fontWeight:800,border:"none",opacity:bekle?.5:1}},"✓"):null); };
-  return h(Sheet,{ik:"🧵",hex:"#7c46e6",baslik:"Filamentler",alt:list.length+" çeşit · "+turler.length+" tür"+(kgTop>0?(" · "+kgYaz(kgTop)+" · "+tlk(deger)):"")+(stoksuz?(" · "+stoksuz+" stoksuz"):""),onClose,cta:"Kapat",onCta:onClose},
+  return h(Sheet,{ik:"🧵",hex:"#7c46e6",baslik:"Filamentler",alt:list.length+" çeşit · "+turler.length+" tür · depoda "+depoTop+" makara"+(mkTop?(" · makinede "+mkTop):"")+(deger>0?(" · "+tlk(deger)):"")+(stoksuz?(" · "+stoksuz+" boş"):""),onClose,cta:"Kapat",onCta:onClose},
     h("button",{onClick:()=>onAc({tip:"filamentDuzen",fl:null}),style:{width:"100%",padding:12,borderRadius:13,marginBottom:10,background:"var(--surf)",border:"1.5px dashed #7c46e6",color:"#7c46e6",fontSize:14,fontWeight:800}},"Yeni filament"),
     kodsuz.length?h("button",{onClick:()=>onKodla&&onKodla(kodsuz),disabled:bekle,
       style:{width:"100%",padding:"10px 12px",borderRadius:12,marginBottom:14,textAlign:"left",
@@ -4499,7 +4635,7 @@ function FilamentYonetimSheet({filamentler,onClose,onAc,onKodla,onStok,bekle}){
         h("span",{style:{fontSize:14,fontWeight:800,
           color:tg.tur===FL_TUR_YOK?"#9a3412":"#5b21b6"}},tg.tur),
         h("span",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",flex:1}},
-          tg.say+" çeşit"+(tg.kg>0?(" · "+kgYaz(tg.kg)):""))),
+          tg.say+" çeşit"+(tg.makara>0?(" · "+tg.makara+" makara"):""))),
       tg.markalar.map(g=>h("div",{key:g.marka,style:{marginBottom:12}},
         h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:7}},
           /* marka kodu — renkler bunun üzerinden numaralanır, dokununca değişir */
@@ -4509,7 +4645,7 @@ function FilamentYonetimSheet({filamentler,onClose,onAc,onKodla,onStok,bekle}){
               color:"var(--violet)",borderColor:"#d8ccff"}},flMarkaKod(list,g.marka)):null,
           h("span",{style:{fontSize:12.5,fontWeight:800,color:"var(--txt)",flex:1,minWidth:0,
             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-            g.marka+" · "+g.list.length+" renk"+(g.kg>0?(" · "+kgYaz(g.kg)):"")),
+            g.marka+" · "+g.list.length+" renk"+(g.makara>0?(" · "+g.makara+" makara"):"")),
           /* aynı markanın yeni rengi: tür, marka ve kg fiyatı hazır gelir */
           h("button",{onClick:()=>onAc({tip:"filamentDuzen",
             fl:{marka:g.marka==="Diğer"?"":g.marka,kgFiyat:g.kgFiyat,
@@ -4554,7 +4690,7 @@ function FilamentDuzenSheet({fl,filamentler,onKaydet,onSil,onAlim,bekle}){
   const [marka,setMarka]=useState(fl?flMarka(fl):"");
   const [renk,setRenk]=useState(duzen?flRenk(fl):"");
   const [kg,setKg]=useState((fl&&num(fl.kgFiyat)>0)?String(num(fl.kgFiyat)):"");
-  const [stokKg,setStokKg]=useState(duzen?String(num(fl.stokKg)||""):"");
+  const [stokMak,setStokMak]=useState(duzen?String(flMakara(fl)||""):"");
   /* makara ağırlığı — planlamada kaç rulo gerektiği buradan çıkar */
   const [rulo,setRulo]=useState(String(fl?flRuloGram(fl):RULO_GRAM));
   const [elleKod,setElleKod]=useState(duzen?flKod(fl):"");
@@ -4578,9 +4714,10 @@ function FilamentDuzenSheet({fl,filamentler,onKaydet,onSil,onAlim,bekle}){
     onClose:()=>onKaydet(null),
     cta:bekle?"⏳…":(duzen?"Kaydet":"Ekle"),disabled:!tamAd||!!cakisma||bekle,
     onCta:()=>onKaydet({id:duzen?fl.id:null,kod,markaKod:marka.trim()?markaKod:"",no:"",ad:tamAd,tur:tur.trim(),
-      marka:marka.trim(),renk:renk.trim(),kgFiyat:num(kg),stokKg:num(stokKg),
+      marka:marka.trim(),renk:renk.trim(),kgFiyat:num(kg),
+      stokMakara:Math.max(0,Math.round(num(stokMak))),
       ruloGram:Math.max(1,Math.round(num(rulo)||RULO_GRAM)),
-      sayim:duzen&&Math.abs(num(stokKg)-num(fl.stokKg))>0.0005})},
+      sayim:duzen&&Math.max(0,Math.round(num(stokMak)))!==flMakara(fl)})},
     /* — tür: en üst sınıf — */
     h("div",{className:"lbl",style:{marginBottom:8}},"Tür"),
     h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}},
@@ -4631,22 +4768,26 @@ function FilamentDuzenSheet({fl,filamentler,onKaydet,onSil,onAlim,bekle}){
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:duzen?14:0}},
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"₺ / kg (ortalama)"),
         h("input",{type:"number",inputMode:"decimal",step:"any",value:kg,onChange:e=>setKg(e.target.value),placeholder:"örn. 700",style:inp})),
-      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Stok kg"),
-        h("input",{type:"number",inputMode:"decimal",step:"any",value:stokKg,onChange:e=>setStokKg(e.target.value),placeholder:"0",style:inp}))),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Depo · makara"),
+        h("input",{type:"text",inputMode:"numeric",value:stokMak,onChange:e=>setStokMak(e.target.value),placeholder:"0",style:inp}))),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12,alignItems:"end"}},
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Makara ağırlığı (gr)"),
         h("input",{type:"text",inputMode:"numeric",value:rulo,onChange:e=>setRulo(e.target.value),
           placeholder:String(RULO_GRAM),style:inp})),
       h("div",null)),
-    (duzen&&num(stokKg)>0&&num(kg)>0)?h("div",{style:{textAlign:"right",fontSize:12,fontWeight:800,color:"var(--violet)",marginBottom:12}},"Stok değeri "+tlk(num(stokKg)*num(kg))):null,
+    (num(kg)>0)?h("div",{style:{textAlign:"right",fontSize:12,fontWeight:800,color:"var(--violet)",marginBottom:12}},
+      tlk(num(kg)*Math.max(1,num(rulo)||RULO_GRAM)/1000)+"/makara"
+      +(Math.max(0,Math.round(num(stokMak)))>0
+        ?(" · depo "+tlk(Math.max(0,Math.round(num(stokMak)))*num(kg)*Math.max(1,num(rulo)||RULO_GRAM)/1000)):"")):null,
     duzen?h("div",{style:{display:"grid",gap:6,padding:"11px 13px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700,marginBottom:12}},
-      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayımdan beri düşülen"),h("b",null,(Math.round(num(fl.dusenKg)*100)/100)+" kg")),
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayımdan beri takılan"),h("b",null,Math.max(0,Math.round(num(fl.dusenMakara)))+" makara")),
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Bu filamentten basılan"),h("b",null,kgYaz(Math.max(0,num(fl.harcananGram))/1000))),
       h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayım"),h("b",null,fl.sayimTarih?fmtS(fl.sayimTarih):"—")),
       num(fl.sonFark)?h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Son sayım farkı"),
         h("b",{style:{color:num(fl.sonFark)<0?"var(--red)":"var(--green)"}},(num(fl.sonFark)>0?"+":"")+(Math.round(num(fl.sonFark)*100)/100)+" kg")):null,
-      Math.abs(num(stokKg)-num(fl.stokKg))>0.0005?h("div",{style:{display:"flex",justifyContent:"space-between",borderTop:"1px solid var(--line)",paddingTop:6}},
+      Math.max(0,Math.round(num(stokMak)))!==flMakara(fl)?h("div",{style:{display:"flex",justifyContent:"space-between",borderTop:"1px solid var(--line)",paddingTop:6}},
         h("span",{style:{color:"var(--mut)"}},"Kaydedince sayım farkı"),
-        h("b",{style:{color:(num(stokKg)-num(fl.stokKg))<0?"var(--red)":"var(--green)"}},((num(stokKg)-num(fl.stokKg))>0?"+":"")+(Math.round((num(stokKg)-num(fl.stokKg))*100)/100)+" kg")):null):null,
+        h("b",{style:{color:(Math.max(0,Math.round(num(stokMak)))-flMakara(fl))<0?"var(--red)":"var(--green)"}},((Math.max(0,Math.round(num(stokMak)))-flMakara(fl))>0?"+":"")+(Math.max(0,Math.round(num(stokMak)))-flMakara(fl))+" makara")):null):null,
     duzen?h("div",{style:{display:"flex",gap:8,marginTop:2}},
       h("button",{onClick:()=>onAlim&&onAlim(fl),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--cyan)",fontSize:13,fontWeight:800}},"Alım ekle"),
       h("button",{onClick:()=>onSil(fl),style:{flex:1,padding:12,borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},"Sil")):null);
@@ -4654,28 +4795,29 @@ function FilamentDuzenSheet({fl,filamentler,onKaydet,onSil,onAlim,bekle}){
 // 📦 FİLAMENT ALIMI — stok kg artar, kg fiyatı ağırlıklı ortalamaya gider, nakit çıkışı yazılır
 function FilamentAlimSheet({fl,giderler,onKaydet,onClose,bekle}){
   const bugun=()=>{ const d2=new Date(); d2.setMinutes(d2.getMinutes()-d2.getTimezoneOffset()); return d2.toISOString().slice(0,10); };
-  const [kg,setKg]=useState(""); const [tutar,setTutar]=useState(""); const [tarih,setTarih]=useState(bugun());
-  const a=Math.max(0,num(kg)), t=Math.max(0,num(tutar));
-  const yeniKg=a>0?t/a:0;
-  const eskiKg=Math.max(0,num(fl.stokKg)), eskiFiyat=num(fl.kgFiyat);
-  const ort=(eskiKg+a)>0?((eskiKg*eskiFiyat+a*yeniKg)/(eskiKg+a)):yeniKg;
+  const [mak,setMak]=useState(""); const [tutar,setTutar]=useState(""); const [tarih,setTarih]=useState(bugun());
+  const a=Math.max(0,Math.round(num(mak))), t=Math.max(0,num(tutar));
+  const R=flRuloGram(fl);                       /* bir makara kaç gram */
+  const alinanKg=a*R/1000;
+  const yeniKg=alinanKg>0?t/alinanKg:0;         /* bu alımın kg fiyatı */
+  const eskiMak=flMakara(fl), eskiKg=flMakaraKg(fl), eskiFiyat=num(fl.kgFiyat);
+  const ort=(eskiKg+alinanKg)>0?((eskiKg*eskiFiyat+alinanKg*yeniKg)/(eskiKg+alinanKg)):yeniKg;
   const gecmis=(giderler||[]).filter(g=>g.ref===fl.id&&g.stok).sort((x,y)=>new Date(y.tarih)-new Date(x.tarih)).slice(0,6);
-  return h(Sheet,{ik:"📦",hex:"#7c46e6",baslik:"Alım · "+(flAd(fl)||fl.ad||""),alt:"stok "+(Math.round(eskiKg*10)/10)+" kg",onClose,
+  return h(Sheet,{ik:"📦",hex:"#7c46e6",baslik:"Alım · "+(flAd(fl)||fl.ad||""),alt:"depoda "+eskiMak+" makara",onClose,
     cta:bekle?"⏳…":("Alımı işle · "+tlk(t)),disabled:a<=0||t<=0||bekle,
-    onCta:()=>onKaydet({filamentId:fl.id,ad:flAd(fl)||fl.ad||"",kg:a,tutar:t,tarih:new Date(tarih+"T12:00:00").toISOString(),yeniFiyat:Math.round(ort*100)/100})},
+    onCta:()=>onKaydet({filamentId:fl.id,ad:flAd(fl)||fl.ad||"",makara:a,kg:alinanKg,tutar:t,tarih:new Date(tarih+"T12:00:00").toISOString(),yeniFiyat:Math.round(ort*100)/100})},
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
-      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Kg"),
-        h("input",{type:"number",inputMode:"decimal",step:"any",value:kg,onChange:e=>setKg(e.target.value),style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Kaç makara"),
+        h("input",{type:"text",inputMode:"numeric",value:mak,onChange:e=>setMak(e.target.value),style:inp})),
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Ödenen toplam ₺"),
         h("input",{type:"number",inputMode:"decimal",step:"any",value:tutar,onChange:e=>setTutar(e.target.value),style:inp}))),
     h("div",{className:"lbl",style:{marginBottom:8}},"Tarih"),
     h("input",{type:"date",value:tarih,onChange:e=>setTarih(e.target.value),style:{...inp,fontSize:14,padding:"12px 10px",marginBottom:12}}),
     (a>0&&t>0)?h("div",{style:{display:"grid",gap:6,padding:"11px 13px",borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700,marginBottom:12}},
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Makara fiyatı"),h("b",null,tlk(t/a))),
       h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Bu alımın kg fiyatı"),h("b",null,tlk(yeniKg))),
       h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Yeni ortalama ₺/kg"),h("b",{style:{color:"var(--violet)"}},tlk(ort))),
-      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Yeni stok"),h("b",null,(Math.round((eskiKg+a)*10)/10)+" kg"))):null,
-    h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#eff8fd",border:"1px solid #a5d8f3",fontSize:11.5,fontWeight:700,color:"#0369a1",marginBottom:gecmis.length?12:0,lineHeight:1.5}},
-      "Stok artar, tutar 'Filament alımı' olarak nakit çıkışına yazılır — net kârdan düşmez."),
+      h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",{style:{color:"var(--mut)"}},"Yeni depo"),h("b",null,(eskiMak+a)+" makara · "+kgYaz(eskiKg+alinanKg)))):null,
     gecmis.length?h(React.Fragment,null,
       h("div",{className:"lbl",style:{marginBottom:6}},"Önceki alımlar"),
       gecmis.map((g,i)=>h("div",{key:g.id||i,style:{display:"flex",justifyContent:"space-between",padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:12}},
@@ -6374,16 +6516,23 @@ function App(){
         const bit=new Date(p2.gercekBaslangic||p2.baslangic).getTime()+num(p2.sureDk)*60000;
         if(bit>now2) continue;   // henüz bitmedi
         try{
-          for(const f of eski)   // düzenlenmiş → önceki düşümü geri al
-            await save("filament",{id:f.filamentId,stokKg:increment(num(f.gram)/1000),dusenKg:increment(-num(f.gram)/1000)});
-          for(const f of pay){ const kg=num(f.gram)/1000;
-            await save("filament",{id:f.filamentId,stokKg:increment(-kg),dusenKg:increment(kg)}); }
+          /* 📦 Depo makara sayar; basılan gram depodan DÜŞMEZ — makineye takılı
+             makarayı eritir. Filamentte yalnız toplam tüketim izi tutulur. */
+          for(const f of eski)   // düzenlenmiş → önceki tüketimi geri al
+            await save("filament",{id:f.filamentId,harcananGram:increment(-num(f.gram))});
+          for(const f of pay)
+            await save("filament",{id:f.filamentId,harcananGram:increment(num(f.gram))});
+          const mkK=(makineler||[]).find(x=>x&&x.id===p2.makineId);
+          if(mkK){ const ters=(eski||[]).map(f=>({filamentId:f.filamentId,gram:-num(f.gram)}));
+            const geri=ters.length?makaraHarca(mkK,ters):null;
+            const yeni=makaraHarca(geri?{...mkK,takiliMakara:geri}:mkK,pay)||geri;
+            if(yeni) await save("makineler",{id:mkK.id,takiliMakara:yeni}); }
           await save("plan",{id:p2.id,filDus:{list:pay,
             filamentId:pay.length===1?pay[0].filamentId:"",gram:pay.length===1?pay[0].gram:0,
             tarih:new Date().toISOString()}});
         }catch(e){ console.error("filament düşümü",e); }
       } },4000);
-    return ()=>clearTimeout(t); },[plan,filamentler]);
+    return ()=>clearTimeout(t); },[plan,filamentler,makineler]);
   // 💾 hesaplanan birim maliyeti ürüne yaz — pazarlamacı satış anında bu değeri kayda dondurur
   useEffect(()=>{ if(!d) return; const t=setTimeout(()=>{
     (d.stok||[]).forEach(u=>{ const m=num(u.maliyet); const eski=num(u.raw&&u.raw.maliyetGuncel);
@@ -6498,8 +6647,7 @@ function App(){
     try{ await remove("kullanici",u.id); setModal(null); say("Silindi · "+(u.ad||"")); }
     catch(e){ console.error(e); say("Silinemedi"); } finally{ setIsBekle(false); } }
   async function makineKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
-    try{ await save("makineler",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",ad:p2.ad,tur:p2.tur,
-      takiliFilament:(p2.takiliFilament||[]).slice(0,MAK_YUVA)});
+    try{ await save("makineler",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",ad:p2.ad,tur:p2.tur});
       setModal(null); say((p2.id?"Güncellendi":"Makine eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function makineSil(mk){ if(!mk||!mk.id||isBekle) return; if(!confirm("🗑 "+(mk.ad||"makine")+" silinsin mi?")) return; setIsBekle(true);
@@ -6552,19 +6700,50 @@ function App(){
     catch(e){ console.error(e); say("Numaralandırma yarım kaldı"); } finally{ setIsBekle(false); } }
   async function filamentKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ const onc=(filamentler||[]).find(x=>x.id===p2.id)||{};
-      const ek=p2.sayim?{dusenKg:0,sayimTarih:new Date().toISOString(),sonFark:Math.round((num(p2.stokKg)-num(onc.stokKg))*1000)/1000}:{};
+      const R=Math.max(1,Math.round(num(p2.ruloGram)||RULO_GRAM));
+      const mk=Math.max(0,Math.round(num(p2.stokMakara)));
+      const ek=p2.sayim?{dusenMakara:0,dusenKg:0,sayimTarih:new Date().toISOString(),
+        sonFark:mk-flMakara(onc)}:{};
       await save("filament",{...(p2.id?{id:p2.id}:{}),no:p2.no||"",kod:p2.kod||"",
         markaKod:p2.markaKod||"",ad:p2.ad,
-        tur:p2.tur||"",marka:p2.marka||"",renk:p2.renk||"",kgFiyat:p2.kgFiyat,stokKg:num(p2.stokKg),
-        ruloGram:Math.max(1,Math.round(num(p2.ruloGram)||RULO_GRAM)),...ek});
-      setModal(null); say(p2.sayim?("Sayım kaydedildi · "+p2.ad):((p2.id?"Güncellendi":"Filament eklendi")+" · "+p2.ad)); }
+        tur:p2.tur||"",marka:p2.marka||"",renk:p2.renk||"",kgFiyat:p2.kgFiyat,
+        stokMakara:mk,stokKg:Math.round(mk*R)/1000,   /* stokKg türetilmiştir — finans onu okur */
+        ruloGram:R,...ek});
+      setModal(null); say(p2.sayim?("Sayım · "+p2.ad+" "+mk+" makara"):((p2.id?"Güncellendi":"Filament eklendi")+" · "+p2.ad)); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
-  /* 🧵 listeden doğrudan stok girişi — sayım olarak kaydedilir */
-  async function filamentStok(fl,kg){ if(!fl||!fl.id||isBekle) return; setIsBekle(true);
-    try{ await save("filament",{id:fl.id,stokKg:num(kg),dusenKg:0,
-        sayimTarih:new Date().toISOString(),
-        sonFark:Math.round((num(kg)-num(fl.stokKg))*1000)/1000});
-      say("Sayım · "+(flAd(fl)||"filament")+" "+kgYaz(num(kg))); }
+  /* 🧵 listeden doğrudan depo sayımı — kaç MAKARA var */
+  async function filamentStok(fl,adet){ if(!fl||!fl.id||isBekle) return; setIsBekle(true);
+    try{ const mk=Math.max(0,Math.round(num(adet))), R=flRuloGram(fl);
+      await save("filament",{id:fl.id,stokMakara:mk,stokKg:Math.round(mk*R)/1000,
+        dusenMakara:0,dusenKg:0,sayimTarih:new Date().toISOString(),
+        sonFark:mk-flMakara(fl)});
+      say("Sayım · "+(flAd(fl)||"filament")+" "+mk+" makara"); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  /* 🧵 makarayı makineye tak. Depodan alınıyorsa depodan bir makara düşer;
+     makinede zaten duran açık makara ise depoya hiç girmemiştir, dokunulmaz. */
+  async function makaraTak(mk,yuva,filamentId,depodan){
+    if(!mk||!mk.id||!filamentId||isBekle) return; setIsBekle(true);
+    try{ const L=makMakaralar(mk).slice();
+      const i=Math.max(0,Math.min(MAK_YUVA-1,num(yuva)));
+      while(L.length<i) L.push(null);
+      L[i]={filamentId,tam:!!depodan,harcanan:0,tarih:new Date().toISOString()};
+      const yeni=makaraYaz(L.filter(Boolean));
+      await save("makineler",{id:mk.id,takiliMakara:yeni,takiliFilament:yeni.map(x=>x.filamentId)});
+      const f=(filamentler||[]).find(x=>x&&x.id===filamentId);
+      if(depodan&&f){ const R=flRuloGram(f), kalan=Math.max(0,flMakara(f)-1);
+        await save("filament",{id:f.id,stokMakara:kalan,stokKg:Math.round(kalan*R)/1000,
+          dusenMakara:increment(1),dusenKg:increment(R/1000)}); }
+      say((f?(flRenk(f)||flAd(f)):"Makara")+" takıldı"+(depodan?" · depodan düştü":" · ölçülmedi")); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  /* 🧵 makarayı çıkar — yarım kalan makara depoya geri sayılmaz, elde açık durur */
+  async function makaraCikar(mk,yuva){ if(!mk||!mk.id||isBekle) return;
+    const L=makMakaralar(mk); const sl=L[num(yuva)]; if(!sl) return;
+    const f=(filamentler||[]).find(x=>x&&x.id===sl.filamentId);
+    if(!confirm("🧵 "+((f&&(flRenk(f)||flAd(f)))||"Makara")+" çıkarılsın mı?")) return;
+    setIsBekle(true);
+    try{ const yeni=makaraYaz(L.filter((x,i)=>i!==num(yuva)));
+      await save("makineler",{id:mk.id,takiliMakara:yeni,takiliFilament:yeni.map(x=>x.filamentId)});
+      say("Makara çıkarıldı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function filamentSil(fl){ if(!fl||!fl.id||isBekle) return; if(!confirm("🗑 "+(fl.ad||"filament")+" silinsin mi?")) return; setIsBekle(true);
     try{ await remove("filament",fl.id); setModal(null); say("Filament silindi"); }
@@ -6806,11 +6985,18 @@ function App(){
     if(!confirm(msj)) return;
     try{ for(const p2 of bek) await save("plan",{id:p2.id,tablaAlindi:true});
       await save("plan",{id:x.p.id,basladi:true,gercekBaslangic:new Date().toISOString()});
-      /* 🧵 bu baskıyı başlatmak için gereken makaralar artık makinede takılı —
-         sistem bunu kendi öğreniyor, elle girilmesi gerekmiyor */
+      /* 🧵 bu baskıyı başlatmak için gereken makaralar artık makinede takılı.
+         Sistem bunu kendi öğrenir; zaten takılı olanın harcanan izi korunur,
+         yeni görünenler "ölçülmedi" olarak eklenir — depoya dokunulmaz, çünkü
+         makaranın depodan mı yoksa elde duran açık makaradan mı geldiği belli değil. */
       const fl=[...new Set(((x.p.filList||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
         .map(f=>f.filamentId)))].slice(0,MAK_YUVA);
-      if(x.p.makineId&&fl.length){ try{ await save("makineler",{id:x.p.makineId,takiliFilament:fl}); }
+      if(x.p.makineId&&fl.length){ try{
+        const mkK=(makineler||[]).find(y=>y&&y.id===x.p.makineId);
+        const onc=makMakaralar(mkK);
+        const yeni=fl.map(id=>onc.find(o=>o.filamentId===id)
+          ||{filamentId:id,tam:false,harcanan:0,tarih:new Date().toISOString()});
+        await save("makineler",{id:x.p.makineId,takiliMakara:makaraYaz(yeni),takiliFilament:fl}); }
         catch(e2){ console.error(e2); } }
       setModal(null);
       say((bek.length?(bek.length+" tabla toplandı · "):"")+"▶Başladı · "+(x.p.ad||"iş")); }
@@ -6833,7 +7019,12 @@ function App(){
       :("🗑 "+(x.p.ad||"iş")+" plandan silinsin mi?");
     if(!confirm(msj)) return;
     try{ const yedek={...x.p};
-      if(x.p.filDus&&x.p.filDus.filamentId){ try{ await save("filament",{id:x.p.filDus.filamentId,stokKg:increment(num(x.p.filDus.gram)/1000),dusenKg:increment(-num(x.p.filDus.gram)/1000)}); }catch(e){} }
+      if(x.p.filDus){ const geri=Array.isArray(x.p.filDus.list)?x.p.filDus.list
+          :(x.p.filDus.filamentId?[{filamentId:x.p.filDus.filamentId,gram:num(x.p.filDus.gram)}]:[]);
+        for(const g2 of geri){ try{ await save("filament",{id:g2.filamentId,harcananGram:increment(-num(g2.gram))}); }catch(e){} }
+        const mkK=(makineler||[]).find(y=>y&&y.id===x.p.makineId);
+        if(mkK&&geri.length){ const yz=makaraHarca(mkK,geri.map(g2=>({filamentId:g2.filamentId,gram:-num(g2.gram)})));
+          if(yz){ try{ await save("makineler",{id:mkK.id,takiliMakara:yz}); }catch(e){} } } }
       await remove("plan",x.p.id); setModal(null);
       setSilinen({p:yedek}); clearTimeout(silT.current); silT.current=setTimeout(()=>setSilinen(null),8000);   // 8 sn geri alınabilir
     }catch(e){ console.error(e); say("Silinemedi"); } }
@@ -6892,17 +7083,22 @@ function App(){
       onDuzen:()=>setModal({tip:"isEkle",kayit:modal.x.p})}),
     modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,filamentler,bekle:isBekle,onKaydet:isKaydet,kayit:modal.kayit||null,pre:modal.pre||null}),
     modal&&modal.tip==="makineYonet"&&h(MakineYonetimSheet,{makineler,onClose:()=>setModal(null),onAc:setModal}),
-    modal&&modal.tip==="makineDuzen"&&h(MakineDuzenSheet,{mk:modal.mk,filamentler,bekle:isBekle,onKaydet:makineKaydet,onSil:makineSil}),
-    modal&&modal.tip==="filamentYonet"&&h(FilamentYonetimSheet,{filamentler,bekle:isBekle,onClose:()=>setModal(null),onAc:setModal,onKodla:filamentKodla,onStok:filamentStok}),
+    modal&&modal.tip==="makineDuzen"&&h(MakineDuzenSheet,{mk:(makineler||[]).find(x=>x&&modal.mk&&x.id===modal.mk.id)||modal.mk,filamentler,bekle:isBekle,onKaydet:makineKaydet,onSil:makineSil,
+      onMakara:m=>setModal({tip:"makara",mkId:m.id,mk:m})}),
+    modal&&modal.tip==="filamentYonet"&&h(FilamentYonetimSheet,{filamentler,makineler,bekle:isBekle,onClose:()=>setModal(null),onAc:setModal,onKodla:filamentKodla,onStok:filamentStok}),
+    modal&&modal.tip==="makara"&&h(MakaraSheet,{mk:(makineler||[]).find(x=>x&&x.id===modal.mkId)||modal.mk,
+      filamentler,bekle:isBekle,onTak:makaraTak,onCikar:makaraCikar,onClose:()=>setModal(null)}),
     modal&&modal.tip==="filamentMarka"&&h(FilamentMarkaSheet,{marka:modal.marka,kod:modal.kod,
       filamentler,bekle:isBekle,onClose:()=>setModal(null),onKaydet:filamentMarkaKod}),
     modal&&modal.tip==="filamentDuzen"&&h(FilamentDuzenSheet,{fl:modal.fl,filamentler,bekle:isBekle,onKaydet:filamentKaydet,onSil:filamentSil,onAlim:f2=>setModal({tip:"filamentAlim",fl:f2})}),
     modal&&modal.tip==="filamentAlim"&&h(FilamentAlimSheet,{fl:modal.fl,giderler,bekle:isBekle,onClose:()=>setModal(null),
       onKaydet:async(a2)=>{ if(isBekle) return; setIsBekle(true);
-        try{ await save("filament",{id:a2.filamentId,stokKg:increment(a2.kg),kgFiyat:a2.yeniFiyat});
+        try{ await save("filament",{id:a2.filamentId,stokMakara:increment(a2.makara),
+            stokKg:increment(a2.kg),kgFiyat:a2.yeniFiyat});
           await save("gider",{tur:"Filament alımı",tutar:a2.tutar,tarih:a2.tarih,stok:true,oto:true,ref:a2.filamentId,
-            aciklama:a2.ad+" · "+a2.kg+" kg"});
-          setModal(null); say("Alım işlendi · stok arttı"); }
+            miktar:a2.makara,makara:a2.makara,kg:a2.kg,
+            aciklama:a2.ad+" · "+a2.makara+" makara"});
+          setModal(null); say("Alım işlendi · depo "+a2.makara+" makara arttı"); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }}),
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
     modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap,onRota:talepRota,onSil:talepSil}),
@@ -6918,9 +7114,14 @@ function App(){
           if(g.hedefId&&num(g.miktar)>0&&num(g.tutar)>0){
             const mk=num(g.miktar), bir=num(g.tutar)/mk;
             if(g.tur==="Filament alımı"){ const f2=(filamentler||[]).find(x=>x.id===g.hedefId);
-              if(f2){ const es=Math.max(0,num(f2.stokKg)); const ort=(es+mk)>0?((es*num(f2.kgFiyat)+mk*bir)/(es+mk)):bir;
-                await save("filament",{id:f2.id,stokKg:increment(mk),kgFiyat:Math.round(ort*100)/100});
-                ek.ref=f2.id; ek.miktar=mk; } }
+              /* miktar MAKARA sayısıdır; kg fiyatı makara ağırlığından çıkar */
+              if(f2){ const adet=Math.max(0,Math.round(mk)), R=flRuloGram(f2);
+                const alKg=adet*R/1000, birKg=alKg>0?num(g.tutar)/alKg:0;
+                const es=Math.max(0,flMakaraKg(f2));
+                const ort=(es+alKg)>0?((es*num(f2.kgFiyat)+alKg*birKg)/(es+alKg)):birKg;
+                await save("filament",{id:f2.id,stokMakara:increment(adet),stokKg:increment(alKg),
+                  kgFiyat:Math.round(ort*100)/100});
+                ek.ref=f2.id; ek.miktar=adet; ek.makara=adet; ek.kg=alKg; } }
             else if(g.tur==="Sarf malzemesi alımı"){ const sf=(sarflar||[]).find(x=>x.id===g.hedefId);
               if(sf){ const es=Math.max(0,num(sf.stokta)); const ort=(es+mk)>0?((es*num(sf.birimFiyat)+mk*bir)/(es+mk)):bir;
                 await save("sarf",{id:sf.id,stokta:increment(mk),birimFiyat:Math.round(ort*10000)/10000});
