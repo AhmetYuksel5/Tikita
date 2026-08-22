@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L50";   // komuta (admin) deneme sürümü
+const SURUM="L51";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1097,6 +1097,62 @@ function planTakvim(ozet,baslangicMs,bekleme,degisimDk,plan){
       bitis:new Date(bs+num(j.baski)*60000).toISOString()});
     saat[j.mak]=bs+num(j.baski)*60000+bk*60000; });
   return out;
+}
+/* 🔀 BİR TABLAYI BAŞKA MAKİNEYE TAŞI
+   Kural tek cümle: iş hedef makinenin kuyruğunun SONUNA geçer, kaynak makinede
+   açılan delik kapanır (sonraki işler tam o kadar öne çeker), başka hiçbir şey
+   değişmez. Başlamış iş taşınmaz — o makara fiilen makinenin üstünde.
+   Yalnız aynı TÜRDEKİ makineye taşınır: süre ve gram tarifte türe göre yazılı,
+   tür değişirse ikisinin de yeniden hesaplanması gerekirdi.
+   Dönen: kaydedilecek {id,makineId,baslangic} listesi (boşsa taşıma geçersiz). */
+function planTasi(plan,planId,hedefId,simdiMs){
+  const now=num(simdiMs)||Date.now();
+  const L=(plan||[]).filter(x=>x&&x.id);
+  const is=L.find(x=>x.id===planId);
+  if(!is||is.basladi||!hedefId||hedefId===is.makineId) return [];
+  const bas=x=>new Date(x.gercekBaslangic||x.baslangic).getTime()||0;
+  const bit=x=>bas(x)+num(x.sureDk)*60000;
+  const kuyruk=id=>L.filter(x=>x.makineId===id).slice().sort((a,b)=>bas(a)-bas(b));
+  const yaz=[];
+  /* — kaynak makine: delik kapansın — */
+  const K=kuyruk(is.makineId);
+  const i=K.findIndex(x=>x.id===is.id);
+  const sonra=K.slice(i+1).filter(x=>!x.basladi);
+  if(sonra.length){
+    /* kayma = taşınan işin süresi + arkasındaki boşluk (aralar aynen korunur) */
+    let kay=bas(sonra[0])-bas(is);
+    /* ne şimdinin ne de başlamış bir işin bitişinin gerisine düşsün */
+    const calisan=K.filter(x=>x.basladi).map(bit);
+    const taban=Math.max(now,calisan.length?Math.max.apply(null,calisan):0);
+    kay=Math.min(kay,Math.max(0,bas(sonra[0])-taban));
+    if(kay>0) sonra.forEach(x=>yaz.push({id:x.id,makineId:x.makineId,
+      baslangic:new Date(bas(x)-kay).toISOString()}));
+  }
+  /* — hedef makine: kuyruğun sonuna — */
+  const onceki=K.slice(0,i).pop();
+  const ara=onceki?Math.max(0,bas(is)-bit(onceki)):0;   /* işin önündeki boşluk korunur */
+  const H=kuyruk(hedefId);
+  const bosalir=H.length?Math.max.apply(null,H.map(bit)):0;
+  yaz.push({id:is.id,makineId:hedefId,
+    baslangic:new Date(Math.max(now,bosalir)+ara).toISOString()});
+  return yaz;
+}
+/* taşınabilecek makineler — aynı tür, kuyruk durumu ve makara farkıyla */
+function planTasiHedef(p,makineler,plan,filamentler){
+  const mk=(makineler||[]).find(x=>x&&x.id===(p&&p.makineId))||null;
+  const tur=makTur(mk);
+  const bas=x=>new Date(x.gercekBaslangic||x.baslangic).getTime()||0;
+  const bit=x=>bas(x)+num(x.sureDk)*60000;
+  const ger=[...new Set(((p&&p.filList)||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
+    .map(f=>f.filamentId))];
+  return (makineler||[]).filter(m=>m&&m.id&&m.id!==(p&&p.makineId)&&makTur(m)===tur)
+    .map(m=>{ const K=(plan||[]).filter(x=>x&&x.makineId===m.id);
+      const takili=makTakili(m);
+      return {id:m.id,ad:m.ad||m.tur||"",tur:makTur(m),
+        isSay:K.length,bosalir:K.length?Math.max.apply(null,K.map(bit)):0,
+        takilacak:ger.filter(f=>takili.indexOf(f)<0),
+        bilinmiyor:!makMakaralar(m).length}; })
+    .sort((a,b)=>(a.takilacak.length-b.takilacak.length)||(a.bosalir-b.bosalir));
 }
 /* aktarım kaydı: takvime yazılacak baskı kaydı */
 const planKayit=(x,parti,urunler)=>{
@@ -2408,7 +2464,7 @@ function ganttRenk(durum){
   return {bg:"var(--surf2)",bd:"1px solid var(--line)",tx:"var(--txt)"};
 }
 // iş detayı — klasik modal
-function IsSheet({x,onClose,onBaslat,onSil,onDuzen,onTabla,foto}){
+function IsSheet({x,onClose,onBaslat,onSil,onDuzen,onTabla,onTasi,foto}){
   const p=x.p; const c=ganttRenk(x.durum);
   const etiket={bitti:"Bitti",basiyor:"Basıyor",sirada:"⏭ Sırada",gecikti:"⏰ Gecikti — şimdiye kaydı",geride:"Geride kaldı (üzerinden iş başlatıldı)"}[x.durum]||x.durum;
   const rows=[
@@ -2435,12 +2491,47 @@ function IsSheet({x,onClose,onBaslat,onSil,onDuzen,onTabla,foto}){
     rows.map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
       h("span",{style:{color:"var(--mut)",fontWeight:600,flexShrink:0}},r[0]),
       h("span",{style:{fontWeight:800,textAlign:"right"}},r[1]))),
+    /* 🔀 başlamamış iş başka makineye taşınabilir */
+    (basla&&onTasi)?h("button",{onClick:onTasi,style:{display:"flex",alignItems:"center",gap:10,
+      width:"100%",padding:13,borderRadius:14,marginTop:16,textAlign:"left",
+      background:"var(--surf2)",border:"1px solid var(--line)"}},
+      h("span",{style:{fontSize:17,flexShrink:0}},"🔀"),
+      h("span",{style:{flex:1,minWidth:0,fontSize:13.5,fontWeight:800}},"Makineyi değiştir"),
+      h("span",{style:{fontSize:15,color:"var(--mut2)",fontWeight:800,flexShrink:0}},"›")):null,
     h("div",{style:{display:"flex",gap:10,marginTop:16}},
       h("button",{onClick:onDuzen,style:{flex:1,padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,color:"var(--cyan)"}},"Baskıyı düzenle"),
       silinebilir?h("button",{onClick:onSil,style:{flex:1,padding:13,borderRadius:14,background:"var(--surf2)",border:"1px solid var(--red)",fontSize:13.5,fontWeight:800,color:"var(--red)"}},
         basla?"İşi sil":"Baskıyı iptal et"):null));
 }
 
+/* 🔀 Hangi makineye taşınsın — yalnız aynı türdekiler */
+function MakineTasiSheet({p,mkAd,makineler,plan,filamentler,bekle,onTasi,onClose}){
+  const L=planTasiHedef(p,makineler,plan,filamentler);
+  const now=Date.now();
+  const flAdi=id=>{ const f=(filamentler||[]).find(x=>x&&x.id===id);
+    return f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f))):"?"; };
+  const tur=makTur((makineler||[]).find(x=>x&&x.id===(p&&p.makineId)));
+  return h(Sheet,{ik:"🔀",hex:"#0e8fce",baslik:"Makineyi değiştir",
+    alt:(mkAd||"")+" → aynı tür ("+tur+") · "+L.length+" makine",onClose,cta:"Vazgeç",onCta:onClose},
+    L.length?L.map(m=>h("button",{key:m.id,onClick:()=>onTasi(p,m.id),disabled:bekle,
+      style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 12px",
+        borderRadius:12,marginBottom:8,textAlign:"left",background:"var(--surf2)",
+        border:"1px solid "+(m.takilacak.length?"var(--line)":"#86efac"),opacity:bekle?.5:1}},
+      h("span",{style:{display:"flex",flexShrink:0}},h(Icn,{n:"printer",c:"var(--mut)",s:19})),
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",
+          textOverflow:"ellipsis",whiteSpace:"nowrap"}},m.ad),
+        h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:2}},
+          (m.isSay?(m.isSay+" iş kuyrukta · "+(m.bosalir>now?(dkYaz((m.bosalir-now)/60000)+" sonra boşalır"):"boşaldı")):"kuyruk boş")),
+        h("div",{style:{fontSize:11,fontWeight:800,marginTop:2,
+          color:m.takilacak.length?"#9a3412":"#166534"}},
+          m.takilacak.length
+            ?("🧵 "+m.takilacak.length+" makara takılacak: "+m.takilacak.map(flAdi).join(" · "))
+            :"🧵 makaralar hazır")),
+      h("span",{style:{fontSize:15,color:"var(--mut2)",fontWeight:800,flexShrink:0}},"›")))
+      :h("div",{style:{padding:"18px 0",textAlign:"center",color:"var(--mut)",fontSize:13,
+        fontWeight:700}},"Aynı türde başka makine yok."));
+}
 // ➕ İŞ EKLE — eski panelin IsModal kayıt şemasıyla birebir uyumlu yazar
 function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pre}){
   const duzen=!!(kayit&&kayit.id);
@@ -7013,6 +7104,19 @@ function App(){
       setModal(null); say(L.length>1?(L.length+" tabla toplandı"):("Tabla toplandı · "+(L[0].ad||"iş"))); }
     catch(e){ console.error(e); say("İşlenemedi"); } finally{ setIsBekle(false); } }
   const [silinen,setSilinen]=useState(null); const silT=useRef(null);
+  /* 🔀 tablayı başka makineye taşı — kaynak makinede açılan delik kapanır */
+  async function isTasi(p2,hedefId){ if(!p2||!p2.id||!hedefId||isBekle) return;
+    const W=planTasi(plan,p2.id,hedefId,Date.now());
+    if(!W.length) return say("Taşınamadı");
+    setIsBekle(true);
+    try{ for(const w of W) await save("plan",{id:w.id,makineId:w.makineId,baslangic:w.baslangic});
+      /* yığından hem taşıma sayfası hem iş kartı kalksın — kart eski makine adını
+         gösteriyor olurdu, iş artık başka makinede */
+      setModal(null); setModal(null);
+      const m=(makineler||[]).find(x=>x&&x.id===hedefId);
+      say("🔀 "+((m&&m.ad)||"makine")+"'ye taşındı"
+        +(W.length>1?(" · "+(W.length-1)+" iş öne çekildi"):"")); }
+    catch(e){ console.error(e); say("Taşınamadı"); } finally{ setIsBekle(false); } }
   async function isSil(x){
     const msj=(x.p.basladi&&x.durum==="basiyor")
       ?("⚠ \""+(x.p.ad||"iş")+"\" ŞU AN BASILIYOR.\nİptal edilip plandan silinsin mi?")
@@ -7080,7 +7184,10 @@ function App(){
     h(Toast,{msg:toastMsg}),
     modal&&modal.tip==="is"&&h(IsSheet,{x:modal.x,foto:(fotoMap[(modal.x.p||{}).urunId]||{}).data,onClose:()=>setModal(null),onBaslat:()=>isBaslat(modal.x),onSil:()=>isSil(modal.x),
       onTabla:()=>tablaTopla(modal.x.p),
+      onTasi:()=>setModal({tip:"isTasi",p:modal.x.p,mkAd:modal.x.mkAd||""}),
       onDuzen:()=>setModal({tip:"isEkle",kayit:modal.x.p})}),
+    modal&&modal.tip==="isTasi"&&h(MakineTasiSheet,{p:modal.p,mkAd:modal.mkAd,
+      makineler,plan,filamentler,bekle:isBekle,onTasi:isTasi,onClose:()=>setModal(null)}),
     modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,filamentler,bekle:isBekle,onKaydet:isKaydet,kayit:modal.kayit||null,pre:modal.pre||null}),
     modal&&modal.tip==="makineYonet"&&h(MakineYonetimSheet,{makineler,onClose:()=>setModal(null),onAc:setModal}),
     modal&&modal.tip==="makineDuzen"&&h(MakineDuzenSheet,{mk:(makineler||[]).find(x=>x&&modal.mk&&x.id===modal.mk.id)||modal.mk,filamentler,bekle:isBekle,onKaydet:makineKaydet,onSil:makineSil,
