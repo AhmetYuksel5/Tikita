@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L44";   // komuta (admin) deneme sürümü
+const SURUM="L45";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -500,6 +500,27 @@ function baskiBlokOku(b){
     turler:Object.keys(tur)};
 }
 const baskiBlokDolu=x=>!!x&&(x.turler.length>0||x.varsayilan.sureDk>0||x.varsayilan.gram>0);
+/* ————— TARİF DENETİMİ —————
+   İkinci makine türü doldurulurken bir yuvanın filamenti önceki seçimde kalıyor;
+   sonuç: aynı filament iki yuvada, öbür renk hiç yok. Sessizce geçmesin. */
+function baskiDenet(bloklar){
+  /* bloklar: [{tur, filament:[{filamentId,gram}], sureDk}] — tek bir tarif bloğunun türleri */
+  const uy=[]; const T=(bloklar||[]).filter(x=>x&&x.tur);
+  T.forEach(b=>{ const say={};
+    (b.filament||[]).forEach(f=>{ if(f&&f.filamentId) say[f.filamentId]=(say[f.filamentId]||0)+1; });
+    Object.keys(say).forEach(id=>{ if(say[id]>1)
+      uy.push({tip:"cift",tur:b.tur,filamentId:id,kez:say[id]}); }); });
+  /* bir türde olup ötekinde olmayan filament */
+  if(T.length>1){ const set={}; const hepsi={};
+    T.forEach(b=>{ set[b.tur]={}; (b.filament||[]).forEach(f=>{ if(f&&f.filamentId){ set[b.tur][f.filamentId]=1; hepsi[f.filamentId]=1; } }); });
+    Object.keys(hepsi).forEach(id=>{ const yok=T.filter(b=>!set[b.tur][id]).map(b=>b.tur);
+      if(yok.length&&yok.length<T.length) uy.push({tip:"eksik",filamentId:id,turler:yok}); }); }
+  /* süre var filament yok · filament var süre yok */
+  T.forEach(b=>{ const gr=(b.filament||[]).reduce((s2,f)=>s2+num(f&&f.gram),0);
+    if(num(b.sureDk)>0&&!(gr>0)) uy.push({tip:"gramsiz",tur:b.tur});
+    if(gr>0&&!(num(b.sureDk)>0)) uy.push({tip:"suresiz",tur:b.tur}); });
+  return uy;
+}
 function baskiOku(u){
   const b=(u&&u.baskiBilgi)||null; if(!b) return null;
   const ana=baskiBlokOku(b);
@@ -727,6 +748,26 @@ function BaskiBilgiSheet({u,makineler,filamentler,onKaydet,onClose,bekle}){
         (K.fil||[]).length<BASKI_FIL_MAX?h("button",{onClick:filEkle,
           style:{...GS.ibtn,padding:"11px",fontWeight:800,color:"#7c46e6"}},
           "＋ Filament ekle ("+(K.fil||[]).length+"/"+BASKI_FIL_MAX+")"):null),
+      /* ⚠ türler arası tutarsızlık — sessizce geçmesin */
+      (()=>{ const bloklar=turListe.map(t=>{ const x=((tas[BK]||{})[t.tur])||{};
+          return {tur:t.tur,sureDk:num(x.sure),
+            filament:(x.fil||[]).filter(f=>num(f.gram)>0&&(f.filamentId||f.degisken))
+              .map(f=>({filamentId:f.filamentId||"",gram:num(f.gram)})) }; })
+          .filter(b=>b.sureDk>0||b.filament.length);
+        const uy=baskiDenet(bloklar); if(!uy.length) return null;
+        const fAd=id=>{ const f=(filamentler||[]).find(x=>x.id===id);
+          return f?((flKod(f)?flKod(f)+" ":"")+flAd(f)):"filament"; };
+        const yaz=u=>u.tip==="cift"
+            ?("⚠ "+u.tur+": "+fAd(u.filamentId)+" "+u.kez+" yuvada birden seçili — biri başka renk olmalı mı?")
+          :u.tip==="eksik"
+            ?("⚠ "+fAd(u.filamentId)+" şu türde hiç yok: "+u.turler.join(", "))
+          :u.tip==="gramsiz"
+            ?("⚠ "+u.tur+": süre girilmiş ama filament yok — o makinede stoktan düşmez")
+            :("⚠ "+u.tur+": filament girilmiş ama süre yok — o makinede planlanamaz");
+        return h("div",{style:{marginTop:10,padding:"10px 12px",borderRadius:11,
+          background:"#fff7ed",border:"1px solid #fed7aa"}},
+          uy.slice(0,4).map((u,i)=>h("div",{key:i,style:{fontSize:11.5,fontWeight:700,
+            color:"#9a3412",lineHeight:1.45,marginTop:i?5:0}},yaz(u)))); })(),
       gramTop>0?h("div",{style:{marginTop:10,padding:"9px 12px",borderRadius:11,background:"#f5f2ff",
         border:"1px solid #d8ccff",fontSize:12,fontWeight:700,color:"#5b21b6"}},
         sekEt(sekme)+": bir tabla = "+adet+" "+((PARCALAR.length&&ayri)?parca:(PARCALAR.length?"takım":"adet"))
