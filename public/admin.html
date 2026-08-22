@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L43";   // komuta (admin) deneme sürümü
+const SURUM="L44";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -861,8 +861,11 @@ function planIsleri(secim,BM,bekleme){
     /* aynı ürünün renk çeşitleri ayrı satır gelir — anahtarları çakışmasın */
     const renk=it.renk||null, vk=it.vk!=null?String(it.vk):String(ix);
     const renkAd=it.renkAd||"";
-    b.parcalar.forEach((r,ri)=>{ const parca=n*Math.max(1,num(r.ger)); const cap=Math.max(1,num(r.plakaAdet));
-      const tam=Math.floor(parca/cap), kalan=parca-tam*cap; let sira=0;
+    b.parcalar.forEach((r,ri)=>{ const ger=Math.max(1,num(r.ger));
+      const parca=n*ger; const cap=Math.max(1,num(r.plakaAdet));
+      /* 🍽 Tabla bölünmez. Girilen adet EN AZ o kadar çıkacak şekilde tam tablaya
+         yuvarlanır: 16'lık tablada 50 istenirse 4 tabla basılır, 64 adet çıkar. */
+      const tam=Math.ceil(parca/cap); let sira=0;
       /* filament kırılımı liste: tarifli üründe 4 çeşide kadar, geçmişten
          türetilende tek çeşit. Özet bu listeden toplanır. */
       const ekle2=(ad2,bDk,gr)=>{
@@ -875,10 +878,41 @@ function planIsleri(secim,BM,bekleme){
         /* anahtar tür türe aynı — aynı iş farklı makinede farklı süre/gram alır */
         isler.push({key:(u.id||u.ad||"?")+"@"+vk+"#"+ri+"#"+(sira++),urunId:u.id||"",
           urun:u.ad||"?",parca:r.ad,adet:ad2,baski:bDk,dk:bDk+bk,gram:gr,renkAd,
+          parcaGer:ger,plakaAdet:cap,
           filamentId:r.filamentId||"",filPay}); };
-      for(let i=0;i<tam;i++) ekle2(cap,num(r.dkParca)*cap,num(r.gramParca)*cap);
-      if(kalan>0) ekle2(kalan,num(r.dkParca)*kalan,num(r.gramParca)*kalan); }); });
+      for(let i=0;i<tam;i++) ekle2(cap,num(r.dkParca)*cap,num(r.gramParca)*cap); }); });
   return isler;
+}
+/* ————— İSTENEN ADET → ÇIKACAK ADET —————
+   Tabla bölünmediği için girilen sayı bir ALT SINIR: 16'lık tablada 50 istenirse
+   4 tabla basılır ve 64 adet çıkar. Parçalı üründe takım sayısı, parçaların
+   en darına göre belirlenir. */
+function planUretimTek(u,adet,BM){
+  const b=BM&&BM[(u||{}).id]; const n=Math.max(0,Math.round(num(adet)));
+  if(!b||!b.ok||n<=0) return null;
+  let tabla=0, takim=Infinity; const parcalar=[];
+  (b.parcalar||[]).forEach(r=>{ const ger=Math.max(1,num(r.ger)), cap=Math.max(1,num(r.plakaAdet));
+    const t=Math.ceil(n*ger/cap), cikan=t*cap;
+    tabla+=t; parcalar.push({ad:r.ad,tabla:t,cikan,ger,cap});
+    takim=Math.min(takim,Math.floor(cikan/ger)); });
+  return {istenen:n,uretilen:isFinite(takim)?takim:0,tabla,parcalar};
+}
+/* ürün ürün: istenen, tür tür çıkacak adet aralığı ve tabla aralığı */
+function planUretim(secim,BMT,turler){
+  const acc={};
+  (secim||[]).forEach(it=>{ const u=it&&it.u; if(!u||!u.id) return;
+    (turler||[]).forEach(t=>{ const r=planUretimTek(u,it.adet,BMT&&BMT[t]); if(!r) return;
+      const g=acc[u.id]=acc[u.id]||{};
+      const a=g[t]=g[t]||{istenen:0,uretilen:0,tabla:0};
+      a.istenen+=r.istenen; a.uretilen+=r.uretilen; a.tabla+=r.tabla; }); });
+  const out={};
+  Object.keys(acc).forEach(id=>{ const L=Object.values(acc[id]); if(!L.length) return;
+    out[id]={istenen:L[0].istenen,
+      enAz:Math.min.apply(null,L.map(x=>x.uretilen)),
+      enCok:Math.max.apply(null,L.map(x=>x.uretilen)),
+      tEnAz:Math.min.apply(null,L.map(x=>x.tabla)),
+      tEnCok:Math.max.apply(null,L.map(x=>x.tabla))}; });
+  return out;
 }
 /* ————— HEDEFE GÖRE DAĞITIM —————
    Aynı iş A1'de başka, PS1'de başka sürede ve başka gramajda çıkıyor. Bu yüzden
@@ -1130,11 +1164,21 @@ function planOzet(secim,BMT,turler,makList,bekleme,filamentler,hedef,degisimDk){
   const turDagilim={}; const urunDokum={};
   A.forEach(x=>{ turDagilim[x.tur]=(turDagilim[x.tur]||0)+1;
     const k=x.is.urunId||x.is.urun;
-    const o=urunDokum[k]=urunDokum[k]||{id:k,ad:x.is.urun,tabla:0,gram:0,baskiDk:0,turler:{},renkler:{},makineler:{}};
+    const o=urunDokum[k]=urunDokum[k]||{id:k,ad:x.is.urun,tabla:0,gram:0,baskiDk:0,turler:{},renkler:{},
+      makineler:{},parcaUret:{},parcaGer:{},istenen:0,uretilen:0};
     o.tabla++; o.gram+=num(x.v.gram); o.baskiDk+=num(x.v.baski);
+    /* tablalar tam basıldığı için çıkacak adet istenenden fazla olabilir */
+    const pk=x.is.parca||"";
+    o.parcaUret[pk]=(o.parcaUret[pk]||0)+num(x.is.adet);
+    o.parcaGer[pk]=Math.max(1,num(x.is.parcaGer)||1);
     o.turler[x.tur]=(o.turler[x.tur]||0)+1;
     o.makineler[x.mak]=(o.makineler[x.mak]||0)+1;   /* aynı ürün kaç ayrı makineye dağıldı */
     if(x.is.renkAd) o.renkler[x.is.renkAd]=(o.renkler[x.is.renkAd]||0)+num(x.is.adet); });
+  /* her ürün için gerçekten çıkacak adet: parçalı üründe en dar parça belirler */
+  Object.values(urunDokum).forEach(o=>{ const ks=Object.keys(o.parcaUret);
+    o.uretilen=ks.length?Math.min.apply(null,ks.map(k2=>Math.floor(o.parcaUret[k2]/(o.parcaGer[k2]||1)))):0; });
+  (secim||[]).forEach(x=>{ const o=urunDokum[(x.u||{}).id||(x.u||{}).ad];
+    if(o) o.istenen+=Math.max(0,Math.round(num(x.adet))); });
   /* çalışan parkta hiçbir makine bu ürünü basamıyorsa sessizce yok sayılmasın */
   const atlanan=(secim||[]).filter(x=>x&&x.u&&Math.round(num(x.adet))>0
     &&!urunDokum[x.u.id||x.u.ad]).map(x=>x.u.ad||"?");
@@ -1145,7 +1189,9 @@ function planOzet(secim,BMT,turler,makList,bekleme,filamentler,hedef,degisimDk){
     degisim:at.degisim,degisimDk:at.degisimDk,degisimSure,bitisFark:at.bitisFark,
     toplamDk:baskiDk+beklemeDk,filList,filTutar,makTutar,maliyet:filTutar+makTutar,turDagilim,urunDokum,
     atlanan,gramTop:Object.values(gram).reduce((s2,v)=>s2+v,0),
-    adetTop:(secim||[]).filter(x=>urunDokum[x.u.id||x.u.ad])
+    /* adetTop artık GERÇEKTEN ÇIKACAK adet; istenen ayrı yazılıyor */
+    adetTop:Object.values(urunDokum).reduce((s2,o)=>s2+num(o.uretilen),0),
+    istenenTop:(secim||[]).filter(x=>urunDokum[x.u.id||x.u.ad])
       .reduce((s2,x)=>s2+Math.max(0,Math.round(num(x.adet))),0)};
 }
 /* Süre → adet: verilen oranı koruyarak süreye sığan en büyük katsayı (ikili arama) */
@@ -3415,6 +3461,9 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
     return Object.keys(m).sort((a,b2)=>m[b2]-m[a]).map(t=>m[t]+" × "+(t||"makine")).join(" · "); },[makList]);
   const kap=useMemo(()=>mod==="sure"?planKapasite(oranlar,BMT,turAd,makList,bekleme,hedefDk,filamentler,hedef,degisim):null,
     [mod,JSON.stringify(sec),JSON.stringify(renkler),makList,bekleme,hedefDk,BMT,turAd,filamentler,hedef,degisim]);
+  /* 🍽 tabla bölünmediği için girilen adet alt sınır — ürün ürün ne çıkacağı */
+  const uretim=useMemo(()=>planUretim(mod==="adet"?secimAdet:((kap&&kap.secim)||[]),BMT,turAd),
+    [mod,JSON.stringify(sec),JSON.stringify(renkler),BMT,turAd,kap]);
   const ozet=mod==="adet"?(secili.length?planOzet(secimAdet,BMT,turAd,makList,bekleme,filamentler,hedef,degisim):null):(kap&&kap.ozet);
   const sonuc=mod==="adet"?secimAdet:((kap&&kap.secim)||[]);
   const bitis=ozet?new Date(Date.now()+ozet.makespanDk*60000):null;
@@ -3444,6 +3493,8 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
       h("button",{onClick:()=>ayarla(v+(mod==="adet"?10:1)),style:{...GS.ibtn,padding:"6px 10px"}},"+")); };
   return h("div",null,
     h("div",{style:{display:"flex",gap:8,marginBottom:12}},modBtn("adet","📦 Adet → süre"),modBtn("sure","⏱ Süre → adet")),
+    (mod==="adet")?h("div",{style:{fontSize:11,color:GC.mut,fontWeight:700,marginBottom:10,lineHeight:1.45}},
+      "Yazdığın sayı kaç ADET istediğin. Tabla yarım basılmadığı için en az o kadar çıkacak şekilde tam tablaya tamamlanır."):null,
     /* — hedef: makine türü elle seçilmez, işler hedefe göre dağıtılır — */
     h("div",{style:{...GS.card,padding:"13px 14px",marginBottom:12}},
       h("div",{style:{fontSize:12.5,fontWeight:800,color:GC.txt,marginBottom:9}},"Neye göre dağıtılsın"),
@@ -3531,7 +3582,18 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
                   ?(" · "+bi.turler.length+" makine türü"):"")
                 +(b.parcali?(" · "+b.parcalar.length+" parça"):"")
                 +" · stok "+num(u.stokta)
-                +(!T&&b.ornek<PLAN_ORNEK_AZ?" · ⚠ az örnek":""))),
+                +(!T&&b.ornek<PLAN_ORNEK_AZ?" · ⚠ az örnek":"")),
+              /* tabla bölünmez: istenen adet tam tablaya yuvarlanır */
+              (on&&uretim[u.id])?h("div",{style:{fontSize:11,fontWeight:800,color:"#166534",marginTop:3}},
+                (uretim[u.id].tEnAz===uretim[u.id].tEnCok
+                  ?(uretim[u.id].tEnAz+" tabla")
+                  :(uretim[u.id].tEnAz+"–"+uretim[u.id].tEnCok+" tabla"))
+                +" → "
+                +(uretim[u.id].enAz===uretim[u.id].enCok
+                  ?(uretim[u.id].enAz+" adet")
+                  :(uretim[u.id].enAz+"–"+uretim[u.id].enCok+" adet"))
+                +((uretim[u.id].enAz>uretim[u.id].istenen)
+                  ?(" · +"+(uretim[u.id].enAz-uretim[u.id].istenen)+" fazla"):"")):null),
             /* değişken (renk) yuvası olan üründe renk çeşidi seçimi */
             uRoller[u.id]?h("button",{onClick:()=>setRenkAc(u),
               style:{...GS.ibtn,flexShrink:0,padding:"6px 9px",fontSize:12,fontWeight:800,
@@ -3561,7 +3623,11 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
             "makine sayısını artır ya da o makine türüne süre gir")):null,
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
           st(planSure(ozet.makespanDk),makine+" makineyle biter","#0369a1"),
-          st(ozet.adetTop.toLocaleString("tr-TR")+" ad",mod==="sure"?"bu sürede çıkar":"toplam üretim","#166534"),
+          st(ozet.adetTop.toLocaleString("tr-TR")+" ad",
+            mod==="sure"?"bu sürede çıkar"
+            :((num(ozet.adetTop)>num(ozet.istenenTop))
+              ?("istenen "+num(ozet.istenenTop)+" · tabla dolduruldu")
+              :"toplam üretim"),"#166534"),
           st(kgYaz(ozet.gramTop/1000),"filament","#7c46e6"),
           st(tlk(ozet.maliyet),"tahmini maliyet",GC.txt)),
         h("div",{style:{...GS.card,padding:"13px 14px",marginBottom:12}},
@@ -3641,7 +3707,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
               +"Saatleri “Üretim planına taşı” sayfasında yazıyor."):null); })(),
         h("div",{style:{...GS.card,padding:"13px 14px",marginBottom:12}},
           h("div",{style:{fontSize:12,fontWeight:800,color:GC.txt,marginBottom:8}},"📦 Ürün dökümü"),
-          sonuc.map((x,i)=>{ const o1=(ozet.urunDokum||{})[x.u.id]||{tabla:0,gram:0,baskiDk:0,turler:{}};
+          sonuc.map((x,i)=>{ const o1=(ozet.urunDokum||{})[x.u.id]||{tabla:0,gram:0,baskiDk:0,turler:{},uretilen:0,istenen:0};
             const tl=Object.keys(o1.turler).sort((a,b2)=>o1.turler[b2]-o1.turler[a]);
             const T=uBilgi[x.u.id]&&uBilgi[x.u.id].tarif;
             return h("div",{key:x.u.id||i,style:{display:"flex",alignItems:"center",gap:9,
@@ -3660,7 +3726,11 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
                   +(tl.length?(" · "+tl.map(t=>(t||"makine")+(tl.length>1?(" "+o1.turler[t]):"")).join(" + ")):"")
                   +(Object.keys(o1.renkler||{}).length
                     ?("\n🎨 "+Object.keys(o1.renkler).map(r=>o1.renkler[r]+" "+r).join(" · ")):""))),
-              h("span",{style:{fontSize:14,fontWeight:800,flexShrink:0}},x.adet+" ad"),
+              h("div",{style:{flexShrink:0,textAlign:"right"}},
+                h("div",{style:{fontSize:14,fontWeight:800}},num(o1.uretilen||x.adet)+" ad"),
+                (num(o1.uretilen)>num(o1.istenen||x.adet))
+                  ?h("div",{style:{fontSize:10,fontWeight:700,color:GC.mut,marginTop:1}},
+                    "istenen "+num(o1.istenen||x.adet)):null),
               h("span",{style:{fontSize:12,fontWeight:700,color:GC.mut,flexShrink:0,width:78,textAlign:"right"}},
                 planSure(o1.baskiDk))); })),
         /* — planı üretim takvimine taşı — */
