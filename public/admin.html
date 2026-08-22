@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L52";   // komuta (admin) deneme sürümü
+const SURUM="L53";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -5967,19 +5967,38 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
   // pazarlamacı performansı (dönem) — önce üretici modeli
   const perf=(EK||[]).map(e=>{ const mine=R.filter(x=>(x.kullaniciId||"")===e.u.id);
     const sirket=sirketSet.has(e.u.id);
-    let satA=0,satT=0,konsA=0,konsT=0,tah=0,gerA=0,gerC=0,gerU=0,gerM=0,kMarj=0,uret=0,tabla=0,tablaKaz=0; const mek=new Set();
+    let satA=0,satT=0,konsA=0,konsT=0,tah=0,gerA=0,gerC=0,gerU=0,gerM=0,kMarj=0,uret=0,tabla=0,tablaKaz=0,acik=0,acikTam=0; const mek=new Set();
     mine.forEach(x=>{ if(x.tip==="satis"){ if(x.gerilla){ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat);
+          /* gerilla payı zaten min(tahsil,maliyet) — tahsil edilmeyen kısmı
+             buraya hiç girmiyor, ayrıca düşülmez */
           gerA+=num(x.adet); gerC+=th; gerU+=Math.min(th,K); gerM+=Math.max(0,th-K); }
-        else { satA+=num(x.adet); satT+=num(x.adet)*num(x.satisFiyat); kMarj+=num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)); uret+=num(x.adet)*num(x.alisFiyat); } if(x.yer)mek.add((x.yer||"").toLocaleLowerCase("tr")); }
+        else { const c=num(x.adet)*num(x.satisFiyat), K=num(x.adet)*num(x.alisFiyat);
+          /* 💸 Tahsil edilmemiş satış pazarlamacıya borç yazılmaz — eline geçmeyen
+             paranın teslimi istenemez. Hakediş yine de tam marj üzerinden doğar:
+             tahsilat gecikse de pazarlamacı mağdur edilmez (deneme.html ile aynı kural).
+             tahsil alanı hiç yazılmamış eski kayıtlar peşin sayılır. */
+          const th=x.tahsil==null?c:num(x.tahsil);
+          satA+=num(x.adet); satT+=c;
+          kMarj+=num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat));
+          uret+=K;
+          acik+=Math.max(0,K-th);        /* normal: Tikita payının tahsil edilmeyeni */
+          acikTam+=Math.max(0,c-th); }   /* şirket pazarlamacısı: bedelin tamamı Tikita'nın */
+        if(x.yer)mek.add((x.yer||"").toLocaleLowerCase("tr")); }
       else if(x.tip==="tahsilat"){ tah+=num(x.tutar); }
       else if(x.tip==="konsinye"&&!x.gerilla){ konsA+=num(x.adet); konsT+=num(x.adet)*num(x.satisFiyat); }
       else if(x.tip==="tabla"){ tabla++; tablaKaz+=num(x.tutar); } });
     // şirket pazarlamacısında marj yok: bedelin tamamı üreticiye (şirkete) yazılır
     if(sirket){ gerU=gerC; gerM=0; uret=satT; kMarj=0; }
+    /* uBorc  : satılanın Tikita payı (tahakkuk) — kâr tablosunun tabanı
+       uAcik  : bunun henüz tahsil edilmemiş kısmı — sahada duruyor
+       uTahsil: pazarlamacının Tikita adına elinde tuttuğu, teslim edilebilir kısım */
+    const uB=uret+gerU;
+    const uA=Math.min(uB,Math.max(0,sirket?acikTam:acik));
     return {u:e.u,sirket,kaleSay:e.kaleSay,alacak:e.alacak,satA,satT,konsA,konsT,tah,gerA,gerC,gerU,gerM,
-      hakedis:sirket?0:(kMarj+gerM),uBorc:uret+gerU,tabla,tablaKaz,nakit:tah+gerC,mekan:mek.size};
+      hakedis:sirket?0:(kMarj+gerM),uBorc:uB,uAcik:uA,uTahsil:uB-uA,
+      tabla,tablaKaz,nakit:tah+gerC,mekan:mek.size};
   }).filter(p=>p.satA||p.gerA||p.tah||p.konsA||p.tabla).sort((a,b)=>b.nakit-a.nakit);
-  const T={}; ["satA","satT","konsA","konsT","tah","gerA","gerC","gerU","gerM","hakedis","uBorc","tabla","tablaKaz","nakit"].forEach(k=>T[k]=perf.reduce((s,p)=>s+p[k],0));
+  const T={}; ["satA","satT","konsA","konsT","tah","gerA","gerC","gerU","gerM","hakedis","uBorc","uAcik","uTahsil","tabla","tablaKaz","nakit"].forEach(k=>T[k]=perf.reduce((s,p)=>s+p[k],0));
   // hakediş (satış marjı bazlı, canlı) = Σ kale-satış (satış−veriliş)×adet + gerilla marjı — fiyat düzenlemesi anında yansır
   const hakMarj=R.reduce((s,x)=>(x.tip==="satis"&&!x.gerilla&&!sirketSet.has(x.kullaniciId))?s+num(x.adet)*(num(x.satisFiyat)-num(x.alisFiyat)):s,0)+num(T.gerM);
   // 🧹 tabla hakedişi bakiyesi (TÜM ZAMAN, döneme bağlı değil) — kazanılan − ödenen; ödeme emri açık talepler + son ödemeler
@@ -6103,7 +6122,12 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         :{t:num(x.adet)+" × "+(x.urunAd||"?"),alt:"⚡ gerilla · "+(x.kullaniciAd||"?")+" · "+fmtS(x.tarih),
           v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"})}),
     hakedis:()=>({ik:"🫰",hex:"#d97b12",baslik:"Hakediş — pazarlamacı bazında",rows:perf.filter(p=>p.hakedis>0||p.sirket).sort((a,b)=>b.hakedis-a.hakedis).map(p=>({t:(p.u.simge||"")+" "+p.u.ad+(p.sirket?" · şirket":""),alt:p.sirket?("satışın tamamı şirkete · "+tl(p.satT+p.gerC)):("tahsilat "+tl(p.nakit)),v:p.sirket?"—":tl(p.hakedis),renk:p.sirket?"var(--mut)":"var(--gold)"}))}),
-    uretici:()=>({ik:"🏭",hex:"#334155",baslik:"Üreticiye kalan — pazarlamacı bazında",rows:perf.filter(p=>p.uBorc>0).sort((a,b)=>b.uBorc-a.uBorc).map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"tahsilat "+tl(p.nakit),v:tl(p.uBorc),renk:"var(--txt)"}))}),
+    uretici:()=>({ik:"🏭",hex:"#334155",baslik:"Üreticiye kalan — pazarlamacı bazında",
+      rows:perf.filter(p=>p.uBorc>0).sort((a,b)=>b.uTahsil-a.uTahsil).map(p=>({
+        t:(p.u.simge||"")+" "+p.u.ad,
+        alt:"elindeki nakit "+tl(p.nakit)
+          +(p.uAcik>0.5?(" · ⚠ "+tl(p.uAcik)+" tahsil edilmedi"):""),
+        v:tl(p.uTahsil),renk:p.uAcik>0.5?"#9a3412":"var(--txt)"}))}),
     tabla:()=>({ik:"🧹",hex:"#7c46e6",baslik:"Tabla değişimleri",rows:srt(R.filter(x=>x.tip==="tabla")).map(x=>({t:(x.kullaniciAd||"?")+" · "+yerAd(x),alt:fmtS(x.tarih),v:tl(x.tutar),renk:"var(--violet)"}))}),
     aktif:()=>({ik:"🎖️",hex:"#0e8fce",baslik:"Aktif pazarlamacılar",rows:perf.map(p=>({t:(p.u.simge||"")+" "+p.u.ad,alt:"satış "+p.satA+" ad · kons "+p.konsA+" · mekan "+p.mekan,v:tl(p.nakit),renk:"var(--green)"}))}),
     mekan:()=>{ const m={}; R.filter(x=>(x.yer||"").trim()&&["satis","konsinye","tahsilat"].includes(x.tip)).forEach(x=>{ const y=x.yer; const o=m[y]||(m[y]={yer:y,n:0,son:0}); o.n++; const t=new Date(x.tarih).getTime()||0; if(t>o.son)o.son=t; }); return {ik:"📍",hex:"#0e8fce",baslik:"Uğranılan mekanlar",rows:Object.values(m).sort((a,b)=>b.son-a.son).map(o=>({t:o.yer,alt:o.n+" işlem",v:fmtS(new Date(o.son).toISOString()),renk:"var(--cyan)"}))}; },
@@ -6213,7 +6237,9 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
   const paylas=()=>{ const t="Tikita Komuta — "+new Date().toLocaleDateString("tr-TR")+"\n"
     +"Dönem: "+(donemler.find(x=>x[0]===kod)||["",""])[1]+"\n"
     +"Ciro: "+tl(ciro+T.gerC)+" ("+(adet+T.gerA)+" ad.) · gerilla dahil\n"
-    +"Tahsilat: "+tl(T.tah+T.gerC)+" · hakediş: "+tl(hakMarj)+" · Tikita'ya kalan: "+tl(T.uBorc);
+    +"Tahsilat: "+tl(T.tah+T.gerC)+" · hakediş: "+tl(hakMarj)
+    +" · Tikita'ya kalan: "+tl(T.uTahsil)
+    +(T.uAcik>0.5?(" (+"+tl(T.uAcik)+" henüz tahsil edilmedi)"):"");
     window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); };
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 84px"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:12,display:"flex",alignItems:"center",gap:8}},
@@ -6304,7 +6330,9 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         h("div",{className:"lbl",style:{marginBottom:6}},"PARA AKIŞI"),
         [["Etiket cirosu",tl(ciro+T.gerC),"var(--txt)",false],
          ["− pazarlamacı hakedişi","−"+tl(hakMarj),"var(--gold)",false],
-         ["= Tikita'ya kalan",tl(T.uBorc),"var(--green)",true]].map((r,i)=>
+         ["= Tikita payı (satılan)",tl(T.uBorc),"var(--txt)",true],
+         ...(T.uAcik>0.5?[["− henüz tahsil edilmedi","−"+tl(T.uAcik),"var(--red)",false]]:[]),
+         ["= tahsil edilen Tikita payı",tl(T.uTahsil),"var(--green)",true]].map((r,i)=>
           h("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,
             padding:"7px 0",borderTop:r[3]?"1.5px solid var(--line)":"none"}},
             h("span",{style:{fontSize:12.5,fontWeight:r[3]?800:700,color:r[3]?"var(--txt)":"var(--mut)"}},r[0]),
@@ -6349,7 +6377,10 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
       /* 📉 İkincil göstergeler — sıfır olanlar hiç basılmaz, kalanlar katlanır durur. */
       (()=>{ const ek=[
         T.gerC>0.5?h(KStat,{key:"ger",ik:h(Icn,{n:"bolt",c:"var(--cyan)"}),l:"Gerilla",v:tl(T.gerC),s:T.gerA+" adet",renk:"var(--cyan)",onClick:()=>setDet(detB.gerilla())}):null,
-        T.uBorc>0.5?h(KStat,{key:"ure",ik:h(Icn,{n:"printer",c:"var(--txt)"}),l:"Üretici kalan",v:tl(T.uBorc),s:"üreticiye",renk:"var(--txt)",onClick:()=>setDet(detB.uretici())}):null,
+        T.uBorc>0.5?h(KStat,{key:"ure",ik:h(Icn,{n:"printer",c:"var(--txt)"}),l:"Üretici kalan",
+          v:tl(T.uTahsil),
+          s:T.uAcik>0.5?("tahsil edilen · "+tl(T.uAcik)+" bekliyor"):"tahsil edilen",
+          renk:"var(--txt)",onClick:()=>setDet(detB.uretici())}):null,
         T.tabla>0?h(KStat,{key:"tab",ik:h(Icn,{n:"broom",c:"var(--violet)"}),l:"Tabla değişimi",v:tl(T.tablaKaz),s:T.tabla+" değişim",renk:"var(--violet)",onClick:()=>setDet(detB.tabla())}):null,
         (tablaKalanTopA>0.5||acikOdeme.length)?h(KStat,{key:"tbh",ik:h(Icn,{n:"check",c:"var(--gold)"}),l:"Tabla hakedişi",
           v:tl(tablaKalanTopA),s:(acikOdeme.length?(acikOdeme.length+" emir açık"):"ödenecek")+" ›",renk:"var(--gold)",onClick:()=>setOdemeAcik(true)}):null,
@@ -6374,8 +6405,8 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
         h(KStat,{ik:h(Icn,{n:"printer",c:"var(--txt)"}),l:"En çok üretici",v:enUret?enUret.u:"—",s:enUret?("üreticiye "+tl(enUret.uret)):"veri yok",renk:"var(--txt)",onClick:enUret?()=>setDet(detB.uretUrun()):null}),
         h(KStat,{ik:h(Icn,{n:"wallet",c:"var(--gold)"}),l:"En çok hakediş",v:enPaz?enPaz.u:"—",s:enPaz?("pazarlamacıya "+tl(enPaz.marj)):"veri yok",renk:"var(--gold)",onClick:enPaz?()=>setDet(detB.pazUrun()):null})),
       h("button",{onClick:paylas,style:{width:"100%",padding:14,borderRadius:16,background:"#16a34a",fontSize:14.5,fontWeight:800,color:"#fff",boxShadow:"0 8px 20px rgba(22,163,74,.25)"}},"WhatsApp'tan paylaş")):null,
-    alt==="paz"?(perf.length?Tbl(["Pazarlamacı","Satış","Ciro","Ger.","Kons.ad","Kons.₺","Tahsilat","Üretici","Hakediş","Tabla","Mekan"],
-      perf.map(p=>[(p.u.simge||"")+" "+p.u.ad,String(p.satA),tl(p.satT),p.gerA+"·"+tl(p.gerC),String(p.konsA),tl(p.konsT),tl(p.nakit),tl(p.uBorc),tl(p.hakedis),p.tabla+"·"+tl(p.tablaKaz),String(p.mekan)])):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde hareket yok.")):null,
+    alt==="paz"?(perf.length?Tbl(["Pazarlamacı","Satış","Ciro","Ger.","Kons.ad","Kons.₺","Tahsilat","Üretici","Tahsilsiz","Hakediş","Tabla","Mekan"],
+      perf.map(p=>[(p.u.simge||"")+" "+p.u.ad,String(p.satA),tl(p.satT),p.gerA+"·"+tl(p.gerC),String(p.konsA),tl(p.konsT),tl(p.nakit),tl(p.uTahsil),tl(p.uAcik),tl(p.hakedis),p.tabla+"·"+tl(p.tablaKaz),String(p.mekan)])):h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)"}},"Bu dönemde hareket yok.")):null,
     alt==="kons"?h(React.Fragment,null,
       // dönemde bırakılan + toplam açık
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"2px 0 14px"}},
