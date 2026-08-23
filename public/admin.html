@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L64";   // komuta (admin) deneme sürümü
+const SURUM="L65";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1221,6 +1221,10 @@ const flRuloGram=fl=>{ const g=num(fl&&fl.ruloGram); return g>0?g:RULO_GRAM; };
    makinedeki makarayı eritir. Kapalı takılan makarada kalan tahmin edilebilir;
    hâlihazırda makinede duran açık makarada kalan bilinmez. */
 const flMakara=fl=>Math.max(0,Math.round(num(fl&&fl.stokMakara)));
+/* 🧵 ELDE DURAN AÇIK MAKARA — makineden çıkarılmış, yarısı kalmış makaralar.
+   Depoya kapalı makara olarak sayılamaz ama filamenti hâlâ elimizdedir. */
+const flAcikGram=fl=>Math.max(0,Math.round(num(fl&&fl.acikGram)));
+const flAcikMakara=fl=>Math.max(0,Math.round(num(fl&&fl.acikMakara)));
 const flMakaraKg=fl=>Math.round(flMakara(fl)*flRuloGram(fl))/1000;
 const flMakaraFiyat=fl=>Math.round(num(fl&&fl.kgFiyat)*flRuloGram(fl)/10)/100;
 /* makinedeki bir makarada kalan gram — null: ölçülmedi, bilinmiyor.
@@ -1277,7 +1281,8 @@ function makaraStok(filamentler,makineler){
   (filamentler||[]).forEach(f=>{ if(!f||!f.id) return; fl[f.id]=f;
     const R=flRuloGram(f), d=flMakara(f);
     out[f.id]={filamentId:f.id,ruloGram:R,depo:d,depoGram:d*R,
-      makinede:0,olculen:0,olcusuz:0,makineGram:0}; });
+      makinede:0,olculen:0,olcusuz:0,makineGram:0,
+      acik:flAcikMakara(f),acikGram:flAcikGram(f)}; });
   (makineler||[]).forEach(m=>makMakaralar(m).forEach(sl=>{
     const r=out[sl.filamentId]; if(!r) return;
     r.makinede++;
@@ -1285,12 +1290,13 @@ function makaraStok(filamentler,makineler){
     if(k==null){ r.olcusuz++; return; }
     r.olculen++; r.makineGram+=k; }));
   Object.values(out).forEach(r=>{
-    r.gram=r.depoGram+r.makineGram;
+    r.gram=r.depoGram+r.makineGram+r.acikGram;
     r.kg=Math.round(r.gram)/1000;
     r.depoKg=Math.round(r.depoGram)/1000;
     r.makineKg=Math.round(r.makineGram)/1000;
+    r.acikKg=Math.round(r.acikGram)/1000;
     /* makara adedi FİZİKSEL sayıdır — yarım makara da bir makaradır */
-    r.makara=r.depo+r.olculen; });
+    r.makara=r.depo+r.olculen+r.acik; });
   return out;
 }
 const makaraStokTop=S=>{ const L=Object.values(S||{});
@@ -1299,7 +1305,21 @@ const makaraStokTop=S=>{ const L=Object.values(S||{});
     depo:L.reduce((s2,r)=>s2+r.depo,0),
     makinede:L.reduce((s2,r)=>s2+r.makinede,0),
     olcusuz:L.reduce((s2,r)=>s2+r.olcusuz,0),
+    acik:L.reduce((s2,r)=>s2+r.acik,0),
+    acikKg:Math.round(L.reduce((s2,r)=>s2+r.acikGram,0))/1000,
     makineKg:Math.round(L.reduce((s2,r)=>s2+r.makineGram,0))/1000}; };
+/* 🧵 Makineden çıkarılan makara nereye gider?
+   depo   : hiç kullanılmamış kapalı makara — depoya geri sayılır
+   acik   : kalanı bilinen açık makara — elde açık makara olarak stokta kalır
+   bilinmez: hiç ölçülmemiş — kalanı bilinmediği için stokta izlenemez */
+function makaraCikisTur(sl,fl){
+  if(!sl) return null;
+  const kalan=makKalan(sl,fl);
+  if(sl.tam&&!sl.olculdu&&!(num(sl.harcanan)>0)) return {tur:"depo",gram:flRuloGram(fl)};
+  if(kalan==null) return {tur:"bilinmez",gram:0};
+  if(kalan<=0) return {tur:"bitti",gram:0};
+  return {tur:"acik",gram:Math.round(kalan)};
+}
 /* 📅 Bu makineye planlanan işlerin istediği filamentler — planlama aracından
    üretim hattına taşındıktan sonra hangi makaraların takılacağı buradan çıkar.
    Bitmiş ve tablası alınmış işler makara istemez. */
@@ -5304,15 +5324,22 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onClose}){
               textOverflow:"ellipsis",whiteSpace:"nowrap",color:ger?"#166534":"var(--txt)"}},
               (ger?"📅 ":"")+adi(f)),
             h("div",{style:{fontSize:10.5,fontWeight:700,marginTop:1,
-              color:ger?"#15803d":(dp>0?"var(--mut)":"var(--red)")}},
+              color:ger?"#15803d":(dp>0||flAcikGram(f)>0?"var(--mut)":"var(--red)")}},
               (ger?("planda "+Math.round(gerek[f.id].gram)+" g gerekli · "):"")
-              +"depoda "+dp+" makara · "+Math.round(flRuloGram(f))+" g")),
-          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,true); },
+              +"depoda "+dp+" makara · "+Math.round(flRuloGram(f))+" g"
+              +(flAcikGram(f)>0?(" · açık "+flAcikMakara(f)+" makara "
+                +(Math.round(flAcikGram(f))/1000).toLocaleString("tr")+" kg"):""))),
+          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"depo"); },
             disabled:bekle||dp<=0,
             style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,opacity:dp>0?1:.35,
               background:dp>0?"#7c46e6":"#fff",color:dp>0?"#fff":"var(--mut)",
               borderColor:dp>0?"#7c46e6":"var(--line)"}},"📦 Depodan"),
-          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,false); },
+          flAcikGram(f)>0?h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"acik"); },
+            disabled:bekle,
+            style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,
+              color:"#166534",borderColor:"#86efac",background:"#f0fdf4"}},
+            "🧵 Açıktan"):null,
+          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"elde"); },
             disabled:bekle,
             style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,
               color:"#9a3412",borderColor:"#fed7aa"}},"🧵 Zaten takılı")); })
@@ -5325,7 +5352,7 @@ function FilamentYonetimSheet({filamentler,makineler,onClose,onAc,onKodla,onStok
   /* 🧵 stok = depodaki kapalı makara + makinede duran ölçülmüş makara */
   const ST=useMemo(()=>makaraStok(list,makineler),[filamentler,makineler]);
   const TOP=makaraStokTop(ST);
-  const st=fl=>ST[fl.id]||{depo:0,makinede:0,olculen:0,olcusuz:0,makineKg:0,kg:0,makara:0};
+  const st=fl=>ST[fl.id]||{depo:0,makinede:0,olculen:0,olcusuz:0,makineKg:0,kg:0,makara:0,acik:0,acikKg:0};
   const deger=list.reduce((s2,f2)=>s2+st(f2).kg*num(f2.kgFiyat),0);
   const depoTop=TOP.depo;
   const turler=flTurGrup(list);
@@ -5357,6 +5384,7 @@ function FilamentYonetimSheet({filamentler,makineler,onClose,onAc,onKodla,onStok
           return h("div",{style:{fontSize:10.5,fontWeight:800,color:"#5b21b6",marginTop:2}},
             "📦 stok "+S.makara+" makara · "+S.kg.toLocaleString("tr")+" kg"
             +(S.olculen?(" · makinede "+S.olculen+" makara "+S.makineKg.toLocaleString("tr")+" kg"):"")
+            +(S.acik?(" · açık "+S.acik+" makara "+S.acikKg.toLocaleString("tr")+" kg"):"")
             +(S.olcusuz?(" · "+S.olcusuz+" makara ölçülmedi"):"")); })())),
     h("input",{value:yazi(fl),type:"text",inputMode:"numeric",placeholder:"0",
       onChange:e=>{ const v=e.target.value; setDuz(o=>({...o,[fl.id]:v})); },
@@ -5372,6 +5400,7 @@ function FilamentYonetimSheet({filamentler,makineler,onClose,onAc,onKodla,onStok
     alt:list.length+" çeşit · "+turler.length+" tür"
       +" · stok "+TOP.makara+" makara · "+TOP.kg.toLocaleString("tr")+" kg"
       +" · depoda "+depoTop+" makara"+(mkTop?(" · makinede "+mkTop):"")
+      +(TOP.acik?(" · açık "+TOP.acik+" makara "+TOP.acikKg.toLocaleString("tr")+" kg"):"")
       +(TOP.olcusuz?(" · "+TOP.olcusuz+" ölçülmedi"):"")
       +(deger>0?(" · "+tlk(deger)):"")+(stoksuz?(" · "+stoksuz+" boş"):""),onClose,cta:"Kapat",onCta:onClose},
     TOP.olcusuz>0?h("div",{style:{padding:"10px 12px",borderRadius:12,background:"#fff7ed",
@@ -7553,11 +7582,14 @@ function App(){
     const kg=num(s2); if(!(kg>0)){ say("Geçersiz miktar"); return null; }
     return Math.round(kg*1000);
   }
-  async function makaraTak(mk,yuva,filamentId,depodan){
+  async function makaraTak(mk,yuva,filamentId,kaynak){
     if(!mk||!mk.id||!filamentId||isBekle) return;
     const f=(filamentler||[]).find(x=>x&&x.id===filamentId);
-    /* zaten takılı makarada kalan bilinmiyor — kilosu hemen sorulur */
+    const kyn=kaynak===true?"depo":(kaynak||"elde");
+    const depodan=kyn==="depo";
+    /* depodan gelmeyen makarada kalan bilinmiyor — kilosu hemen sorulur */
     const olcum=depodan?null:makaraKgSor(f,"⚖️ ");
+    if(kyn==="acik"&&olcum==null){ say("Açık makara için kilo gerekli"); return; }
     setIsBekle(true);
     try{ const L=makMakaralar(mk).slice();
       const i=Math.max(0,Math.min(MAK_YUVA-1,num(yuva)));
@@ -7570,8 +7602,14 @@ function App(){
       if(depodan&&f){ const R=flRuloGram(f), kalan=Math.max(0,flMakara(f)-1);
         await save("filament",{id:f.id,stokMakara:kalan,stokKg:Math.round(kalan*R)/1000,
           dusenMakara:increment(1),dusenKg:increment(R/1000)}); }
+      /* elde duran açık makaradan takıldıysa o havuzdan düşer — iki kez sayılmasın */
+      if(kyn==="acik"&&f){ const g=Math.min(olcum||0,flAcikGram(f));
+        await save("filament",{id:f.id,acikGram:increment(-g),
+          acikMakara:increment(flAcikMakara(f)>0?-1:0)}); }
       say((f?(flRenk(f)||flAd(f)):"Makara")+" takıldı"
-        +(depodan?" · depodan düştü":(olcum!=null?(" · "+(olcum/1000)+" kg stoğa yazıldı"):" · ölçülmedi"))); }
+        +(depodan?" · depodan düştü"
+          :kyn==="acik"?(" · açık makaradan "+(olcum/1000)+" kg")
+          :(olcum!=null?(" · "+(olcum/1000)+" kg stoğa yazıldı"):" · ölçülmedi"))); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   /* ⚖️ makinede duran makarayı tart — girilen kilo stoğa sayılır */
   async function makaraOlcuAl(mk,yuva){
@@ -7587,14 +7625,35 @@ function App(){
       say("⚖️ "+((f&&(flRenk(f)||flAd(f)))||"Makara")+" · "+(g/1000)+" kg stoğa yazıldı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   /* 🧵 makarayı çıkar — yarım kalan makara depoya geri sayılmaz, elde açık durur */
+  /* 🧵 Makarayı çıkar. Hiç kullanılmamış kapalı makara DEPOYA geri sayılır;
+     kalanı bilinen makara "elde açık makara" olarak stokta kalır; hiç ölçülmemiş
+     makaranın kalanı bilinmediği için izlenemez. */
   async function makaraCikar(mk,yuva){ if(!mk||!mk.id||isBekle) return;
     const L=makMakaralar(mk); const sl=L[num(yuva)]; if(!sl) return;
     const f=(filamentler||[]).find(x=>x&&x.id===sl.filamentId);
-    if(!confirm("🧵 "+((f&&(flRenk(f)||flAd(f)))||"Makara")+" çıkarılsın mı?")) return;
+    const ad=(f&&(flRenk(f)||flAd(f)))||"Makara";
+    const c=makaraCikisTur(sl,f)||{tur:"bilinmez",gram:0};
+    const not=c.tur==="depo"
+        ?"\n\nHiç kullanılmamış — depoya kapalı makara olarak geri sayılacak."
+      :c.tur==="acik"
+        ?("\n\n~"+c.gram+" g kalan · elde açık makara olarak stokta tutulacak.")
+      :c.tur==="bitti"
+        ?"\n\nMakara bitmiş — stoğa bir şey eklenmeyecek."
+        :"\n\n⚠ Kalanı ölçülmedi — stokta izlenemeyecek.\nÖnce ⚖️ ile kilosunu girersen kalan stokta kalır.";
+    if(!confirm("🧵 "+ad+" çıkarılsın mı?"+not)) return;
     setIsBekle(true);
     try{ const yeni=makaraYaz(L.filter((x,i)=>i!==num(yuva)));
       await save("makineler",{id:mk.id,takiliMakara:yeni,takiliFilament:yeni.map(x=>x.filamentId)});
-      say("Makara çıkarıldı"); }
+      if(f){
+        if(c.tur==="depo"){ const R=flRuloGram(f), yeniDepo=flMakara(f)+1;
+          await save("filament",{id:f.id,stokMakara:yeniDepo,stokKg:Math.round(yeniDepo*R)/1000,
+            dusenMakara:increment(-1),dusenKg:increment(-R/1000)}); }
+        else if(c.tur==="acik"&&c.gram>0)
+          await save("filament",{id:f.id,acikGram:increment(c.gram),acikMakara:increment(1)});
+      }
+      say(c.tur==="depo"?("📦 "+ad+" depoya geri sayıldı")
+        :c.tur==="acik"?("🧵 "+ad+" · "+c.gram+" g açık makaraya geçti")
+        :"Makara çıkarıldı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function filamentSil(fl){ if(!fl||!fl.id||isBekle) return; if(!confirm("🗑 "+(fl.ad||"filament")+" silinsin mi?")) return; setIsBekle(true);
     try{ await remove("filament",fl.id); setModal(null); say("Filament silindi"); }
