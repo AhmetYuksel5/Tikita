@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v117";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v118";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -196,19 +196,28 @@ function hakedisHesap(har,ts,esik,sirketPaz){
 }
 /* 💵 SAHA NAKDİ — pazarlamacının topladığı ama henüz teslim etmediği para.
    Kesme tarihinden itibaren tahsil edilen nakdin TAMAMI Tikita'ya teslim edilir. */
-function nakitDurum(har){
-  let toplanan=0, teslim=0, bekleyen=0;
+/* Teslimat HAFTALIK KESİME bağlıdır: bir hafta kapanmadan o haftanın nakdi
+   istenmez. Süren haftada toplanan para "bu hafta" olarak ayrı durur ve
+   cuma akşamı kesim olunca teslim edilecek tutara geçer. */
+function nakitDurum(har,simdi){
+  const NOW=num(simdi)||Date.now();
+  let toplanan=0, teslim=0, bekleyen=0, acikHafta=0;
   (har||[]).forEach(x=>{
     const t=new Date(x.tarih).getTime();
     if(x.tip==="nakitTeslim"){ const v=num(x.tutar);
       if(x.onay===false) bekleyen+=v; else teslim+=v; return; }
     if(t<HAKEDIS_BAS_MS) return;                       // kesme öncesi eski düzen
+    let v=0;
     if(x.tip==="satis"&&(x.gerilla||x.kaynak==="gerilla"))
-      toplanan+=(x.tahsil!=null?num(x.tahsil):num(x.adet)*num(x.satisFiyat));
-    else if(x.tip==="tahsilat") toplanan+=num(x.tutar);
+      v=(x.tahsil!=null?num(x.tahsil):num(x.adet)*num(x.satisFiyat));
+    else if(x.tip==="tahsilat") v=num(x.tutar);
+    else return;
+    /* haftası henüz kapanmadıysa teslim edilecek tutara girmez */
+    if(haftaBitMs(t)>=NOW) acikHafta+=v; else toplanan+=v;
   });
   const kalan=Math.max(0,toplanan-teslim-bekleyen);
-  return {toplanan,teslim,bekleyen,kalan,elde:toplanan-teslim};
+  return {toplanan,teslim,bekleyen,kalan,acikHafta,
+    tumToplanan:toplanan+acikHafta,elde:toplanan-teslim};
 }
 // bir kullanıcının bugüne kadarki tüm dönemleri (yeni sistemin başlangıcından)
 function hakedisDonemler(har,simdi){
@@ -1750,7 +1759,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
   // 🫰 bu dönemin hakedişi — Cumartesi 00:00 → Cuma 23:59
   const sirketPaz=!!(d&&d.emir&&d.emir.sirketPaz);
   const HD=useMemo(()=>hakedisHesap(hareketler,NOW,BEDAVA_ESIK,sirketPaz),[hareketler,sirketPaz]);
-  const ND=useMemo(()=>nakitDurum(hareketler),[hareketler]);
+  const ND=useMemo(()=>nakitDurum(hareketler,NOW),[hareketler,NOW]);
   const kayitBul=kod=>(hakDonemler||[]).find(x=>x.hafta===kod&&x.kullaniciId===benId)||null;
   const buKayit=kayitBul(HD.kod);
   const gecmisD=useMemo(()=>hakedisDonemler(hareketler,NOW).slice(1).map(t=>{
@@ -1825,8 +1834,10 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
         h("div",{style:{flex:1,minWidth:0}},
           h("div",{style:{fontSize:14,fontWeight:800}},"Teslim edilecek nakit"),
           h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},
-            "toplanan "+tl(ND.toplanan)+" · teslim "+tl(ND.teslim)
-            +(ND.bekleyen>0.5?(" · onay bekleyen "+tl(ND.bekleyen)):""))),
+            "kapanan haftalar "+tl(ND.toplanan)+" · teslim "+tl(ND.teslim)
+            +(ND.bekleyen>0.5?(" · onay bekleyen "+tl(ND.bekleyen)):"")),
+          ND.acikHafta>0.5?h("div",{style:{fontSize:11,fontWeight:800,color:"#9a3412",marginTop:2}},
+            "🗓 bu hafta toplanan "+tl(ND.acikHafta)+" — kesimden sonra teslim"):null),
         h("div",{style:{textAlign:"right",flexShrink:0}},
           h("div",{style:{fontSize:19,fontWeight:800,color:ND.kalan>0.5?"var(--cyan)":"var(--green)"}},tl(ND.kalan)),
           h("div",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:800}},ND.kalan>0.5?"elinde":"temiz")))):null,
@@ -1906,10 +1917,16 @@ function NakitTeslimSheet({ND,hareketler,onTeslim,onClose,say}){
   return h(Sheet,{ik:"💵",hex:"#0e8fce",baslik:"Nakit teslim",alt:"topladığın parayı komutaya bildir",
     onClose,cta:bekle?"Bildiriliyor…":"💵 Teslim ettim",onCta:gonder,disabled:bekle||v<=0},
     h("div",{style:{background:"var(--surf2)",borderRadius:14,padding:"12px 14px",marginBottom:14}},
-      satir("Kesme tarihinden beri toplanan",tl(ND.toplanan)),
+      satir("Kapanan haftalarda toplanan",tl(ND.toplanan)),
       satir("Teslim edilen",tl(ND.teslim),"var(--green)"),
       ND.bekleyen>0.5?satir("Onay bekleyen",tl(ND.bekleyen),"var(--gold)"):null,
-      satir("ELİNDE KALAN",tl(ND.kalan),ND.kalan>0.5?"var(--cyan)":"var(--green)",true)),
+      satir("ŞİMDİ TESLİM EDİLECEK",tl(ND.kalan),ND.kalan>0.5?"var(--cyan)":"var(--green)",true),
+      ND.acikHafta>0.5?satir("🗓 Bu hafta toplanan (kesim sonrası)",tl(ND.acikHafta),"#9a3412"):null),
+    ND.acikHafta>0.5?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#fff7ed",
+      border:"1px solid #fed7aa",fontSize:11.5,fontWeight:700,color:"#9a3412",marginBottom:12,
+      lineHeight:1.5}},
+      "Süren haftada topladığın "+tl(ND.acikHafta)+" bu teslimata girmez. Hafta cuma akşamı "
+      +"kapanınca teslim edilecek tutara eklenir."):null,
     h("div",{className:"lbl",style:{marginBottom:5}},"Teslim edilen tutar"),
     h("div",{style:{display:"flex",gap:8,marginBottom:10}},
       h("input",{type:"text",inputMode:"decimal",value:tut,onChange:e=>setTut(e.target.value),
