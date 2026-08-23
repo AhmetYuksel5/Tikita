@@ -4,7 +4,7 @@ const fs = require("fs"), path = require("path"), vm = require("vm");
 const body = fs.readFileSync(path.join(__dirname, "../public/lib/hareket-model.js"), "utf8")
   .replace(/^export\s+/gm, "");
 const ctx = vm.createContext({ console });
-vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar};", ctx);
+vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar,urunKarlilik};", ctx);
 const M = ctx.__out;
 
 let ok = 0, fail = 0;
@@ -169,6 +169,22 @@ t("mutabakat: eşleşen kalemlerde fark 0", MU.filter(x => x.ad !== "Sentetik pe
 t("mutabakat: sentetik kalem açıklamalı bilinçli fark", (() => {
   const sx = MU.find(x => x.ad === "Sentetik peşin tahsilat");
   return sx && sx.yeni === 430 && sx.aciklama.length > 0; })());
+
+/* ── ÜRÜN KÂRLILIĞI ── */
+const D2 = { hareketler: [
+  { id: "x1", tip: "satis", tarih: YENI, adet: 2, satisFiyat: 100, alisFiyat: 70, maliyetBirim: 40, urunAd: "Kolye" },
+  { id: "x2", tip: "satis", tarih: YENI, adet: 3, satisFiyat: 100, alisFiyat: 70, maliyetBirim: 40, urunAd: "Kolye" },
+  { id: "x3", tip: "satis", tarih: YENI, adet: 1, satisFiyat: 60, alisFiyat: 45, maliyetBirim: 50, urunAd: "Bileklik" },
+  { id: "x4", tip: "stant", tarih: YENI, fiyat: 500, mod: "satis" }
+] };
+const UK = M.urunKarlilik(M.olayUret(D2, { simdi: SIMDI }).rows);
+t("ürün kârlılığı: Kolye 5 adet, kâr=veriliş−maliyet", (() => {
+  const k = UK.find(x => x.urun === "Kolye");
+  return k && k.adet === 5 && k.ciroUc === 500 && k.ciroVeris === 350 && k.maliyet === 200 && k.tikitaKar === 150; })());
+t("ürün kârlılığı: zarar eden ürün eksi", (() => { const b = UK.find(x => x.urun === "Bileklik");
+  return b && b.tikitaKar === -5; })());
+t("ürün kârlılığı: stant ürün DEĞİL, listede yok", !UK.find(x => x.urun === "?" || x.urun === ""));
+t("ürün kârlılığı sıralı (kâr çoktan aza)", UK[0].urun === "Kolye");
 
 console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
 process.exit(fail ? 1 : 0);

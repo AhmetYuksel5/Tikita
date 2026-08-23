@@ -381,6 +381,27 @@ export function nakitOzet(rows) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   ÜRÜN KÂRLILIĞI — satış satırlarından ürün bazında (kullanıcı isteği:
+   muhasebe kodlu deftere gerek yok, ürün kârlılığı kalsın).
+   ciroUc = uç müşteri bedeli · ciroVeris = Tikita cirosu (veriliş) ·
+   tikitaKar = veriliş − maliyet (ürünün Tikita'ya bıraktığı).
+   ───────────────────────────────────────────────────────────────────────── */
+export function urunKarlilik(rows) {
+  const M = {};
+  (rows || []).forEach(s => {
+    if (s.tur !== "SATIS" || s.altTur === "stant") return;
+    const k = s.urunAd || s.urunId || "?";
+    const o = M[k] || (M[k] = { urun: k, adet: 0, ciroUc: 0, ciroVeris: 0, maliyet: 0 });
+    o.adet += num(s.adet);
+    o.ciroUc = r2(o.ciroUc + s.tutar);
+    o.ciroVeris = r2(o.ciroVeris + num(s.adet) * num(s.birim && s.birim.veris));
+    o.maliyet = r2(o.maliyet + num(s.adet) * num(s.birim && s.birim.maliyet));
+  });
+  return Object.values(M).map(o => ({ ...o, tikitaKar: r2(o.ciroVeris - o.maliyet) }))
+    .sort((a, b) => b.tikitaKar - a.tikitaKar);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    MUTABAKAT — eski ekran toplamları ile yeni satır toplamlarının kıyası.
    eski: {ciro, verisBedel, tahsilat, gider, ...} çağıran hesaplar (RaporA/
    hesap fonksiyonlarından); yeni taraf buradan. Satır yapısı {ad, eski,
