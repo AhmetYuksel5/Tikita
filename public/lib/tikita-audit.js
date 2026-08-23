@@ -145,3 +145,355 @@ export async function geriYukleDoc(db, coll, obj) {
   await setDoc(doc(db, coll, id), dd);
   return id;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUDIT ÇEKİRDEĞİ — merge + increment dünyasına uyarlanmış değişiklik kaydı.
+
+   PersonelTakip'ten FARKLAR (bilerek):
+   - Tikita `setDoc({merge:true})` kullanır → her update kaydı DOĞUŞTAN KISMİDİR:
+     `data` = yama (increment'ler çözülmüş), `prev` = YALNIZ yamadaki anahtarların
+     eski değerleri. Yamada olmayan alan kayda hiç girmez.
+   - Yamada olup dokümanda OLMAYAN alanın prev'i `__YOK__` işaretidir — geri alma
+     o alanı deleteField ile SİLER (merge dünyasında undo alan silebilmelidir).
+   - increment() alanları geri alınırken prev DEĞERİ YAZILMAZ; TERS INCREMENT
+     yapılır (mutlak yazım, araya giren eşzamanlı tahsilatı ezer — Tikita'nın
+     kendi increment dersi). Kayıttaki `incAlan` haritası bunun için tutulur.
+   - İş-olayı kayıtlarına `telafi` etiketi konur: genel geri alma o kayıtları
+     REDDEDER ve ekrandaki telafi akışına (geriAlKayit vb.) yönlendirir.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export const YOK = "__YOK__";   // "bu alan dokümanda yoktu" işareti (undo → deleteField)
+export const LOG_GUN = 40;      // log penceresi — TEK KAYNAK, başka yerde -40 gün hesaplama
+
+/* Audit'lenen koleksiyonlar (varsayılan). GİRMEYENLER ve sebepleri:
+   stok_hareket (kendisi zaten log defteri) · urun_foto (base64, diff anlamsız) ·
+   kesif_cache (yeniden üretilebilir churn) · fiyat_gecmisi (kendisi önceki-değer kaydı) ·
+   audit_logs (kendini loglamaz). */
+export const AUDIT_COLLS = new Set([
+  "kullanici","musteri","bolge","stok_urun","pazarlama_hareket","plan","makineler",
+  "filament","sarf","montaj_gorev","gider","sabit_gider","hakedis_donem","talep",
+  "kampanya","hedef","ayar","sefer","kesif_red"
+]);
+
+const uid8 = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+// 8 karakter rastgele — 4 karakter toplu yazımlarda ÇAKIŞIYORDU (PersonelTakip dersi).
+
+/* Anahtar sırasından bağımsız kararlı JSON — "fark yok"u doğru tespit için. */
+export function stabJSON(v) {
+  if (v === undefined) return "u";
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(stabJSON).join(",") + "]";
+  return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + stabJSON(v[k])).join(",") + "}";
+}
+export const ayniDeger = (a, b) => stabJSON(a) === stabJSON(b);
+
+/* increment() sentineli tespiti — SDK 10.12.0 pinli olduğu için _methodName donuktur.
+   SDK yükseltilirse İLK test edilecek yer burası (tek fonksiyonda izole). */
+export function incMi(v) {
+  return !!(v && typeof v === "object" && typeof v._methodName === "string" &&
+    v._methodName.indexOf("increment") >= 0);
+}
+export function incDelta(v) {
+  const d = Number(v && (v._operand !== undefined ? v._operand : v.Ea));
+  return isFinite(d) ? d : 0;
+}
+
+const derinKopya = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+
+/* Yamadaki increment'leri LOG için çözer (yazılan yama DEĞİŞMEZ).
+   Dönen: { data: log'a yazılacak çözülmüş yama, incAlan: {"alan"|"alan.alt": delta} }.
+   prev bilinmiyorsa değer "__INC(+3)__" metnidir — okunur, uydurma rakam yazmaz. */
+export function incCoz(dd, prevDoc) {
+  const data = {}, incAlan = {};
+  const coz = (yol, v, eski) => {
+    const d = incDelta(v);
+    incAlan[yol] = d;
+    return (typeof eski === "number" && isFinite(eski)) ? Math.round((eski + d) * 100) / 100
+      : "__INC(" + (d >= 0 ? "+" : "") + d + ")__";
+  };
+  Object.keys(dd || {}).forEach(k => {
+    const v = dd[k];
+    if (incMi(v)) { data[k] = coz(k, v, prevDoc && prevDoc[k]); return; }
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      // iç içe map yaması (pazStokK:{uid:increment(n)}) — bir seviye derine bakılır
+      const m = {}; let varInc = false;
+      Object.keys(v).forEach(ak => {
+        const av = v[ak];
+        if (incMi(av)) { varInc = true; m[ak] = coz(k + "." + ak, av, prevDoc && prevDoc[k] && prevDoc[k][ak]); }
+        else m[ak] = derinKopya(av);
+      });
+      data[k] = m;
+      return;
+    }
+    data[k] = derinKopya(v);
+  });
+  return { data, incAlan };
+}
+
+/* prev alt kümesi — YALNIZ yamadaki üst-düzey anahtarlar.
+   İç içe map yamasında prev, üst-düzey anahtarın TAMAMIdır (merge'ün derin
+   birleşme semantiğini alan alan modellemek hata kaynağı — üst-düzey tam kopya
+   hem gösterim hem undo için yeterli). */
+export function prevAltKume(dd, prevDoc) {
+  if (!prevDoc) return null;
+  const p = {};
+  Object.keys(dd || {}).forEach(k => {
+    p[k] = (k in prevDoc) ? derinKopya(prevDoc[k]) : YOK;
+  });
+  return p;
+}
+
+/* Kısa kimlik özeti — kısmi kayıt "kim/ne?" sorusunu cevaplayabilsin.
+   Şifre alanları ASLA girmez. data/prev'e KARIŞTIRILMAZ (undo yalnız onları okur). */
+const KIM_ATLA = { pin: 1, pinHash: 1, pinSalt: 1, token: 1 };
+export function auditKimlik(d) {
+  const out = {}; let say = 0;
+  Object.keys(d || {}).forEach(k => {
+    if (say >= 25 || KIM_ATLA[k]) return;
+    const v = d[k];
+    if (typeof v === "number" || typeof v === "boolean" ||
+        (typeof v === "string" && v.length <= 80)) { out[k] = v; say++; }
+  });
+  return out;
+}
+
+/* İnsan-okur tek satır etiket — Tikita koleksiyonlarına göre. */
+const parayaz = v => { const n = Number(v); return isFinite(n) && n !== 0 ? " · " + (Math.round(n * 100) / 100) + " ₺" : ""; };
+export function etiketYap(coll, action, d, prev) {
+  const x = d || prev || {};
+  const ek = action === "delete" ? " — SİLİNDİ" : (action === "create" ? "" : " — güncellendi");
+  try {
+    if (coll === "pazarlama_hareket")
+      return [(x.tip || "hareket"), x.urunAd, x.adet ? x.adet + " adet" : "", x.kullaniciAd].filter(Boolean).join(" · ") + parayaz(x.tutar) + ek;
+    if (coll === "gider" || coll === "sabit_gider")
+      return [(x.tur || "gider"), x.aciklama].filter(Boolean).join(" · ") + parayaz(x.tutar) + ek;
+    if (coll === "hakedis_donem")
+      return ["hakediş", x.kullaniciAd, x.hafta, x.durum].filter(Boolean).join(" · ") + parayaz(x.hakedis) + ek;
+    if (coll === "plan")
+      return ["baskı", x.ad || x.urunAd].filter(Boolean).join(" · ") + ek;
+    if (coll === "stok_urun")
+      return ["ürün", x.ad].filter(Boolean).join(" · ") + ek;
+    if (coll === "kullanici" || coll === "musteri")
+      return [(coll === "kullanici" ? "kullanıcı" : "kale"), x.ad].filter(Boolean).join(" · ") + ek;
+    const kim = auditKimlik(x); const ilk = kim.ad || kim.aciklama || kim.tur || "";
+    return (coll + (ilk ? " · " + ilk : "")) + ek;
+  } catch (e) { return coll + ek; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   kurAudit — sayfa başına tek kurulum.
+   opts: { db,                     zorunlu
+           cn,                     mantıksal→gerçek koleksiyon adı (demo/OV öneki);
+                                   cn(coll)!==coll ise AUDIT ATLANIR (deneme verisi
+                                   gerçek defteri kirletmez)
+           kim,                    () => ({who, whoId})
+           auditColls,             Set — varsayılan AUDIT_COLLS
+           onHata }                audit yazım hatası bildirimi (toast köprüsü)
+   ───────────────────────────────────────────────────────────────────────── */
+export function kurAudit(opts) {
+  const db = opts.db;
+  const cn = opts.cn || (c => c);
+  const kim = opts.kim || (() => ({ who: "", whoId: "" }));
+  const COLLS = opts.auditColls || AUDIT_COLLS;
+  const onHata = opts.onHata || null;
+
+  /* Yerel ayna — her canlı dinleyici koleksiyonu buraya da yazar (snapPut).
+     fss'in "prev"i buradan gelir; unutulan sayfa her şeyi create loglar. */
+  const snap = {};   // coll -> {map:{id:doc}}
+  function snapPut(coll, rows) {
+    const m = {};
+    (rows || []).forEach(r => { if (r && r.id) m[r.id] = r; });
+    snap[coll] = { map: m };
+  }
+  function snapGet(coll, id) { const s = snap[coll]; return s ? s.map[id] : undefined; }
+  const snapVar = coll => !!snap[coll];
+
+  /* op damgası — tek eylem = tek log satırı. Damga yazım BAŞINDA alınır
+     (audit async yazılabilir, sıra kaymasın). */
+  let OP = null;
+  function opAl(coll, action) {
+    if (!OP) return null;
+    OP.n++;
+    const anaMi = !OP.anaVar && (!OP.ana || OP.ana === coll || OP.ana === coll + ":" + action);
+    if (anaMi) OP.anaVar = true;
+    return { op: OP.id, opAna: anaMi || undefined, opAd: OP.ad || undefined, telafi: OP.telafi || undefined };
+  }
+  async function op(fn, ana, ad, ekstra) {
+    const onceki = OP;
+    OP = { id: uid8(), n: 0, ana: ana || "", anaVar: false, ad: ad || "", telafi: (ekstra && ekstra.telafi) || "" };
+    try { return await fn(); }
+    finally { OP = onceki; }
+  }
+
+  let auditFail = 0;
+  function auditWrite(action, coll, docId, dataObj, prevObj, ek) {
+    try {
+      const lid = uid8();
+      const k = kim() || {};
+      const rec = {
+        id: lid, ts: new Date().toISOString(), date: ymdYerel(),
+        v: AUDIT_SURUM, action, coll, docId: String(docId || ""),
+        data: JSON.stringify(dataObj === undefined ? null : dataObj),
+        prev: JSON.stringify(prevObj === undefined ? null : prevObj),
+        label: etiketYap(coll, action, dataObj, prevObj),
+        who: k.who || "", whoId: k.whoId || ""
+      };
+      if (ek) Object.keys(ek).forEach(x => { if (ek[x] !== undefined) rec[x] = ek[x]; });
+      if (action === "update") {
+        rec.kismi = true;                            // merge dünyasında her update kısmidir
+        rec.kim = JSON.stringify(auditKimlik(dataObj || {}));
+      }
+      const { id: _, ...dd } = rec;
+      setDoc(doc(db, "audit_logs", lid), dd).catch(e => {
+        auditFail++; try { window.__auditFail = auditFail; } catch (_) {}
+        console.error("audit yazılamadı", e);
+        if (onHata && auditFail === 1) { try { onHata(e); } catch (_) {} }
+      });
+    } catch (e) {
+      auditFail++; try { window.__auditFail = auditFail; } catch (_) {}
+      console.error("audit kurulamadı", e);
+    }
+  }
+
+  /* ── save: setDoc({merge:true}) + audit. Asıl yazım audit'ten ETKİLENMEZ. ── */
+  async function save(coll, obj, ek) {
+    const id = obj.id || uid8();
+    const { id: _, ...dd } = obj;
+    const gercek = cn(coll);
+    const auditli = COLLS.has(coll) && gercek === coll;
+    if (!auditli) { await setDoc(doc(db, gercek, id), dd, { merge: true }); return id; }
+
+    // prev YAZIMDAN ÖNCE — aynadan senkron. Ayna yoksa ve id dışarıdan geldiyse
+    // getDoc'a düşülür (bir ağ turu; create/update ayrımı yanlış olmasın).
+    let prevDoc = snapGet(coll, id);
+    if (prevDoc === undefined && obj.id && !snapVar(coll)) {
+      try { const s = await getDoc(doc(db, gercek, id)); if (s.exists()) prevDoc = { id, ...s.data() }; }
+      catch (e) { /* okunamadıysa create varsayılır */ }
+    }
+    const action = prevDoc ? "update" : "create";
+    const damga = opAl(coll, action);
+
+    await setDoc(doc(db, gercek, id), dd, { merge: true });   // ASIL İŞ — önce bu
+
+    try {
+      const { data, incAlan } = incCoz(dd, prevDoc);
+      if (action === "update") {
+        const prevAlt = prevAltKume(dd, prevDoc);
+        // fark yoksa log satırı YOK (kararlı JSON, anahtar sırası bağımsız)
+        const fark = Object.keys(data).some(k2 =>
+          (incAlan[k2] !== undefined) || Object.keys(incAlan).some(y => y.indexOf(k2 + ".") === 0) ||
+          !ayniDeger(data[k2], prevAlt[k2] === YOK ? undefined : prevAlt[k2]));
+        if (fark) auditWrite("update", coll, id, data, prevAlt,
+          { ...(damga || {}), ...(Object.keys(incAlan).length ? { incAlan: JSON.stringify(incAlan) } : {}), ...(ek || {}) });
+      } else {
+        auditWrite("create", coll, id, data, null, { ...(damga || {}), ...(ek || {}) });
+      }
+    } catch (e) { console.error("audit diff", e); }
+    return id;
+  }
+
+  /* ── remove: silinen dokümanın tamamı hem data hem prev'de saklanır. ── */
+  async function remove(coll, id, ek) {
+    const gercek = cn(coll);
+    const auditli = COLLS.has(coll) && gercek === coll;
+    if (!auditli) { await deleteDoc(doc(db, gercek, id)); return; }
+    let old = snapGet(coll, id);
+    if (old === undefined) {
+      try { const s = await getDoc(doc(db, gercek, id)); if (s.exists()) old = { id, ...s.data() }; } catch (e) {}
+    }
+    const damga = opAl(coll, "delete");
+    await deleteDoc(doc(db, gercek, id));
+    auditWrite("delete", coll, id, old || null, old || null, { ...(damga || {}), ...(ek || {}) });
+  }
+
+  /* ── restoreDoc: merge'süz TAM yazım (plan geri alma / yedekten dönüş). ── */
+  async function restoreDoc(coll, obj, ek) {
+    const id = obj.id; if (!id) throw new Error("restoreDoc: id yok");
+    const { id: _, ...dd } = obj;
+    const gercek = cn(coll);
+    const auditli = COLLS.has(coll) && gercek === coll;
+    const prevDoc = auditli ? snapGet(coll, id) : undefined;
+    const damga = auditli ? opAl(coll, "restore") : null;
+    await setDoc(doc(db, gercek, id), dd);
+    if (auditli) auditWrite("restore", coll, id, derinKopya(dd), prevDoc ? derinKopya(prevDoc) : null, { ...(damga || {}), ...(ek || {}) });
+    return id;
+  }
+
+  /* ── GERİ ALMA ───────────────────────────────────────────────────────────
+     Kurallar:
+     - `telafi` etiketli kayıt REDDEDİLİR → {yonlendir} döner; o iş ekrandaki
+       telafi akışıyla (geriAlKayit / montajGeriAl / …) geri alınır.
+     - incAlan alanları TERS INCREMENT ile döner (asla mutlak eski değer).
+     - __YOK__ alanları deleteField ile SİLİNİR.
+     - create → sil · delete → tam geri yükle · restore → prev'e tam dön.
+     - Undo'nun kendisi audit'LENMEZ (sonsuz döngü); kayda undone damgası vurulur. */
+  async function undoAudit(log) {
+    if (!log || log.undone) return { olmadi: "zaten" };
+    if (log.telafi) return { yonlendir: log.telafi };
+    const gercek = cn(log.coll);
+    if (gercek !== log.coll) return { olmadi: "demo" };
+    const ref = doc(db, gercek, log.docId);
+    const oku = s => { try { return s == null ? null : JSON.parse(s); } catch (e) { return null; } };
+    // data/prev JSON METNİdir — parse edilmeden okunamaz (bilinen tuzak).
+    const dataO = oku(log.data), prevO = oku(log.prev);
+
+    if (log.action === "create") {
+      await deleteDoc(ref);
+    } else if (log.action === "delete") {
+      const geri = prevO || dataO; if (!geri) return { olmadi: "veri yok" };
+      const { id: _i, ...dd } = geri; await setDoc(ref, dd);
+    } else if (log.action === "restore") {
+      if (!prevO) return { olmadi: "önceki hâl kayıtlı değil" };
+      const { id: _i, ...dd } = prevO; await setDoc(ref, dd);
+    } else { // update (kısmi)
+      if (!prevO) return { olmadi: "veri yok" };
+      const incAlan = oku(log.incAlan) || {};
+      // ① increment alanları: ters increment (üst düzey ve "a.b" noktalı yollar)
+      const incUp = {};
+      Object.keys(incAlan).forEach(y => { const d = Number(incAlan[y]) || 0; if (d) incUp[y] = increment(-d); });
+      if (Object.keys(incUp).length) {
+        try { await updateDoc(ref, incUp); }
+        catch (e) { console.error("ters increment", e); return { olmadi: "increment geri alınamadı" }; }
+      }
+      // ② diğer alanlar: prev'e dön; __YOK__ → alanı sil. increment'li ÜST düzey
+      //    alanlara ve incli iç içe map'in üst anahtarına DOKUNULMAZ.
+      const incUst = {}; Object.keys(incAlan).forEach(y => { incUst[y.split(".")[0]] = 1; });
+      const geriYaz = {};
+      Object.keys(prevO).forEach(k => {
+        if (incUst[k]) return;
+        geriYaz[k] = (prevO[k] === YOK) ? deleteField() : prevO[k];
+      });
+      if (Object.keys(geriYaz).length) {
+        try { await updateDoc(ref, geriYaz); }
+        catch (e) { // doküman silinmişse merge ile diriltme DOĞRU değil — bildir
+          console.error("undo yazımı", e); return { olmadi: "doküman bulunamadı" };
+        }
+      }
+    }
+    const k = kim() || {};
+    setDoc(doc(db, "audit_logs", log.id),
+      { undone: true, undoneTs: new Date().toISOString(), undoneBy: k.who || "" }, { merge: true })
+      .catch(e => console.error("undone damgası", e));
+    return { oldu: true };
+  }
+
+  /* ── 40 günlük pencereli log aboneliği ───────────────────────────────────
+     Ölçüt alan "ts" — sonradan eklenen bir alan pencere ölçütü YAPILMAZ
+     (alan olmayan doküman eşitsizlik sorgusundan düşer; PersonelTakip'te
+     "date" alanı 40 günlük geçmişi görünmez yapmıştı). Sorgu kurulamazsa
+     TÜM koleksiyona abone OLUNMAZ — boş liste döner (bosDus). */
+  function logDinle(cb) {
+    const win = new Date(Date.now() - LOG_GUN * 864e5).toISOString();
+    try {
+      const q = query(collection(db, "audit_logs"), where("ts", ">=", win));
+      return onSnapshot(q,
+        s => { const L = s.docs.map(d => ({ id: d.id, ...d.data() }));
+               L.sort((a, b) => (b.ts || "").localeCompare(a.ts || "") || (b.id || "").localeCompare(a.id || ""));
+               cb(L); },
+        e => { console.error("audit_logs", e); cb([]); });
+    } catch (e) { console.error("audit_logs sorgu", e); cb([]); return () => {}; }
+  }
+
+  return { save, remove, restoreDoc, snapPut, snapGet, op, undoAudit, logDinle,
+           auditWrite, auditFailSay: () => auditFail };
+}

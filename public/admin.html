@@ -81,7 +81,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { yedekTopla, yedekIndir, sonYedekIsaretle, sonYedekGun, yedekEskiMi, ymdYerel, TK_YEDEK_FOTO } from "./lib/tikita-audit.js";
+import { yedekTopla, yedekIndir, sonYedekIsaretle, sonYedekGun, yedekEskiMi, ymdYerel, TK_YEDEK_FOTO, kurAudit } from "./lib/tikita-audit.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -167,8 +167,12 @@ const IK=(key,c,s)=>{ const t=TEMALAR[TEMA]||TEMALAR.kurumsal; const v=(t.I||{})
                : h("span",{style:{fontSize:(s||18)-1,lineHeight:1}},v); };
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
-async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
+/* 📜 AUDIT — bütün yazımlar tek sarmalayıcıdan geçer; gövde audit çekirdeğine
+   yönlendirildi, çağıran ~250 yer değişmeden değişiklik kaydı kazandı. */
+const AUD=kurAudit({db,kim:()=>{ const u=AUD.snapGet("kullanici",BEN_ID);
+  return {who:(u&&u.ad)||"Komuta",whoId:BEN_ID||"komuta"}; }});
+async function save(coll,obj){ return AUD.save(coll,obj); }
+async function remove(coll,id){ return AUD.remove(coll,id); }
 // — eski panel ile ORTAK plan yardımcıları (birebir) —
 async function planOtele(makineId,plan,oldStartMs,deltaMs,editedId){ if(!deltaMs) return;
   const ds=(plan||[]).filter(p=>p.makineId===makineId&&p.id!==editedId&&new Date(p.baslangic).getTime()>oldStartMs);
@@ -446,7 +450,10 @@ function hataBildir(){ if(!VERI_HATA){ VERI_HATA=true; hataDinle.forEach(f=>f())
 function useVeriHata(){ const [,f]=useState(0); useEffect(()=>{ const g=()=>f(x=>x+1); hataDinle.add(g); return ()=>hataDinle.delete(g); },[]); return VERI_HATA; }
 function useColl(name){ const [rows,setRows]=useState(null);
   useEffect(()=>{ const t=setTimeout(()=>setRows(r=>{ if(r===null){ hataBildir(); return []; } return r; }),18000);   // mobil bağlantıda erken pes etme
-    const un=onSnapshot(collection(db,name),s=>{clearTimeout(t);setRows(s.docs.map(d=>({id:d.id,...d.data()})));},
+    const un=onSnapshot(collection(db,name),s=>{clearTimeout(t);
+        const R=s.docs.map(d=>({id:d.id,...d.data()}));
+        AUD.snapPut(name,R);   // audit "önce"si bu aynadan okunur — satır atlanırsa her şey create loglanır
+        setRows(R);},
       e=>{console.error(name,e);clearTimeout(t);hataBildir();setRows(r=>r===null?[]:r);});
     return ()=>{clearTimeout(t);un();}; },[]);
   return rows; }

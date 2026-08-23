@@ -69,6 +69,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { kurAudit } from "./lib/tikita-audit.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -85,10 +86,14 @@ const tlk=n=>(Math.round(num(n)*100)/100).toLocaleString("tr-TR",{maximumFractio
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
 const gerekenP=(u,p)=>Math.max(1,Math.round(num(((u&&u.parcaAdet)||{})[p]||1)));
-async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,coll,id),d,{merge:true}); return id; }
+/* 📜 AUDIT — montaj yazımları da değişiklik kaydına düşer. */
+const AUD=kurAudit({db,kim:()=>{ const u=AUD.snapGet("kullanici",BEN_ID);
+  return {who:(u&&u.ad)||"Montaj",whoId:BEN_ID||""}; }});
+async function save(coll,obj){ return AUD.save(coll,obj); }
 
 function useColl(name){ const [rows,setRows]=useState(null);
-  useEffect(()=>{ const un=onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),
+  useEffect(()=>{ const un=onSnapshot(collection(db,name),s=>{ const R=s.docs.map(d=>({id:d.id,...d.data()}));
+      AUD.snapPut(name,R); setRows(R); },
     e=>{ console.error(name,e); setRows(r=>r===null?[]:r); });
     return ()=>un(); },[]);
   return rows; }
