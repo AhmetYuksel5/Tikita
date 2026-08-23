@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L65";   // komuta (admin) deneme sürümü
+const SURUM="L66";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -165,6 +165,11 @@ const IK=(key,c,s)=>{ const t=TEMALAR[TEMA]||TEMALAR.kurumsal; const v=(t.I||{})
   return t.geo ? h(Icn,{n:v,c:c||"currentColor",s:s||18})
                : h("span",{style:{fontSize:(s||18)-1,lineHeight:1}},v); };
 let BEN_ID=null; try{ BEN_ID=localStorage.getItem("tk_uid"); }catch(e){}   // giriş yapan kullanıcının id'si (index.html giriş kapısı yazar)
+/* 🏭 ÜRETİM BANDI YETKİSİ — bir pazarlamacıya üretim bandı atanabilir.
+   O kişi komuta paneline yalnız Üretim sekmesiyle girer: baskı planlar,
+   başlatır, tabla toplar, makara takar/çıkarır. Başka sekme görmez. */
+const bandciMi=u=>!!(u&&u.rol==="pazarlamaci"&&u.uretimBandi);
+const komutaGirebilir=u=>!!(u&&(u.rol==="admin"||bandciMi(u)));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,coll,id),dd,{merge:true}); return id; }
 async function remove(coll,id){ await deleteDoc(doc(db,coll,id)); }
@@ -3688,11 +3693,14 @@ function KullaniciSheet({u,onKaydet,bekle}){
   const [simge,setSimge]=useState(duzen?(u.simge||SIMGELER[0]):SIMGELER[0]);
   const [pin,setPin]=useState("");
   const [sirketPaz,setSirketPaz]=useState(duzen?!!u.sirketPaz:false);   // 🏢 hakediş almaz
+  const [bant,setBant]=useState(duzen?!!u.uretimBandi:false);           // 🏭 üretim bandı yetkisi
   const gecerli=!!ad.trim()&&(duzen||pin.trim().length>=4);
   return h(Sheet,{ik:simge,hex:"#1e3a5f",baslik:duzen?("Düzenle · "+(u.ad||"")):"Yeni kullanıcı",
     alt:"",onClose:()=>onKaydet(null),
     cta:bekle?"⏳…":(duzen?"Kaydet":"Kullanıcı ekle"),disabled:!gecerli||bekle,
-    onCta:()=>onKaydet({id:duzen?u.id:null,ad:ad.trim(),rol,simge,pin:pin.trim(),sirketPaz:rol==="pazarlamaci"?sirketPaz:false})},
+    onCta:()=>onKaydet({id:duzen?u.id:null,ad:ad.trim(),rol,simge,pin:pin.trim(),
+      sirketPaz:rol==="pazarlamaci"?sirketPaz:false,
+      uretimBandi:rol==="pazarlamaci"?bant:false})},
     h("div",{className:"lbl",style:{marginBottom:8}},"Ad *"),
     h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Emir",style:{...inp,marginBottom:14}}),
     h("div",{className:"lbl",style:{marginBottom:8}},"Rol"),
@@ -3709,7 +3717,25 @@ function KullaniciSheet({u,onKaydet,bekle}){
         background:sirketPaz?"#eff8fd":"var(--surf2)",border:"1px solid "+(sirketPaz?"#a5d8f3":"var(--line)"),
         color:sirketPaz?"#0369a1":"var(--mut)"}},
         sirketPaz?"Sattığı ürünün bedeli kaça satarsa satsın tümüyle şirkete aktarılır. Hakediş doğmaz, haftalık ödeme çıkmaz."
-                 :"Satış ile veriliş fiyatı arasındaki fark hakedişi olur, haftalık ödenir.")):null,
+                 :"Satış ile veriliş fiyatı arasındaki fark hakedişi olur, haftalık ödenir."),
+      /* 🏭 üretim bandı — pazarlamacı komuta panelinin yalnız Üretim sekmesine girer */
+      h("div",{className:"lbl",style:{marginBottom:8}},"Üretim bandı"),
+      h("button",{onClick:()=>setBant(v=>!v),
+        style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"11px 12px",
+          borderRadius:12,marginBottom:8,background:bant?"#f0fdf4":"var(--surf2)",
+          border:"1px solid "+(bant?"#86efac":"var(--line)")}},
+        h("span",{style:{width:22,height:22,borderRadius:7,flexShrink:0,display:"flex",alignItems:"center",
+          justifyContent:"center",fontSize:13,fontWeight:800,color:"#fff",
+          background:bant?"#16a34a":"transparent",border:"2px solid "+(bant?"#16a34a":"var(--mut2)")}},bant?"✓":""),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13.5,fontWeight:800,color:bant?"#166534":"var(--txt)"}},
+            "🏭 Üretim bandını yönetsin"),
+          h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:1,lineHeight:1.5}},
+            bant?"Komuta panelinde yalnız Üretim sekmesini görür: baskı planlar, başlatır, tabla toplar, makara takar."
+                :"Kapalı — yalnız kendi pazarlama ekranını kullanır."))),
+      bant?h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:14,fontSize:11.5,fontWeight:700,
+        lineHeight:1.5,background:"#f0fdf4",border:"1px solid #86efac",color:"#166534"}},
+        "Pazarlama ekranındaki 🏭 Üretim bandı düğmesinden geçer. Rapor, stok, ekip ve finans göremez."):null):null,
     h("div",{className:"lbl",style:{marginBottom:8}},"Simge"),
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
       SIMGELER.map(sm=>h("button",{key:sm,onClick:()=>setSimge(sm),
@@ -7207,9 +7233,13 @@ function TablaOdemeSheet({ekip,tablaBak,acikOdeme,odemeList,onEmir,onIptal,onClo
 // alt bar — seçili sekme Tikita logosunun renklerinden birini alır
 // 🧪 deney: açıkken simgeler T-I-K-I-T-A harflerini taşıyan sürümleriyle değişir
 const HARF_IK={us:"t_panel",uretim:"i_uretim",stok:"k_stok",ekip:"i_ekip",rapor:"t_rapor",deney:"a_deney"};
-function Nav({aktif,go,deneyIk,onDeney,pc}){ const items=[["us","dash",TT().navUs,"#e8334a"],["uretim","printer","Üretim","#17a2b8"],
-  ["stok","box","Stok","#e09b00"],["ekip","users","Ekip","#7b2fbe"],["rapor","chart","Rapor","#7cb92b"],
-  ["deney","a_deney","Deney","#f47b20"]];
+function Nav({aktif,go,deneyIk,onDeney,pc,bandci}){
+  /* 🏭 üretim bandı yetkili pazarlamacı: yalnız Üretim + kendi pazarlama ekranı */
+  const items=bandci
+    ?[["uretim","printer","Üretim","#17a2b8"],["paz","users","Pazarlama","#7b2fbe"]]
+    :[["us","dash",TT().navUs,"#e8334a"],["uretim","printer","Üretim","#17a2b8"],
+      ["stok","box","Stok","#e09b00"],["ekip","users","Ekip","#7b2fbe"],["rapor","chart","Rapor","#7cb92b"],
+      ["deney","a_deney","Deney","#f47b20"]];
   // 🖥 masaüstü görünümü → sol yan menü (alt bar yerine)
   if(pc) return h("div",{style:{position:"fixed",top:0,left:0,bottom:0,width:208,zIndex:50,background:"var(--surf)",
       borderRight:"1px solid var(--line)",boxShadow:"3px 0 20px rgba(28,30,45,.05)",display:"flex",flexDirection:"column",
@@ -7225,7 +7255,7 @@ function Nav({aktif,go,deneyIk,onDeney,pc}){ const items=[["us","dash",TT().navU
         h("span",{style:{width:5,height:5,borderRadius:5,flexShrink:0,background:on?renk:"transparent"}}))}));
   return h("div",{style:{position:"fixed",bottom:0,left:0,right:0,zIndex:50}},
     h("div",{style:{maxWidth:520,margin:"0 auto",background:"var(--surf)",borderTop:"1px solid var(--line)",boxShadow:"0 -4px 20px rgba(28,30,45,.08)",
-      display:"grid",gridTemplateColumns:"repeat(6,1fr)",padding:"2px 6px calc(env(safe-area-inset-bottom,0px) + 2px)"}},
+      display:"grid",gridTemplateColumns:"repeat("+items.length+",1fr)",padding:"2px 6px calc(env(safe-area-inset-bottom,0px) + 2px)"}},
       items.map(([k,ic,ad,renk])=>{const deneyMi=k==="deney"; const on=deneyMi?!!deneyIk:(aktif===k); const col=on?renk:"var(--mut2)";
         const sim=(deneyIk&&HARF_IK[k])?HARF_IK[k]:ic;
         return h("button",{key:k,onClick:deneyMi?onDeney:(()=>go(k)),style:{display:"flex",flexDirection:"column",alignItems:"center",gap:1,padding:"2px 0",color:col}},
@@ -7390,7 +7420,10 @@ function App(){
     (d.stok||[]).forEach(u=>{ const m=num(u.maliyet); const eski=num(u.raw&&u.raw.maliyetGuncel);
       if(m>0&&Math.abs(m-eski)>0.005) save("stok_urun",{id:u.id,maliyetGuncel:Math.round(m*100)/100}).catch(()=>{}); }); },3000);
     return ()=>clearTimeout(t); },[d]);
-  const go=v=>{ modalKapat(); BACK_STACK.length=0; setHedefOdak(null); setView(v); window.scrollTo(0,0); };   // sekme değişince geri yığını da sıfırlanır
+  /* 🏭 bantçı yalnız Üretim'de kalır; "paz" kendi pazarlama ekranına döner */
+  const go=v=>{ if(v==="paz"){ location.href="deneme.html"; return; }
+    if(bandci&&v!=="uretim") return;
+    modalKapat(); BACK_STACK.length=0; setHedefOdak(null); setView(v); window.scrollTo(0,0); };   // sekme değişince geri yığını da sıfırlanır
   const [isBekle,setIsBekle]=useState(false);
   async function isKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ const eski=p2._eski; const {_eski,...kayit}=p2;
@@ -7469,7 +7502,8 @@ function App(){
     catch(e){ console.error(e); say("Seri kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function kullaniciKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ const ekPin=p2.pin?{pin:p2.pin,pinHash:"",pinSalt:""}:{};   // görünür şifre (yönetici görebilsin diye düz metin)
-      await save("kullanici",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,rol:p2.rol,simge:p2.simge,renkH:adRenk(p2.ad).H,sirketPaz:!!p2.sirketPaz,...ekPin});
+      await save("kullanici",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,rol:p2.rol,simge:p2.simge,renkH:adRenk(p2.ad).H,
+        sirketPaz:!!p2.sirketPaz,uretimBandi:!!p2.uretimBandi,...ekPin});
       setModal(null); say((p2.id?"Güncellendi":"Kullanıcı eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function sifreSet(id,pin){ if(!id||!pin||String(pin).trim().length<4||isBekle) return; setIsBekle(true);
@@ -7973,9 +8007,11 @@ function App(){
     if(kullanicilar&&kullanicilar.length){ const me=kullanicilar.find(u=>u.id===BEN_ID);
       if(!me){ location.replace("index.html?giris=1"); return; }
       if(me.rol==="montaj") location.replace("montaj.html");
-      else if(me.rol!=="admin") location.replace("deneme.html"); } },[kullanicilar]);
+      else if(!komutaGirebilir(me)) location.replace("deneme.html"); } },[kullanicilar]);
   const benKul=kullanicilar?kullanicilar.find(u=>u.id===BEN_ID):undefined;
-  const yetkili=!!(BEN_ID&&benKul&&benKul.rol==="admin");
+  const yetkili=komutaGirebilir(benKul);
+  /* 🏭 üretim bandı yetkili pazarlamacı — yalnız Üretim sekmesi */
+  const bandci=bandciMi(benKul);
   const engelle=h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}},
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Giriş gerekli — yönlendiriliyor…"));
@@ -7990,13 +8026,14 @@ function App(){
     h("div",{style:{width:44,height:44,borderRadius:"50%",border:"3px solid var(--line)",borderTopColor:"var(--cyan)",animation:"spin .8s linear infinite"}}),
     h("div",{style:{color:"var(--mut)",fontSize:14,fontWeight:600}},"Komuta merkezi hazırlanıyor…"));
   let ekran;
-  if(view==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"}),onTalepSil:talepSil});
-  else if(view==="uretim") ekran=h(Uretim,{d,plan,makineler,filamentler,ac:setModal,onTabla:tablaTopla,fotoMap,
+  const gorunen=bandci?"uretim":view;
+  if(gorunen==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"}),onTalepSil:talepSil});
+  else if(gorunen==="uretim") ekran=h(Uretim,{d,plan,makineler,filamentler,ac:setModal,onTabla:tablaTopla,fotoMap,
     bekle:isBekle,onAktar:planAktar,onGeriAl:planGeriAl,
     onFilAta:async(ids,fid)=>{ for(const id of ids){ await save("plan",{id,filamentId:fid}); }
       say(ids.length+" baskıya filament atandı"); }});
-  else if(view==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap,onPlanSil:x=>isSil({p:x.p,durum:"bekliyor"}),bekle:isBekle,onFiyat:fiyatKaydet,anlasmaSay:anlasmalar.length});
-  else if(view==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler,yinelenenSay:yinelenenler.length});
+  else if(gorunen==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap,onPlanSil:x=>isSil({p:x.p,durum:"bekliyor"}),bekle:isBekle,onFiyat:fiyatKaydet,anlasmaSay:anlasmalar.length});
+  else if(gorunen==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler,yinelenenSay:yinelenenler.length});
   else ekran=h(RaporA,{d,ac:setModal,giderler,sabitGider,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal,
     hakedisDonem,onHakOnay:hakedisOnay,onHakOde:hakedisOde,onHakGeriAl:hakedisGeriAl,
     onNakitOnay:nakitOnay,onNakitGeriAl:nakitGeriAl,montajGorev});
@@ -8006,7 +8043,7 @@ function App(){
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
     ekran,
-    h(Nav,{aktif:view,go,deneyIk,onDeney:()=>setDeneyIk(v=>!v),pc:yanMenu}),
+    h(Nav,{aktif:gorunen,go,deneyIk,onDeney:()=>setDeneyIk(v=>!v),pc:yanMenu,bandci}),
     silinen?h("div",{className:"fade",style:{position:"fixed",left:"50%",bottom:108,transform:"translateX(-50%)",zIndex:61,
       background:"#1b1e25",color:"#fff",padding:"11px 14px",borderRadius:14,fontSize:13,fontWeight:600,
       boxShadow:"0 12px 40px rgba(0,0,0,.28)",display:"flex",alignItems:"center",gap:12,maxWidth:"90%"}},
