@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v116";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v117";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -157,7 +157,7 @@ function hakedisHesap(har,ts,esik,sirketPaz){
   const sat=(har||[]).filter(x=>x.tip==="satis"&&ic(x));
   const E=num(esik!=null?esik:1);
   const byU={};
-  let hakedis=0,ciro=0,verisBedel=0,adet=0,gerNakit=0,eksiVar=false,bedavaAdet=0;
+  let hakedis=0,ciro=0,verisBedel=0,adet=0,gerNakit=0,eksiVar=false,bedavaAdet=0,tahsilsiz=0;
   const byG={};   // 📅 gün + kale kırılımı — "ne zaman, nerede, ne ciro, ne hakediş"
   sat.forEach(x=>{
     const a=Math.max(0,num(x.adet)), fiyat=num(x.satisFiyat), veris=num(x.alisFiyat);
@@ -173,12 +173,17 @@ function hakedisHesap(har,ts,esik,sirketPaz){
     hakedis+=tutar; ciro+=a*fiyat; verisBedel+=a*veris; adet+=a;
     const ger=!!(x.gerilla||x.kaynak==="gerilla");
     if(ger) gerNakit+=a*fiyat;
+    /* 💸 satıldı ama parası alınmadı: hakediş yine doğar, teslim edilecek nakde girmez.
+       tahsil alanı hiç yazılmamış eski kayıtlar peşin sayılır. */
+    const th=x.tahsil==null?a*fiyat:num(x.tahsil);
+    const acik=Math.max(0,a*fiyat-th);
+    tahsilsiz+=acik;
     // 📅 gün + kale kırılımı: aynı kaleye aynı gün yapılan satışlar tek satırda toplanır
     const g0=new Date(x.tarih); g0.setHours(0,0,0,0); const gun=g0.getTime()||0;
     const kale=ger?"⚡ Seyyar":((x.yer||"").trim()||"—");
     const gk=gun+"|"+kale;
-    const o=byG[gk]||(byG[gk]={gun,kale,gerilla:ger,adet:0,ciro:0,veris:0,hakedis:0,bedava:0,kayit:0});
-    o.adet+=a; o.ciro+=a*fiyat; o.veris+=a*veris; o.hakedis+=tutar; o.kayit++;
+    const o=byG[gk]||(byG[gk]={gun,kale,gerilla:ger,adet:0,ciro:0,veris:0,hakedis:0,bedava:0,kayit:0,tahsilsiz:0});
+    o.adet+=a; o.ciro+=a*fiyat; o.veris+=a*veris; o.hakedis+=tutar; o.kayit++; o.tahsilsiz+=acik;
     if(bedava) o.bedava+=a;
   });
   const tahNakit=(har||[]).filter(x=>x.tip==="tahsilat"&&ic(x)).reduce((s,x)=>s+num(x.tutar),0);
@@ -186,7 +191,7 @@ function hakedisHesap(har,ts,esik,sirketPaz){
   // en yeni gün üstte; aynı günde çok ciro yapan kale önce
   const satirlar=Object.keys(byG).map(k=>({...byG[k]})).sort((a,b)=>b.gun-a.gun||b.ciro-a.ciro);
   return {b0,b1,kod:haftaKod(ts),etiket:haftaEtiket(ts),satisKayit:sat.length,
-    urunler,satirlar,hakedis,ciro,verisBedel,adet,gerNakit,tahNakit,nakit:gerNakit+tahNakit,eksiVar,bedavaAdet,
+    urunler,satirlar,hakedis,ciro,verisBedel,adet,gerNakit,tahNakit,nakit:gerNakit+tahNakit,eksiVar,bedavaAdet,tahsilsiz,
     sirketPaz:!!sirketPaz, gecerli:b0>=HAKEDIS_BAS_MS};
 }
 /* 💵 SAHA NAKDİ — pazarlamacının topladığı ama henüz teslim etmediği para.
@@ -2003,6 +2008,12 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
     HD.bedavaAdet>0?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#f1f5f9",
       fontSize:11.5,fontWeight:700,color:"#475569",marginBottom:12}},
       HD.bedavaAdet+" adet sembolik fiyatla (bedava) verilmiş — hakediş doğurmaz."):null,
+    /* 💸 satıldı ama parası alınmadı — hakediş doğdu, teslim beklenmiyor */
+    HD.tahsilsiz>0.5?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#fff7ed",
+      border:"1px solid #fed7aa",fontSize:11.5,fontWeight:700,color:"#9a3412",marginBottom:12,
+      lineHeight:1.5}},
+      "💸 "+tl(HD.tahsilsiz)+" tahsil edilmedi — hakedişin yine tam ödenir, "
+      +"bu para için senden teslimat beklenmez."):null,
     /* 📅 GÜN · KALE DÖKÜMÜ — "ne zaman, hangi kale, ne ciro yaptım, ne hakediş ettim".
        Ürün kırılımı yerine bu; pazarlamacı gününü ve kalesini böyle hatırlıyor. */
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:6}},
@@ -2014,7 +2025,9 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
         h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
           color:s.gerilla?"var(--cyan)":"var(--txt)"}},s.kale),
         h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:2}},
-          gunKisa(s.gun)+" · "+s.adet+" adet"+(s.bedava?(" · "+s.bedava+" bedava"):""))),
+          gunKisa(s.gun)+" · "+s.adet+" adet"+(s.bedava?(" · "+s.bedava+" bedava"):"")),
+        num(s.tahsilsiz)>0.5?h("div",{style:{fontSize:10.5,fontWeight:800,color:"#9a3412",marginTop:2}},
+          "💸 "+tl(s.tahsilsiz)+" tahsil edilmedi"):null),
       h("div",{style:{textAlign:"right",flexShrink:0}},
         h("div",{style:{fontSize:13,fontWeight:800,color:"var(--green)"}},tl(s.ciro)),
         h("div",{style:{fontSize:10.5,color:"var(--mut2)",fontWeight:700,marginTop:1}},"ciro")),
@@ -2026,7 +2039,10 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
       h("div",{style:{fontSize:11.5,fontWeight:800,color:"#0369a1",marginBottom:5}},"KOMUTAYA TESLİM EDİLECEK NAKİT"),
       satir("Gerilla (peşin) satış",tl(HD.gerNakit),"#0369a1"),
       satir("Kale tahsilatları",tl(HD.tahNakit),"#0369a1"),
-      satir("Toplam",tl(HD.nakit),"#0369a1",true)),
+      satir("Toplam",tl(HD.nakit),"#0369a1",true),
+      HD.tahsilsiz>0.5?h("div",{style:{fontSize:11,fontWeight:700,color:"#9a3412",marginTop:6,
+        paddingTop:6,borderTop:"1px solid #a5d8f3",lineHeight:1.45}},
+        "Tahsil edilmeyen "+tl(HD.tahsilsiz)+" bu tutara girmiyor — parası geldiğinde teslim edilecek."):null),
     h("button",{onClick:()=>setGecmisAcik(!gecmisAcik),style:{width:"100%",marginTop:14,padding:"11px 13px",
       borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},
       (gecmisAcik?"▾":"▸")+" Geçmiş dönemler ("+gecmisD.length+")"),
