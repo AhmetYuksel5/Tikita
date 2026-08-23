@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L53";   // komuta (admin) deneme sürümü
+const SURUM="L54";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -866,8 +866,12 @@ function planBirim(urunler,plan,filamentler,tur,makineler){
           plakaAdet:cap2,filamentId:(c2.filament[0]||{}).filamentId||"",
           filList:(()=>{let sr=0;return c2.filament.map(f=>({filamentId:f.filamentId,gramParca:num(f.gram)/cap2,
             degisken:!!f.degisken,rol:f.degisken?filRolAd(f,sr++):""}));})(),ornek:0}); });
-      const ok2=!eksik&&rows.length>0;
-      out[u.id]={ok:ok2,parcali:true,tarif:true,ayri:true,ornek:0,
+      /* 🖨 Tarif hangi makine türlerine yazıldıysa ürün YALNIZ onlarda basılır.
+         "ortalama" kaynağı, o tür için tarif olmadığı hâlde öbür türlerden
+         uydurulmuş bir tahmindir — planlama artık o makineleri kullanmaz. */
+      const tahmin=kay.some(k=>k==="ortalama");
+      const ok2=!eksik&&rows.length>0&&!tahmin;
+      out[u.id]={ok:ok2,parcali:true,tarif:true,ayri:true,ornek:0,tahminTur:tahmin,
         parcalar:rows,eksikParca:rows.filter(r=>r.eksik).map(r=>r.ad),
         tarifKaynak:kay[0]||"",turSay:Object.keys(tSet).length,
         dk:ok2?rows.reduce((s2,r)=>s2+num(r.dkParca)*num(r.ger),0):0,
@@ -877,7 +881,9 @@ function planBirim(urunler,plan,filamentler,tur,makineler){
     const cz=baskiCoz(bb,tur);
     if(cz&&(cz.sureDk>0||cz.gram>0)){
       const cap=Math.max(1,num(cz.tablaAdet));
-      out[u.id]={ok:cz.sureDk>0,parcali:false,tarif:true,ornek:0,eksikParca:[],
+      /* 🖨 tarifi olmayan türde uydurma değerle basılmaz — bkz. yukarıdaki not */
+      const tahmin=cz.kaynak==="ortalama";
+      out[u.id]={ok:cz.sureDk>0&&!tahmin,parcali:false,tarif:true,ornek:0,eksikParca:[],tahminTur:tahmin,
         dk:cz.sureDk/cap,gram:cz.gram/cap,tarifKaynak:cz.kaynak,turSay:bb.turler.length,
         parcalar:[{ad:u.ad||"ürün",ger:1,dkParca:cz.sureDk/cap,gramParca:cz.gram/cap,
           plakaAdet:cap,filamentId:(cz.filament[0]||{}).filamentId||"",
@@ -3904,7 +3910,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
      süre ve gramaj tahmindir, tarif sayılmaz. */
   const calTur=useMemo(()=>turAd.filter(t=>(secili||[]).some(u=>{ const b=BMT[t]&&BMT[t][u.id];
     return b&&b.ok&&(!b.tarif||b.tarifKaynak===t); })),[turAd,BMT,secili]);
-  /* çalışan parkta tarifi olmayan tür varsa söyle — o makinelerde rakamlar tahmin */
+  /* çalışan parkta tarifi olmayan tür varsa söyle — o makineler boş kalır */
   const tahminTur=useMemo(()=>{ const m={};
     makList.forEach(x=>{ if(x.tur&&calTur.indexOf(x.tur)<0) m[x.tur]=(m[x.tur]||0)+1; });
     return Object.keys(m).map(t=>m[t]+" × "+t); },[makList,calTur]);
@@ -3996,8 +4002,8 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
       h("div",{style:{fontSize:11,color:GC.mut,fontWeight:700,marginBottom:tahminTur.length?6:10}},parkOzet),
       tahminTur.length?h("div",{style:{fontSize:11,fontWeight:800,color:"#9a3412",marginBottom:10,
         lineHeight:1.45}},
-        "⚠ "+tahminTur.join(" · ")+" için tarif yok — o makinelerde süre ve gramaj "
-        +"öbür türlerden tahmin ediliyor"):null,
+        "⚠ "+tahminTur.join(" · ")+" için tarif yok — seçili ürünler o makinelerde "
+        +"planlanmaz. Kullanmak istiyorsan baskı düzenlemede o türe süre ve gram gir."):null,
       /* hangi makinelerin çalışacağı tek tek seçilebilir */
       h("div",{style:{display:"flex",gap:8,marginBottom:12}},
         h("button",{onClick:()=>setMakSecAc(true),
@@ -4089,8 +4095,8 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
         :h("div",{style:{padding:"16px 0",textAlign:"center",color:GC.mut,fontSize:12.5}},"Eşleşen ürün yok.")),
       yok.length?h("div",{style:{marginTop:10,paddingTop:9,borderTop:"1px solid "+GC.line,fontSize:11,color:GC.mut,fontWeight:600,lineHeight:1.5}},
         yokTarif.length?h("div",{style:{color:"#9a3412",fontWeight:800,marginBottom:4}},
-          "⚠ "+yokTarif.length+" üründe baskı bilgisi var ama hiçbir makine türüne süre girilmemiş: "
-          +yokTarif.slice(0,6).map(u=>u.ad).join(", ")):null,
+          "⚠ "+yokTarif.length+" üründe baskı bilgisi var ama çalışan makine türlerinin "
+          +"hiçbirine süre girilmemiş: "+yokTarif.slice(0,6).map(u=>u.ad).join(", ")):null,
         yok.length>yokTarif.length
           ?("⚠ "+(yok.length-yokTarif.length)+" ürün listede yok — baskı geçmişi olmadığı için süre/gram çıkarılamıyor"
             +((yok.length-yokTarif.length)<=6?(": "+yok.filter(u=>!uBilgi[u.id].tarif).map(u=>u.ad).join(", ")):"")):null):null),
