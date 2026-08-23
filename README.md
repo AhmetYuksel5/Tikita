@@ -108,3 +108,41 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
     pazarlamacı** + yere özel pazarlamacı istatistiği.
 
 Detay için `ROADMAP.md`.
+
+---
+
+## 📒 Hareket Defteri + 📜 Audit + 💾 Yedek (2026-08-23)
+
+**Ortak modüller (`public/lib/` — kopyalanmaz, tek kaynak; `/lib/**` no-cache):**
+
+- **`lib/tikita-audit.js`** — değişiklik kaydı + yedek çekirdeği. Tüm sayfaların
+  `save()/remove()` gövdesi buradan geçer; `audit_logs`'a kim/ne/ne-zaman düşer
+  (merge+increment modeli: her update kısmi; increment geri alma TERS increment ile).
+  `telafi` etiketli iş-olayı kayıtları genel geri almaya KAPALIDIR — ekranlardaki
+  ↩️ telafi akışlarına (geriAlKayit / montajGeriAl / hakedisGeriAl) yönlendirilir.
+  `firestore.rules`: audit_logs silinemez, yalnız `undone` damgası güncellenir.
+- **`lib/hareket-model.js`** — SAF 4-tür defter katmanı (SATIŞ · TAHSİLAT · MASRAF ·
+  ÖDEME). Firebase/DOM/Date.now KULLANMAZ; koleksiyon dizileri alır, kanonik satır
+  döndürür. Raporlar (dönem pivotu, ürün kârlılığı, kale ekstresi, personel carisi,
+  nakit, mutabakat) bu satırlardan CANLI türer — geçmiş kayıt düzeltilince raporlar
+  kendiliğinden düzelir. Fiziksel göç YOK: kaynak koleksiyonlar yerinde durur.
+  Muhasebe kodu/yevmiye bilinçli olarak YOK (2026-08-23 kararı — sade işletme dili).
+  `stok_hareket` hiçbir adapterde MALİ satır üretmez (çift sayım kararları gömülü).
+
+**Ekranlar (admin):** Rapor sekmesi → `ESKİ RAPOR | 📒 HAREKET DEFTERİ` (bayrak:
+`ayar/genel.raporKaynak` = eski|yanyana|yeni — davranışı push değil bayrak değiştirir).
+Ayarlar → 💾 Yedek indir (manifest + parmak izi; kullanıcı PIN'i içerir — güvenli sakla),
+🖼 Foto yedeği, 📜 Değişiklik kaydı (son 40 gün; op katlama; ↶ geri al).
+
+**KURALLAR:**
+1. **Yeni koleksiyon açan, `TK_YEDEK_COLLS`'a (tikita-audit.js) eklemeden işi bitmiş saymaz.**
+2. Audit'lenecekse `AUDIT_COLLS`'a da eklenir; yazım her zaman `save()/remove()`'dan geçer,
+   çıplak `setDoc/deleteDoc` çağrılmaz.
+3. Çok dokümanlı iş akışları `AUD.op(fn, ana, ad, {telafi})` ile sarılır (tek log satırı).
+4. `useColl`'a yeni abonelik eklerken `AUD.snapPut(name, rows)` satırı unutulmaz —
+   unutulursa her yazım "create" loglanır.
+5. Rapor fonksiyonları SAFTIR: içlerinde yazım yoktur, rapor değeri Firestore'a yazılmaz.
+   (İstisnalar: hakedis_donem = donuk mutabakat belgesi → "eskidi" rozeti ile denetlenir;
+   satırlara dondurulmuş fiyatlar = tarihsel gerçek.)
+6. Model/audit koduna dokununca testler koşulur:
+   `node scratchpad/yedektest.js && node scratchpad/audittest.js && node scratchpad/harekettest.js`
