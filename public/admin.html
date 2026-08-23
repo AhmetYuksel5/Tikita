@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L59";   // komuta (admin) deneme sürümü
+const SURUM="L60";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -3596,11 +3596,17 @@ function KomutaMesajSheet({ekip,onKaydet,bekle}){
 /* ————— 🧮 PLANLAMA ARACI — ne kadar sürer / bu sürede ne kadar çıkar ————— */
 /* 🎨 Bir ürünün renk çeşitleri: "50 kırmızı, 50 beyaz" gibi. Değişken yuvası olan
    ürünlerde planlama bu seçime göre filament hesaplar. */
-function RenkSecSheet({u,roller,filamentler,mevcut,onKaydet,onClose}){
-  const bos=()=>({renk:{},adet:""});
+function RenkSecSheet({u,roller,filamentler,mevcut,varsayilan,onKaydet,onClose}){
+  const flL=(filamentler||[]).filter(f=>(f.ad||"").trim());
+  /* 🎨 Ürünün tarifinde hangi renk yazıyorsa o baştan işaretli gelir; değiştirmek
+     isteyen aynı yerden değiştirir. Silinmiş filament işaretlenmez. */
+  const varSec=()=>{ const o={};
+    (roller||[]).forEach(r=>{ const id=(varsayilan||{})[r];
+      if(id&&flL.some(f=>f.id===id)) o[r]=id; });
+    return o; };
+  const bos=()=>({renk:varSec(),adet:""});
   const [sat,setSat]=useState(()=>(mevcut&&mevcut.length)
     ?mevcut.map(v=>({renk:{...(v.renk||{})},adet:String(num(v.adet)||"")})):[bos()]);
-  const flL=(filamentler||[]).filter(f=>(f.ad||"").trim());
   const yaz=(i,fn)=>setSat(o=>o.map((x,ix)=>ix===i?fn(x):x));
   const top=sat.reduce((s2,x)=>s2+Math.max(0,Math.round(num(x.adet))),0);
   const tamMi=x=>roller.every(r=>x.renk[r])&&num(x.adet)>0;
@@ -3904,6 +3910,18 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
           if(f.degisken&&f.rol&&rl.indexOf(f.rol)<0) rl.push(f.rol); }); }); });
       if(rl.length) o[u.id]=rl; });
     return o; },[urunler,BMT,turAd]);
+  /* 🎨 her rolün TARİFTE yazan filamenti — renk sayfası bunlarla işaretli açılır.
+     Ürün türden türe farklı renkte olabildiği için önce temsilci tür taranır. */
+  const uRolFil=useMemo(()=>{ const o={};
+    urunler.forEach(u=>{ const rl=uRoller[u.id]; if(!rl||!rl.length) return;
+      const m={};
+      const tara=t=>{ const b=BMT[t]&&BMT[t][u.id]; if(!b||!b.ok) return;
+        (b.parcalar||[]).forEach(r=>{ (r.filList||[]).forEach(f=>{
+          if(f.degisken&&f.rol&&f.filamentId&&!m[f.rol]) m[f.rol]=f.filamentId; }); }); };
+      const once=(uBilgi[u.id]||{}).tur; if(once) tara(once);
+      turAd.forEach(tara);
+      if(Object.keys(m).length) o[u.id]=m; });
+    return o; },[urunler,uRoller,uBilgi,BMT,turAd]);
   const renkAdi=r=>Object.keys(r||{}).map(k=>{ const f=(filamentler||[]).find(x=>x.id===r[k]);
     return f?flRenk(f):"?"; }).join(" + ");
   const bulunur=urunler.filter(u=>uBilgi[u.id]&&uBilgi[u.id].ok);
@@ -4333,6 +4351,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
       onKaydet:async takvim=>{ if(onAktar){ await onAktar(takvim,urunler); }
         setAktarAc(false); }}):null,
     renkAc?h(RenkSecSheet,{u:renkAc,roller:uRoller[renkAc.id]||[],filamentler,
+      varsayilan:uRolFil[renkAc.id]||{},
       mevcut:renkler[renkAc.id]||[],onClose:()=>setRenkAc(null),
       onKaydet:L=>{ const id=renkAc.id;
         setRenkler(o=>({...o,[id]:L}));
