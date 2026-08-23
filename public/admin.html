@@ -81,6 +81,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { yedekTopla, yedekIndir, sonYedekIsaretle, sonYedekGun, yedekEskiMi, ymdYerel, TK_YEDEK_FOTO } from "./lib/tikita-audit.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -7234,25 +7235,36 @@ function Nav({aktif,go,deneyIk,onDeney,pc}){ const items=[["us","dash",TT().navU
           h("span",{style:{width:5,height:5,borderRadius:5,background:on?renk:"transparent"}}))})));
 }
 // —— 🧭 ÜST ARAÇ ÇUBUĞU (logo · görünüm · ayarlar · tema · çıkış) ——
-function KomutaBar({gorunum,onGorunum,onAyar,onTema,onCikis,yan}){
-  const btn=(ik,lbl,fn,renk)=>h("button",{onClick:fn,title:lbl,type:"button",
+function KomutaBar({gorunum,onGorunum,onAyar,onTema,onCikis,yan,yedekEski}){
+  const btn=(ik,lbl,fn,renk,dot)=>h("button",{onClick:fn,title:lbl,type:"button",
     style:{width:36,height:36,borderRadius:11,border:"1px solid "+(renk?renk:"var(--line)"),background:"var(--surf)",
-      display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,color:renk||"var(--txt)",flexShrink:0}},ik);
+      display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,color:renk||"var(--txt)",flexShrink:0,position:"relative"}},ik,
+    dot?h("span",{style:{position:"absolute",top:5,right:5,width:7,height:7,borderRadius:4,background:"var(--red)"}}):null);
   return h("div",{className:"tk-bar",style:{display:"flex",alignItems:"center",gap:7,padding:"calc(env(safe-area-inset-top,0px) + 4px) 13px 4px",
       background:"var(--surf)",borderBottom:"1px solid var(--line)"}},
     h("div",{style:{flex:1,minWidth:0,height:42,display:"flex",alignItems:"center"}},
       yan?null:h("img",{src:"tikita-logo.png",alt:"Tikita",style:{height:42,width:"auto"}})),
     btn(IK(gorunum==="pc"?"telefon":"ekran","var(--txt)",18),gorunum==="pc"?"Mobil görünüm":"Masaüstü görünüm",onGorunum),
-    btn(IK("ayarlar","var(--txt)",18),"Ayarlar",onAyar),
+    btn(IK("ayarlar","var(--txt)",18),"Ayarlar",onAyar,null,yedekEski),
     btn(IK("tema","var(--txt)",18),"Tema",onTema),
     btn(IK("cikis","var(--red)",18),"Çıkış",onCikis,"var(--red)"));
 }
 const _menuBtn={display:"flex",alignItems:"center",gap:11,width:"100%",padding:"14px 16px",borderRadius:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"};
-function KomutaAyarSheet({ad,gorunum,onGorunum,onSifre,onClose}){
+function KomutaAyarSheet({ad,gorunum,onGorunum,onSifre,onYedek,onFotoYedek,yedekGun,yedekMesgul,onClose}){
+  const yedekEt=yedekGun==null?"hiç alınmadı":(yedekGun===0?"bugün alındı":yedekGun+" gün önce");
   return h(Sheet,{ik:"⚙️",hex:"#334155",baslik:"Ayarlar",alt:ad||"komuta",onClose,cta:"Kapat",onCta:onClose},
     h("div",{style:{display:"grid",gap:10}},
       h("button",{type:"button",onClick:onSifre,style:_menuBtn},h("span",{style:{fontSize:18}},"🔑"),"Şifremi değiştir"),
       h("button",{type:"button",onClick:onGorunum,style:_menuBtn},h("span",{style:{fontSize:18}},gorunum==="pc"?"📱":"🖥"),"Görünüm: "+(gorunum==="pc"?"Masaüstü — mobile geç":"Mobil — masaüstüne geç")),
+      h("button",{type:"button",onClick:onYedek,disabled:!!yedekMesgul,style:{..._menuBtn,opacity:yedekMesgul?.55:1}},
+        h("span",{style:{fontSize:18}},"💾"),
+        h("div",{style:{flex:1}},
+          h("div",null,yedekMesgul?"Yedek hazırlanıyor…":"Yedek indir"),
+          h("div",{style:{fontSize:11,fontWeight:600,color:(yedekGun==null||yedekGun>7)?"var(--red)":"var(--mut)"}},"Son yedek: "+yedekEt))),
+      h("button",{type:"button",onClick:onFotoYedek,disabled:!!yedekMesgul,style:{..._menuBtn,opacity:yedekMesgul?.55:1}},
+        h("span",{style:{fontSize:18}},"🖼"),"Ürün fotoğrafı yedeği (ayrı dosya)"),
+      h("div",{style:{fontSize:11,color:"var(--mut)",lineHeight:1.5,padding:"0 4px"}},
+        "Yedek dosyası kullanıcı şifrelerini (PIN) de içerir — güvenli bir yerde sakla."),
       h("div",{style:{fontSize:11.5,color:"var(--mut)",textAlign:"center",marginTop:4}},"Tikita · Komuta · "+SURUM)));
 }
 function TemaSheet({tema,onSec,onClose}){
@@ -7325,6 +7337,18 @@ function App(){
   async function sifremiDegistir(){ setModal(null); const np=prompt("Yeni şifren (en az 4 hane):"); if(np==null) return; const v=String(np).trim();
     if(v.length<4){ say("Şifre en az 4 hane olmalı"); return; }
     try{ await save("kullanici",{id:BEN_ID,pin:v,pinHash:"",pinSalt:""}); say("Şifren güncellendi"); }catch(e){ console.error(e); say("Güncellenemedi"); } }
+  /* 💾 YEDEK — tüm koleksiyonlar tek JSON'da, koleksiyon başına parmak izi manifest'iyle.
+     Foto yedeği (urun_foto, base64) ayrı dosyadır — rutin yedeği şişirmesin. */
+  const [yedekMesgul,setYedekMesgul]=useState(false);
+  async function yedekAl(foto){ if(yedekMesgul) return; setYedekMesgul(true);
+    say(foto?"Foto yedeği hazırlanıyor…":"Yedek hazırlanıyor…");
+    try{
+      const {payload,hatalar}=await yedekTopla(db,foto?TK_YEDEK_FOTO:undefined);
+      const fn=yedekIndir(payload,foto?("tikita-foto-yedek-"+ymdYerel()+".json"):undefined);
+      if(!foto&&!hatalar.length) sonYedekIsaretle();
+      say(hatalar.length?("⚠ Yedek indi ama okunamayan koleksiyon var: "+hatalar.join(", ")):("💾 Yedek indirildi · "+fn));
+    }catch(e){ console.error(e); say("⚠ Yedek alınamadı — tekrar dene"); }
+    finally{ setYedekMesgul(false); } }
   // 🔙 geri tuşu: açık pencere → kapat · alt sekme → Komuta · kökte → çıkış sorusu → giriş ekranı
   const backRef=useRef(null);
   backRef.current=()=>{
@@ -8001,7 +8025,7 @@ function App(){
     hakedisDonem,onHakOnay:hakedisOnay,onHakOde:hakedisOde,onHakGeriAl:hakedisGeriAl,
     onNakitOnay:nakitOnay,onNakitGeriAl:nakitGeriAl,montajGorev});
   return h("div",null,
-    h(KomutaBar,{gorunum,yan:yanMenu,onGorunum:gorunumTog,onAyar:()=>setModal({tip:"komutaAyar"}),onTema:()=>setModal({tip:"tema"}),onCikis:cikisYap}),
+    h(KomutaBar,{gorunum,yan:yanMenu,onGorunum:gorunumTog,onAyar:()=>setModal({tip:"komutaAyar"}),onTema:()=>setModal({tip:"tema"}),onCikis:cikisYap,yedekEski:yedekEskiMi()}),
     h("div",{className:"tk-barbosluk"}),
     veriHata?h("div",{style:{margin:"8px 12px 0",padding:"9px 13px",borderRadius:12,background:"#fff7ed",border:"1px solid #fdba74",fontSize:12,fontWeight:700,color:"#9a3412"}},
       "Sunucu veri kotası dolu — kayıtlı önbellek gösteriliyor. Yarın otomatik düzelir."):null,
@@ -8118,7 +8142,8 @@ function App(){
     modal&&modal.tip==="maliyetGec"&&h(MaliyetGecmisSheet,{u:modal.u,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stokKomut"&&h(StokKomutSheet,{cfg:modal.cfg,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stokGec"&&h(StokGecmisSheet,{u:modal.u,stokHareket,onClose:()=>setModal(null)}),
-    modal&&modal.tip==="komutaAyar"&&h(KomutaAyarSheet,{ad:((kullanicilar||[]).find(u=>u.id===BEN_ID)||{}).ad,gorunum,onGorunum:gorunumTog,onSifre:sifremiDegistir,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="komutaAyar"&&h(KomutaAyarSheet,{ad:((kullanicilar||[]).find(u=>u.id===BEN_ID)||{}).ad,gorunum,onGorunum:gorunumTog,onSifre:sifremiDegistir,
+      onYedek:()=>yedekAl(false),onFotoYedek:()=>yedekAl(true),yedekGun:sonYedekGun(),yedekMesgul,onClose:()=>setModal(null)}),
     modal&&modal.tip==="yazismalar"&&h(YazismalarSheet,{talepler,kullanicilar,onAc:t=>setModal({tip:"talep",t}),onClose:()=>setModal(null)}),
     modal&&modal.tip==="uyariStok"&&h(StokUyariSheet,{d,onClose:()=>setModal(null),onGit:()=>{ setModal(null); go("stok"); }}),
     modal&&modal.tip==="uyariAlacak"&&h(AlacakUyariSheet,{d,onClose:()=>setModal(null),onGit:()=>{ setModal(null); go("rapor"); }}),
