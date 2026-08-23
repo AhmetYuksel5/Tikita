@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L62";   // komuta (admin) deneme sürümü
+const SURUM="L63";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1501,6 +1501,51 @@ function pngIndir(cv,ad,belge){
       else bit(cv.toDataURL("image/png"));
     }catch(e){ red(e); }
   });
+}
+/* 🖨 BİR MAKİNENİN KUYRUĞU — şu an ne basıyor, sırada ne var, hangi ürünler.
+   Aralıkla sınırlı değildir: makinenin bütün planı görünür. */
+function makKuyruk(makineId,plan,filamentler,simdi){
+  const NOW=num(simdi)||Date.now();
+  const fl={}; (filamentler||[]).forEach(f=>{ if(f&&f.id) fl[f.id]=f; });
+  const flAdi=id=>{ const f=fl[id];
+    return f?(((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?")).trim()):"?"; };
+  const L=(plan||[]).map(p2=>{ if(!p2||!makineId||p2.makineId!==makineId) return null;
+      const b=new Date(p2.gercekBaslangic||p2.baslangic).getTime()||0;
+      if(!b) return null;
+      const fils=(p2.filList||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0);
+      return {p:p2,id:p2.id||"",ad:p2.ad||"iş",urunId:p2.urunId||"",
+        adet:Math.max(1,Math.round(num(p2.adet))||1),
+        bas:b,bit:b+num(p2.sureDk)*60000,sureDk:num(p2.sureDk),gram:num(p2.gram),
+        basladi:!!p2.basladi,tablaAlindi:!!p2.tablaAlindi,
+        filament:fils.map(f=>flAdi(f.filamentId)).join(" + "),
+        filList:fils.map(f=>({filamentId:f.filamentId,ad:flAdi(f.filamentId),gram:num(f.gram)}))}; })
+    .filter(Boolean).sort((a,b)=>a.bas-b.bas);
+  const basiyor=[], geciken=[], sirada=[], bitti=[];
+  L.forEach(x=>{
+    if(x.tablaAlindi||(x.basladi&&x.bit<=NOW)){ bitti.push(x); return; }
+    if(x.basladi){ basiyor.push({...x,kalanDk:Math.max(0,(x.bit-NOW)/60000)}); return; }
+    if(x.bas<=NOW){ geciken.push({...x,gecikmeDk:Math.max(0,(NOW-x.bas)/60000)}); return; }
+    sirada.push({...x,baslamayaDk:Math.max(0,(x.bas-NOW)/60000)});
+  });
+  /* şimdi + gelecek: hangi üründen kaç adet */
+  const acik=basiyor.concat(geciken,sirada);
+  const um={};
+  acik.forEach(x=>{ const k=x.ad||"?";
+    const o=um[k]=um[k]||{ad:k,urunId:x.urunId,adet:0,baski:0,gram:0,sureDk:0};
+    o.adet+=x.adet; o.baski++; o.gram+=x.gram; o.sureDk+=x.sureDk; });
+  const urunler=Object.values(um).sort((a,b)=>b.adet-a.adet||b.baski-a.baski);
+  const fm={};
+  acik.forEach(x=>x.filList.forEach(f=>{ const o=fm[f.filamentId]=fm[f.filamentId]
+      ||{filamentId:f.filamentId,ad:f.ad,gram:0}; o.gram+=f.gram; }));
+  const filamentler2=Object.values(fm).sort((a,b)=>b.gram-a.gram)
+    .map(f=>({...f,gram:Math.round(f.gram)}));
+  const son=acik.length?acik.reduce((s2,x)=>Math.max(s2,x.bit),0):0;
+  return {basiyor,geciken,sirada,bitti,urunler,filamentler:filamentler2,
+    ozet:{baski:acik.length,adet:acik.reduce((s2,x)=>s2+x.adet,0),
+      gram:Math.round(acik.reduce((s2,x)=>s2+x.gram,0)),
+      sureDk:Math.round(acik.reduce((s2,x)=>s2+x.sureDk,0)),
+      son,bosalirDk:son?Math.max(0,(son-NOW)/60000):0,
+      bitenBaski:bitti.length,bitenAdet:bitti.reduce((s2,x)=>s2+x.adet,0)}};
 }
 function makaraPlani(isler,filamentler){
   const flById={}; (filamentler||[]).forEach(f=>{ if(f&&f.id) flById[f.id]=f; });
@@ -4972,7 +5017,55 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
         satir(donemAd+" filament",gr>0?(gr.toLocaleString("tr")+" gr"):"—"),
         satir("Kayıp zaman",dkYaz((tl.kayipMs||0)/60000),tl.kayipMs>0?GC.kirmiziB:null),
         satir("Gecikme",dkYaz((tl.gecikmeMs||0)/60000),tl.gecikmeMs>0?"#c2410c":null),
-        satir(donemAd+" doluluk","%"+dol)); })():null);
+        satir(donemAd+" doluluk","%"+dol),
+        /* 🖨 bu makinede şimdi ve gelecekte ne basılacak — aralıkla sınırlı değil */
+        (()=>{ const K=makKuyruk(mkBilgi.id,plan,filamentler,now);
+          const isSatir=(x,renk,ust)=>h("button",{key:x.id||x.bas,
+            onClick:()=>{ setMkBilgi(null); ac({tip:"isEkle",kayit:x.p}); },
+            style:{display:"flex",alignItems:"center",gap:9,width:"100%",textAlign:"left",
+              padding:"9px 0",background:"none",borderTop:"1px solid var(--line)"}},
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:13,fontWeight:800,color:renk||"var(--txt)",
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                x.adet+" × "+x.ad),
+              h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut)",marginTop:1,
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                fmtS(x.bas)+" → "+new Date(x.bit).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})
+                +" · "+dkYaz(x.sureDk)+(x.filament?(" · "+x.filament):""))),
+            h("div",{style:{flexShrink:0,textAlign:"right"}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:renk||"var(--mut)"}},ust||""),
+              h("div",{style:{fontSize:10.5,fontWeight:700,color:"#c2410c",marginTop:1}},
+                Math.round(x.gram)+" gr")));
+          const blok=(bas,list,renk,ustFn)=>list.length?h("div",{key:bas,style:{marginTop:14}},
+            h("div",{className:"lbl",style:{marginBottom:2,color:renk}},bas),
+            list.map(x=>isSatir(x,renk,ustFn?ustFn(x):""))):null;
+          if(!K.ozet.baski&&!K.bitti.length) return h("div",{style:{marginTop:16,padding:"14px 0",
+            textAlign:"center",color:"var(--mut)",fontSize:13,fontWeight:700,
+            borderTop:"1px solid var(--line)"}},"Bu makinede planlanmış iş yok.");
+          return h("div",{style:{marginTop:6}},
+            K.ozet.baski?h("div",{style:{padding:"11px 13px",borderRadius:12,marginTop:12,
+              background:"#eef6ff",border:"1px solid #bcd9f7"}},
+              h("div",{style:{fontSize:12.5,fontWeight:800,color:"#1e3a8a"}},
+                "🖨 "+K.ozet.baski+" baskı · "+K.ozet.adet+" adet · "
+                +K.ozet.gram.toLocaleString("tr")+" gr"),
+              h("div",{style:{fontSize:11,fontWeight:700,color:"#3b5f9e",marginTop:2}},
+                dkYaz(K.ozet.sureDk)+" baskı süresi · kuyruk "+dkYaz(K.ozet.bosalirDk)
+                +" sonra boşalır ("+fmtS(K.ozet.son)+")")):null,
+            K.urunler.length?h("div",{style:{marginTop:12}},
+              h("div",{className:"lbl",style:{marginBottom:6}},"📦 Basılacak ürünler"),
+              K.urunler.map(u=>h("div",{key:u.ad,style:{display:"flex",alignItems:"center",gap:8,
+                padding:"7px 0",borderTop:"1px solid var(--line)",fontSize:12.5}},
+                h("span",{style:{flex:1,minWidth:0,fontWeight:800,overflow:"hidden",
+                  textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad),
+                h("span",{style:{fontWeight:800,color:"var(--violet)",flexShrink:0}},u.adet+" adet"),
+                h("span",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",flexShrink:0}},
+                  u.baski+" baskı")))):null,
+            blok("🖨 Şu an basıyor",K.basiyor,"#166534",x=>dkYaz(x.kalanDk)+" kaldı"),
+            blok("⏳ Gecikmiş — başlamadı",K.geciken,"#b91c1c",x=>dkYaz(x.gecikmeDk)+" geçti"),
+            blok("📅 Sırada",K.sirada,"var(--txt)",x=>dkYaz(x.baslamayaDk)+" sonra"),
+            K.bitti.length?h("div",{style:{marginTop:14,fontSize:11.5,fontWeight:700,
+              color:"var(--mut)"}},"✅ "+K.bitti.length+" baskı bitti · "
+              +K.ozet.bitenAdet+" adet"):null); })()); })():null);
 }
 // ⚙️ MAKİNE YÖNETİMİ — makine ekle/düzenle/sil
 function MakineYonetimSheet({makineler,onClose,onAc}){
