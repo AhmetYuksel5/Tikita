@@ -96,7 +96,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v118";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v119";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -1994,22 +1994,33 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
       borderTop:kalin?"1.5px solid var(--line)":"none"}},
     h("div",{style:{flex:1,fontSize:kalin?14:13,fontWeight:kalin?800:600,color:"var(--txt)"}},ad),
     h("div",{style:{fontSize:kalin?15:13.5,fontWeight:800,color:renk||"var(--txt)",whiteSpace:"nowrap"}},v));
+  /* Dönemde satış ya da teslim edilecek nakit varsa gönderilebilir.
+     Şirket pazarlamacısında hakediş doğmaz ama dönem yine kapatılmalı:
+     sattığı mal ve topladığı nakit komutaya bildirilmezse haftalar
+     "gönderilmedi" diye birikip duruyordu. */
+  const gonderilir=(HD.adet>0||HD.nakit>0.5||HD.hakedis>0.5);
   async function gonder(){
     if(bekle||kapali) return;
-    if(HD.sirketPaz){ say&&say("Şirket pazarlamacısı hakediş göndermez"); return; }
-    if(HD.hakedis<=0){ say&&say("Bu dönemde hakediş yok"); return; }
-    if(!confirm("🫰 "+tl(HD.hakedis)+" hakediş komutaya gönderilsin mi?\n"
-      +HD.etiket+" · "+HD.adet+" adet satış\n\nGönderdikten sonra bu dönemin tutarı DEĞİŞMEZ.")) return;
+    if(!gonderilir){ say&&say("Bu dönemde satış da nakit de yok"); return; }
+    const bas=HD.sirketPaz?("🏢 "+tl(HD.ciro)+" satış komutaya bildirilsin mi?")
+      :(HD.hakedis>0.5?("🫰 "+tl(HD.hakedis)+" hakediş komutaya gönderilsin mi?")
+        :("📤 "+HD.etiket+" dönemi komutaya bildirilsin mi?"));
+    if(!confirm(bas+"\n"+HD.etiket+" · "+HD.adet+" adet satış"
+      +(HD.nakit>0.5?("\nTeslim edilecek nakit "+tl(HD.nakit)):"")
+      +"\n\nGönderdikten sonra bu dönemin tutarı DEĞİŞMEZ.")) return;
     setBekle(true);
-    try{ await onGonder(HD); say&&say("✅ Hakediş gönderildi · "+tl(HD.hakedis)); onClose&&onClose(); }
+    try{ await onGonder(HD);
+      say&&say(HD.sirketPaz?("✅ Dönem bildirildi · "+tl(HD.ciro)+" satış")
+        :("✅ Hakediş gönderildi · "+tl(HD.hakedis)));
+      onClose&&onClose(); }
     catch(e){ say&&say("⚠ Gönderilemedi"); }
     finally{ setBekle(false); }
   }
   return h(Sheet,{ik:"🫰",hex:"#d97b12",baslik:"Hakediş · "+haftaNo(HD.b0)+". hafta",
     alt:HD.etiket+" · "+(kapali?(K.durum==="odendi"?"ödendi":(K.durum==="onaylandi"?"onaylandı":"onay bekliyor"))
       :(bitti?"gönderilmedi":"dönem sürüyor")),
-    onClose,cta:(kapali||HD.sirketPaz)?"Kapat":(bekle?"Gönderiliyor…":"📤 Komutaya gönder"),
-    onCta:(kapali||HD.sirketPaz)?onClose:gonder,disabled:bekle||(!kapali&&!HD.sirketPaz&&HD.hakedis<=0)},
+    onClose,cta:kapali?"Kapat":(bekle?"Gönderiliyor…":"📤 Komutaya gönder"),
+    onCta:kapali?onClose:gonder,disabled:bekle||(!kapali&&!gonderilir)},
     h("div",{style:{background:"var(--surf2)",borderRadius:14,padding:"12px 14px",marginBottom:14}},
       satir("Satış",HD.adet+" adet"),
       satir("Ciro (müşteriden)",tl(HD.ciro),"var(--green)"),
@@ -2018,7 +2029,8 @@ function HakedisSheet({HD,buKayit,gecmisD,onGonder,onClose,onSec,say,simdi}){
         HD.sirketPaz?tl(HD.ciro):tl(HD.hakedis),HD.sirketPaz?"var(--cyan)":"var(--gold)",true)),
     HD.sirketPaz?h("div",{style:{padding:"10px 12px",borderRadius:11,background:"#eff8fd",border:"1px solid #a5d8f3",
       fontSize:11.5,fontWeight:700,color:"#0369a1",marginBottom:12,lineHeight:1.5}},
-      "🏢 Şirket pazarlamacısısın: ürünü kaça satarsan sat bedelin tamamı şirkete aktarılır, hakediş doğmaz."):null,
+      "🏢 Şirket pazarlamacısısın: ürünü kaça satarsan sat bedelin tamamı şirkete aktarılır, hakediş doğmaz. "
+      +"Dönemi yine de komutaya gönder — sattığın mal ve teslim edeceğin nakit böyle kayda geçer."):null,
     HD.eksiVar?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#ffe4e6",border:"1px solid #fda4af",
       fontSize:11.5,fontWeight:700,color:"#9f1239",marginBottom:12}},
       "⚠ Veriliş fiyatının altında satılan ürün var — o satırlar hakedişi düşürür."):null,

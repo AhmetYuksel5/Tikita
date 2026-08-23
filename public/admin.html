@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L57";   // komuta (admin) deneme sürümü
+const SURUM="L58";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -5944,7 +5944,9 @@ function HakedisDonemSheet({list,onOnay,onOde,onGeriAl,onClose,hareketler,simdi,
             x.durum==="bildirildi"?h("button",{onClick:()=>onOnay&&onOnay(x),
               style:{flex:1,minWidth:120,padding:"11px 8px",borderRadius:11,background:"var(--cyan)",color:"#fff",fontSize:13,fontWeight:800}},"✓ Onayla"):null,
             (x.durum==="bildirildi"||x.durum==="onaylandi")?h("button",{onClick:()=>onOde&&onOde(x),
-              style:{flex:1,minWidth:120,padding:"11px 8px",borderRadius:11,background:"var(--green)",color:"#fff",fontSize:13,fontWeight:800}},"₺ Ödeme yap"):null,
+              style:{flex:1,minWidth:120,padding:"11px 8px",borderRadius:11,background:"var(--green)",color:"#fff",fontSize:13,fontWeight:800}},
+              /* hakedişi olmayan dönemde ödenecek bir şey yok — yalnız kapatılır */
+              num(x.hakedis)>0.5?"₺ Ödeme yap":"✓ Kapat (ödeme yok)"):null,
             h("button",{onClick:()=>onGeriAl&&onGeriAl(x),
               style:{flex:1,minWidth:120,padding:"11px 8px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--red)",fontSize:13,fontWeight:800}},
               x.durum==="odendi"?"↩ Ödemeyi geri al":"🗑 Dönemi geri al"))):null);
@@ -7144,6 +7146,18 @@ function App(){
     catch(e){ console.error(e); say("⚠ Onaylanamadı"); } }
 
   async function hakedisOde(x){ if(!x||!x.id||isBekle) return;
+    /* 🏢 hakedişi olmayan dönem (şirket pazarlamacısı ya da sıfır marj):
+       ödenecek para yok, gider de yazılmaz — dönem yalnız kapatılır. */
+    if(num(x.hakedis)<=0.5){
+      if(!confirm("✓ "+(x.kullaniciAd||"pazarlamacı")+" · "+(x.bas?gunKisa(x.bas):x.hafta)
+        +" dönemi kapatılsın mı?\nHakediş yok, ödeme yapılmayacak."
+        +(num(x.nakitTeslim)>0.5?("\nTeslim edilecek nakit "+tl(x.nakitTeslim)+" — nakit teslimi ayrıca onaylanır."):""))) return;
+      try{ await save("hakedis_donem",{id:x.id,durum:"odendi",odenenTutar:0,
+          odemeTarih:new Date().toISOString(),
+          ...(x.durum==="bildirildi"?{onayTarih:new Date().toISOString()}:{})});
+        say("✓ Dönem kapatıldı · ödeme yok"); }
+      catch(e){ console.error(e); say("⚠ Kapatılamadı"); }
+      return; }
     const t=prompt("🫰 "+(x.kullaniciAd||"pazarlamacı")+" hakediş ödemesi (₺):\n"
       +(x.bas?gunKisa(x.bas):x.hafta)+" – "+(x.bit?gunKisa(x.bit):"")+" · "+num(x.satisAdet)+" adet satış",
       String(Math.round(num(x.hakedis))));
