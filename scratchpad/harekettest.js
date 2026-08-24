@@ -244,5 +244,41 @@ t("dönem raporu: satış (tahakkuk) nakit raporuna girmiyor", (() => {
 t("dönem raporu: kalan = giren − çıkan", DR.kalan === Math.round((DR.giren - DR.cikan) * 100) / 100);
 t("dönem raporu: başka dönem süzülüyor", M.donemRapor(rows, "2026-07").giren !== DR.giren);
 
+
+/* ── EKSTRE GENİŞLETMESİ: tür kısıtı yok, cariDışı satır bakiyeyi bozmaz ── */
+const DE2 = {
+  hareketler: [
+    { id: "e1", tip: "satis", tarih: "2026-08-10T12:00:00", adet: 1, satisFiyat: 100, alisFiyat: 60, yer: "Kale X" },
+    { id: "e2", tip: "tahsilat", tarih: "2026-08-11T12:00:00", tutar: 60, yer: "Kale X" },
+    { id: "e3", tip: "tahsilat", tarih: "2026-08-12T12:00:00", tutar: 30, yer: "Kale X", avans: true }
+  ],
+  giderler: [ { id: "eg1", tur: "Kargo", tutar: 15, tarih: "2026-08-13T12:00:00", aciklama: "Kale X" } ],
+  sabitGiderler: [], montajGorevler: [], hakedisDonemler: []
+};
+const rows2 = M.olayUret(DE2, { simdi: SIMDI }).rows;
+// gider'in tarafAd'ı "tedarikci" tipinde ve aciklama'dan gelmez — kaleAnahtar tarafAd'a bakar,
+// gider satırının tarafAd'ı gider.tur'dur (satirAciklama'da ayrı), o yüzden burada eşleşmeyecek —
+// asıl senaryo: KALE ile aynı ada sahip bir masraf/ödeme kaydı ekleyip cariDisi işaretini sınıyoruz.
+const D3 = {
+  hareketler: [
+    { id: "f1", tip: "satis", tarih: "2026-08-10T12:00:00", adet: 1, satisFiyat: 100, alisFiyat: 60, yer: "Kale Y" },
+    { id: "f2", tip: "tahsilat", tarih: "2026-08-11T12:00:00", tutar: 70, yer: "Kale Y" }
+  ],
+  giderler: [ { id: "fg1", tur: "Kale Y", tutar: 25, tarih: "2026-08-12T12:00:00" } ],   // taraf adı KALE ile çakışıyor
+  sabitGiderler: [], montajGorevler: [], hakedisDonemler: []
+};
+const rows3 = M.olayUret(D3, { simdi: SIMDI }).rows;
+const EY = M.kaleEkstre(rows3, "Kale Y");
+t("ekstre: tür kısıtı yok — MASRAF satırı da listede", EY.rows.some(s => s.tur === "MASRAF"));
+t("ekstre: cariDışı satır BAKİYEYİ değiştirmiyor", (() => {
+  const son = EY.rows[EY.rows.length - 1];
+  return EY.bakiye === 30 && son.cariDisi === true && son.bakiye === 30; })());
+t("ekstre: cariDışı satırın kendi borç/alacak sütunu dolu (yalnız bakiyeye dokunmuyor)",
+  EY.rows.find(s => s.tur === "MASRAF").alacak === 25);
+t("ekstre: avans satırı cariDisi DEĞİL ama bakiyeyi de değiştirmiyor (ayrı bayrak)", (() => {
+  const EX = M.kaleEkstre(rows2, "Kale X");
+  const av = EX.rows.find(s => s.avansMi);
+  return av && av.cariDisi === false && EX.bakiye === 40 && EX.avans === 30; })());
+
 console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
 process.exit(fail ? 1 : 0);

@@ -6700,7 +6700,12 @@ const MH_ICO={
   excel:["M12 3v12","m8 11 4 4 4-4","M4 20h16"],
   pdf:["M7 3h7l5 5v13H7z","M14 3v5h5","M9.5 17v-4h1.4a1.3 1.3 0 0 1 0 2.6H9.5"],
   paylas:["M18 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4z","M6 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z","M18 23a2 2 0 1 0 0-4 2 2 0 0 0 0 4z","m7.7 11 8.6-5","m7.7 13 8.6 5"],
-  kebab:["M12 5.6v.01","M12 12v.01","M12 18.4v.01"]
+  kebab:["M12 5.6v.01","M12 12v.01","M12 18.4v.01"],
+  goz:["M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z","M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"],
+  gozKapali:["M2 12s4-7 10-7 10 7 10 7-4 7-10 7-2 0-3.8-.4-5.4-1.1","m3 3 18 18","M9.9 9.9a3 3 0 0 0 4.2 4.2"],
+  gorsel:["M4 5h16v14H4z","m4 16 5-5 4 4 3-3 4 4","M9 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"],
+  indir:["M12 4v12","m7 12 5 5 5-5","M5 20h14"],
+  wa:["M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z","M8.5 8.8c.2-.8 1-.7 1.5.1.3.5.6 1 .4 1.5-.2.4-.6.6-.4 1 .3.7 1.4 1.8 2.1 2.1.4.2.6-.2 1-.4.5-.2 1 .1 1.5.4.5.3 1.2.7.5 1.5-.6.7-1.6 1-2.5.7-1.9-.6-3.9-2.6-4.5-4.5-.3-.8 0-1.8.7-2.4z"]
 };
 const mhSvg=(paths,col,boy)=>h("svg",{width:boy||15,height:boy||15,viewBox:"0 0 24 24",fill:"none",
   stroke:col||"currentColor",strokeWidth:1.9,strokeLinecap:"round",strokeLinejoin:"round"},
@@ -6757,7 +6762,18 @@ function hdCsvIndir(sutunlar,satirlar,dosyaAdi){
    yazı boyutu, dönem/tür süzgeci, arama, CSV çıktı. Satıra dokun → ham kayıt. */
 function HareketDefteri({rows,say}){
   const [q,setQ]=useState("");
-  const [tur,setTur]=useState("");
+  /* Tür süzgeci TOGGLE'dır (kullanıcı isteği) — her tür bağımsız açık/kapalı.
+     Hepsi kapanacaksa TÜMÜ'ye döner (boş ekran anlamsız olmasın). */
+  const [turF,setTurF]=useState(()=>({SATIS:true,TAHSILAT:true,MASRAF:true,ODEME:true}));
+  const turHepsi=HM_TURLER.every(k=>turF[k]);
+  function turToggle(k){ setTurF(f=>{ const n={...f,[k]:!f[k]};
+    return HM_TURLER.some(x=>n[x])?n:{SATIS:true,TAHSILAT:true,MASRAF:true,ODEME:true}; }); setLim(200); }
+  function turTumu(){ setTurF({SATIS:true,TAHSILAT:true,MASRAF:true,ODEME:true}); setLim(200); }
+  /* TABLA gizle — yalnız GÖRÜNÜMDEN kalkar; toplamlar (top) HER ZAMAN tam
+     listeden hesaplanır, bu toggle'dan ETKİLENMEZ (kullanıcı isteği: "rakamlara
+     yansımasın"). Sık tekrarlanan tabla hareketleri listeyi kaplamasın diye. */
+  const [tablaGizli,setTablaGizli]=useState(()=>{ try{ return localStorage.getItem("tkHdTablaGizli")==="1"; }catch(e){ return false; } });
+  function tablaTog(){ setTablaGizli(v=>{ const n=!v; try{ localStorage.setItem("tkHdTablaGizli",n?"1":"0"); }catch(e){} return n; }); }
   const [ay,setAy]=useState("");
   const [lim,setLim]=useState(200);
   const [duzen,setDuzen]=useState(null);      // {yeni:bool, r:satır|null, f:{...}}
@@ -6775,17 +6791,20 @@ function HareketDefteri({rows,say}){
      hiçbir şey toplanmaz/gruplanmaz, her hareket kendi satırında durur. */
   const suz=useMemo(()=>{ const qn=q.trim().toLocaleLowerCase("tr");
     return (rows||[]).filter(r=>{
-      if(tur&&r.tur!==tur) return false;
+      if(!turF[r.tur]) return false;
       if(ay&&(r.tarih||"").slice(0,7)!==ay) return false;
       if(qn){ const hay=((r.tarafAd||"")+" "+(r.urunAd||"")+" "+(r.kullaniciAd||"")+" "+(r.altTur||"")+" "+
         hmSatirAciklama(r)+" "+(r.ref||"")+" "+r.tutar).toLocaleLowerCase("tr");
         if(hay.indexOf(qn)<0) return false; }
       return true;
     }).slice().sort((a,b)=>String(b.tarih||"").localeCompare(String(a.tarih||""))||String(a.ref).localeCompare(String(b.ref)));
-  },[rows,q,tur,ay]);
+  },[rows,q,turF,ay]);
+  /* Toplamlar HER ZAMAN suz'dan (tabla gizleme dahil hiçbir görünüm ayarından
+     etkilenmez); yalnız EKRANA ÇİZİLEN satırlar tabla gizliyken daralır. */
   const top=useMemo(()=>{ let b=0,a=0;
     suz.forEach(r=>{ const ba=hmBorcAlacak(r); b+=ba.borc; a+=ba.alacak; });
     return {borc:hrR2(b),alacak:hrR2(a)}; },[suz]);
+  const gosterilen=useMemo(()=>tablaGizli?suz.filter(r=>r.altTur!=="tabla"):suz,[suz,tablaGizli]);
   const satirVeri=r=>({ tarih:hdFd(r.tarih), donem:hdDonem(r.tarih),
     tur:(HD_TURBADGE[r.tur]||["",""])[0]||r.tur,
     taraf:r.tarafAd||"", aciklama:hmSatirAciklama(r), adet:num(r.adet)||"",
@@ -6799,9 +6818,10 @@ function HareketDefteri({rows,say}){
     whiteSpace:"nowrap",borderBottom:"1px solid var(--line)",position:"sticky",top:0,background:"var(--surf2)",zIndex:1};
   const ikonBtn={flexShrink:0,height:32,minWidth:32,padding:"0 9px",borderRadius:9,border:"1px solid var(--line)",
     background:"var(--surf)",color:"var(--mut)",fontSize:12,fontWeight:800,cursor:"pointer"};
-  const turCip=(k,l)=>h("button",{key:k||"hepsi",type:"button",onClick:()=>{setTur(k);setLim(200);},
-    style:{...ikonBtn,color:tur===k?"var(--cyan)":"var(--mut)",borderColor:tur===k?"var(--cyan)":"var(--line)",
-      background:tur===k?"#eaf6fd":"var(--surf)"}},l);
+  const turCip=(k,l)=>{ const on=k?turF[k]:turHepsi;
+    return h("button",{key:k||"hepsi",type:"button",onClick:()=>k?turToggle(k):turTumu(),
+      style:{...ikonBtn,color:on?"var(--cyan)":"var(--mut)",borderColor:on?"var(--cyan)":"var(--line)",
+        background:on?"#eaf6fd":"var(--surf)"}},l); };
 
   /* ── DÜZENLEME · her satır kaynak kaydına yazar ────────────────────────
      Defter satırı türetilmiştir; düzenleme kaynağı değiştirir → satır ve tüm
@@ -6924,6 +6944,8 @@ function HareketDefteri({rows,say}){
         style:{...ikonBtn,padding:"0 8px",color:ay?"var(--cyan)":"var(--mut)"}},
         h("option",{value:""},"Tüm aylar"),aylar.map(a=>h("option",{key:a,value:a},hdDonem(a+"-01")))),
       turCip("","TÜMÜ"),turCip("SATIS","SATIŞ"),turCip("TAHSILAT","TAHSİLAT"),turCip("MASRAF","MASRAF"),turCip("ODEME","ÖDEME"),
+      mhIko(tablaGizli?"Tabla hareketlerini göster":"Tabla hareketlerini gizle (toplamlar değişmez)",
+        tablaGizli?MH_ICO.gozKapali:MH_ICO.goz,tablaTog,tablaGizli?{renk:"#B45309",bd:"#f0d9b5"}:null),
       mhIko("Manuel hareket ekle",MH_ICO.ekle,yeniAc,{renk:"#1FA855",bd:"#bfe6cd"}),
       mhIko("Sütunlar / yazı boyutu",MH_ICO.sutun,()=>setColMenu(true)),
       mhIko("Excel (CSV) indir",MH_ICO.excel,()=>{
@@ -6940,9 +6962,9 @@ function HareketDefteri({rows,say}){
       h("table",{style:{borderCollapse:"collapse",width:"100%",minWidth:gorunen.length*86}},
         h("thead",null,h("tr",null,gorunen.map(c=>h("th",{key:c[0],style:{...bas,textAlign:sagMi(c[0])?"right":"left"}},c[1])))),
         h("tbody",null,
-          suz.length===0?h("tr",null,h("td",{colSpan:gorunen.length,style:{padding:24,textAlign:"center",color:"var(--mut)",fontSize:12.5}},
+          gosterilen.length===0?h("tr",null,h("td",{colSpan:gorunen.length,style:{padding:24,textAlign:"center",color:"var(--mut)",fontSize:12.5}},
             (rows||[]).length?"Süzgece uyan hareket yok.":"Henüz hareket yok.")):
-          suz.slice(0,lim).map(r=>{
+          gosterilen.slice(0,lim).map(r=>{
             const v=satirVeri(r); const bg=HD_TURBADGE[r.tur]||["","#eee","#666"];
             return h("tr",{key:r.ref,onClick:()=>duzenAc(r),title:"Düzenle",
               style:{cursor:"pointer",background:r.sentetik?"var(--surf2)":"transparent"}},
@@ -6956,10 +6978,10 @@ function HareketDefteri({rows,say}){
                 if(k==="ref"||k==="donem") st.fontSize=Math.max(7,font-2), st.color="var(--mut)";
                 return h("td",{key:k,style:st},v[k]); }));
           }))),
-      suz.length>lim?h("button",{type:"button",onClick:()=>setLim(x=>x+300),
+      gosterilen.length>lim?h("button",{type:"button",onClick:()=>setLim(x=>x+300),
         style:{width:"100%",padding:"10px",border:"none",borderTop:"1px solid var(--line)",background:"var(--surf2)",
           fontSize:12.5,fontWeight:800,color:"var(--mut)",cursor:"pointer"}},
-        "Daha fazla ("+(suz.length-lim)+" satır)"):null),
+        "Daha fazla ("+(gosterilen.length-lim)+" satır)"):null),
     duzenModal,
     colMenu?h("div",{onClick:()=>setColMenu(false),style:{position:"fixed",inset:0,zIndex:1200,background:"rgba(10,15,25,.4)",
       display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"16px 16px 48px",overflowY:"auto"}},
@@ -6981,6 +7003,93 @@ function HareketDefteri({rows,say}){
    Bina defterinin (Yeşil Temizlik) Tikita karşılığı. Dört ekran da tek kaynaktan
    — lib/hareket-model.js — CANLI türer: bir hareket düzeltilince dördü birden düzelir.
    Araç çubuğu bina'daki gibi 32×32 kare, tek renk geometrik SVG ikonlardır. */
+/* ── CARİ EKSTRE GÖRSELİ (PNG) — bina EKSTRE'deki "Excel · PDF · paylaş · WhatsApp"
+   düğme sırasının Tikita karşılığı: Görsel düğmesine basınca Görüntüle/İndir/Paylaş
+   üçlüsü açılır (aynı sistem), ayrıca doğrudan WhatsApp kısayolu. 60 satırdan uzun
+   ekstrede baştaki satırlar tek DEVİR satırına toplanır — yürüyen bakiye bozulmaz. */
+function ekstrePngCiz(kaleAd,E){
+  const W=820,KX=34,LIM=60,SAT=30,BAS=112,ALT=64;
+  const tum=E.rows||[];
+  const goster=tum.length>LIM?tum.slice(-LIM):tum;
+  const devirVar=tum.length>LIM;
+  const devirBakiye=devirVar?(tum[tum.length-LIM-1]?tum[tum.length-LIM-1].bakiye:0):0;
+  const satirSayisi=goster.length+(devirVar?1:0);
+  const H=BAS+40+satirSayisi*SAT+ALT+20;
+  const cv=document.createElement("canvas"); const OL=2;
+  cv.width=W*OL; cv.height=H*OL; const g=cv.getContext("2d"); g.scale(OL,OL);
+  const F=(px,w)=>{ g.font=(w||500)+" "+px+'px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'; };
+  const kis=(t,max)=>{ let s=String(t==null?"":t); if(g.measureText(s).width<=max) return s;
+    while(s.length>1&&g.measureText(s+"…").width>max) s=s.slice(0,-1); return s+"…"; };
+  g.fillStyle="#ffffff"; g.fillRect(0,0,W,H); g.textBaseline="alphabetic";
+  g.fillStyle="#0e8fce"; g.fillRect(0,0,W,BAS);
+  g.fillStyle="#fff"; F(24,900); g.fillText("TIKITA",KX,42);
+  F(12,700); g.fillStyle="rgba(255,255,255,.88)"; g.fillText("CARİ EKSTRE",KX,60);
+  F(22,800); g.fillStyle="#fff"; g.fillText(kis(kaleAd,W-2*KX),KX,92);
+  let y=BAS+30;
+  F(10.5,800); g.fillStyle="#8a93a3";
+  g.fillText("TARİH",KX,y); g.fillText("AÇIKLAMA",KX+78,y);
+  g.textAlign="right"; g.fillText("BORÇ",W-KX-140,y); g.fillText("ALACAK",W-KX-68,y); g.fillText("BAKİYE",W-KX,y);
+  g.textAlign="left"; y+=12; g.fillStyle="#e2e6ed"; g.fillRect(KX,y,W-2*KX,1); y+=20;
+  const satirCiz=(tarih,ack,borc,alacak,bakiye,vurgu,soluk)=>{
+    F(11.5,vurgu?800:600); g.fillStyle=soluk?"#a9adb6":(vurgu?"#1b1e25":"#3c434d");
+    g.fillText(tarih,KX,y); g.fillText(kis(ack,W-KX-78-160),KX+78,y);
+    g.textAlign="right"; F(11.5,700);
+    g.fillStyle=borc?"#1FA855":"#c7cbd3"; g.fillText(borc?hdFmk(borc):"—",W-KX-140,y);
+    g.fillStyle=alacak?"#C0392B":"#c7cbd3"; g.fillText(alacak?hdFmk(alacak):"—",W-KX-68,y);
+    g.fillStyle=soluk?"#a9adb6":"#1b1e25"; F(11.5,900); g.fillText(bakiye==null?"—":hdFmk(bakiye),W-KX,y);
+    g.textAlign="left"; y+=SAT;
+  };
+  if(devirVar) satirCiz("","DEVİR — "+(tum.length-LIM)+" eski satır",0,0,devirBakiye,true);
+  goster.forEach(s=>satirCiz(hdFd(s.tarih),hmSatirAciklama(s),s.borc,s.avansMi?0:s.alacak,
+    s.avansMi?null:s.bakiye,false,s.cariDisi));
+  y+=6; g.fillStyle="#eef7f2"; g.fillRect(0,y,W,ALT);
+  F(12.5,800); g.fillStyle="#3c434d"; g.fillText("GÜNCEL BAKİYE",KX,y+28);
+  F(21,900); g.fillStyle=E.bakiye>0.4?"#C0392B":"#1FA855"; g.textAlign="right";
+  g.fillText(hdFmk(E.bakiye)+" ₺",W-KX,y+32); g.textAlign="left";
+  F(9.5,600); g.fillStyle="#a9adb6"; g.fillText(new Date().toLocaleDateString("tr-TR"),KX,y+52);
+  return cv;
+}
+async function ekstrePaylas(kaleAd,E,mode,say){
+  try{
+    const cv=ekstrePngCiz(kaleAd,E);
+    const blob=await new Promise(r=>cv.toBlob(r,"image/png"));
+    if(!blob){ say&&say("⚠ Görsel oluşturulamadı"); return; }
+    const ad=("ekstre-"+String(kaleAd).replace(/[^\wçğıöşüÇĞİÖŞÜ]+/g,"-")+"-"+ymdYerel()+".png").slice(0,80);
+    if(mode==="view"){ const url=URL.createObjectURL(blob); window.open(url,"_blank");
+      setTimeout(()=>URL.revokeObjectURL(url),60000); return; }
+    if(mode==="save"){ const url=URL.createObjectURL(blob);
+      const a=document.createElement("a"); a.href=url; a.download=ad; document.body.appendChild(a); a.click();
+      setTimeout(()=>{ try{a.remove();}catch(e){} URL.revokeObjectURL(url); },3000);
+      say&&say("🖼 Görsel indirildi"); return; }
+    // share / whatsapp — dosya paylaşımı desteklenmiyorsa indir + hedefsiz WhatsApp metni
+    const dosya=new File([blob],ad,{type:"image/png"});
+    if(navigator.canShare&&navigator.canShare({files:[dosya]})){
+      await navigator.share({files:[dosya],title:kaleAd+" · Cari Ekstre"}); return; }
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=ad; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ try{a.remove();}catch(e){} URL.revokeObjectURL(url); },5000);
+    try{ window.open("https://wa.me/?text="+encodeURIComponent(kaleAd+" apartmanı yönetimi için — güncel bakiyeniz "+hdFmk(E.bakiye)+" ₺'dir."),"_blank"); }catch(e){}
+    say&&say("🖼 Görsel indirildi — WhatsApp'a ekleyebilirsin");
+  }catch(e){ console.error(e); say&&say("⚠ Paylaşılamadı"); }
+}
+function EkstreGorselBtn({kaleAd,E,say}){
+  const [ac,setAc]=useState(false);
+  const st={flexShrink:0,height:32,padding:"0 11px",borderRadius:9,border:"1px solid var(--line)",
+    background:"var(--surf)",color:"var(--mut)",fontSize:11.5,fontWeight:800,cursor:"pointer",
+    display:"inline-flex",alignItems:"center",gap:6};
+  return h("div",{style:{position:"relative",display:"inline-flex",gap:6}},
+    h("button",{type:"button",onClick:()=>setAc(v=>!v),style:st},mhSvg(MH_ICO.gorsel,"currentColor",14),"Görsel"),
+    h("button",{type:"button",title:"WhatsApp'tan gönder",onClick:()=>ekstrePaylas(kaleAd,E,"share",say),
+      style:{...st,color:"#1FA855",borderColor:"#bfe6cd"}},mhSvg(MH_ICO.wa,"currentColor",14)),
+    ac?h("div",{onClick:()=>setAc(false),style:{position:"fixed",inset:0,zIndex:1200}},
+      h("div",{onClick:e=>e.stopPropagation(),className:"card",
+        style:{position:"absolute",top:38,right:0,minWidth:170,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,.15)"}},
+        [["Görüntüle",MH_ICO.gorsel,"view"],["İndir",MH_ICO.indir,"save"],["Paylaş",MH_ICO.wa,"share"]].map(([l,ic,m])=>
+          h("button",{key:m,type:"button",onClick:()=>{setAc(false);ekstrePaylas(kaleAd,E,m,say);},
+            style:{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"9px 10px",borderRadius:8,
+              fontSize:12.5,fontWeight:700,color:"var(--txt)",background:"none",textAlign:"left"}},
+            mhSvg(ic,"var(--mut)",15),l)))):null);
+}
 function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,say}){
   const [alt,setAlt]=useState(()=>{ try{ return sessionStorage.getItem("tk_mh_alt")||"hareket"; }catch(e){ return "hareket"; } });
   useEffect(()=>{ try{ sessionStorage.setItem("tk_mh_alt",alt); }catch(e){} },[alt]);
@@ -7032,8 +7141,10 @@ function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,sa
     } else {
       const E=hmEkstre(rows,kale);
       govde=h("div",null,
-        h("button",{type:"button",onClick:()=>setKale(null),
-          style:{fontSize:12.5,fontWeight:800,color:"var(--cyan)",marginBottom:9}},"‹ Müşteriler"),
+        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}},
+          h("button",{type:"button",onClick:()=>setKale(null),
+            style:{fontSize:12.5,fontWeight:800,color:"var(--cyan)"}},"‹ Müşteriler"),
+          h(EkstreGorselBtn,{kaleAd:kale,E,say})),
         kutu([h("div",{key:"b",style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
             h("span",{style:{fontWeight:900,fontSize:15}},kale),
             h("span",{style:{fontWeight:900,fontSize:16,color:E.bakiye>0.4?"var(--red)":"var(--green)"}},hrTl(E.bakiye))),
@@ -7044,7 +7155,7 @@ function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,sa
             h("thead",null,h("tr",null,["TARİH","AÇIKLAMA","BORÇ","ALACAK","BAKİYE"].map((x,i)=>
               h("th",{key:x,style:{padding:"6px 7px",fontSize:9.5,fontWeight:800,color:"var(--mut)",
                 textAlign:i>=2?"right":"left",borderBottom:"1px solid var(--line)",whiteSpace:"nowrap"}},x)))),
-            h("tbody",null,E.rows.map(s=>h("tr",{key:s.ref},
+            h("tbody",null,E.rows.map(s=>h("tr",{key:s.ref,style:s.cariDisi?{opacity:.5}:null},
               h("td",{style:{padding:"6px 7px",borderBottom:"1px solid var(--line)",whiteSpace:"nowrap",color:"var(--mut)"}},hdFd(s.tarih)),
               h("td",{style:{padding:"6px 7px",borderBottom:"1px solid var(--line)",fontWeight:700,overflow:"hidden",whiteSpace:"nowrap"}},
                 hmSatirAciklama(s)),
@@ -7055,9 +7166,10 @@ function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,sa
     }
   } else if(alt==="rapor"){
     const RP=hmDonemRapor(rows,dnm);
+    const donemSatis=hrR2(rows.filter(r=>r.tur==="SATIS"&&(r.tarih||"").slice(0,7)===dnm).reduce((z,r)=>z+num(r.tutar),0));
     const csvSatir=RP.satirlar.map(o=>({ad:o.ad,giren:hdFmk(o.giren),cikan:hdFmk(o.cikan)}));
     govde=h("div",null,
-      h("div",{style:{display:"flex",gap:7,alignItems:"center",marginBottom:10}},
+      h("div",{style:{display:"flex",gap:7,alignItems:"center",marginBottom:donemSatis>0?4:10}},
         h("select",{value:dnm,onChange:e=>setRDonem(e.target.value),
           style:{flex:1,height:38,padding:"0 11px",borderRadius:11,border:"1px solid var(--line)",
             background:"var(--surf)",fontSize:14,fontWeight:800,color:"var(--txt)"}},
@@ -7065,6 +7177,8 @@ function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,sa
         mhIko("Excel (CSV) indir",MH_ICO.excel,()=>{
           hdCsvIndir([["ad","MÜŞTERİ / KALEM"],["giren","GİREN"],["cikan","ÇIKAN"]],csvSatir,
             "tikita-rapor-"+dnm+".csv"); say&&say("📄 Rapor indirildi"); },{renk:"#1FA855",bd:"#bfe6cd"})),
+      donemSatis>0?h("div",{style:{fontSize:11.5,fontWeight:700,color:"var(--mut)",marginBottom:10}},
+        "Satış (tahakkuk) "+hrTl(donemSatis)+" — bu tabloya girmez, yalnız nakit hareketleri"):null,
       h("div",{style:{border:"1px solid var(--line)",borderRadius:12,background:"var(--surf)",overflow:"hidden"}},
         h("table",{style:{borderCollapse:"collapse",width:"100%",fontSize:13}},
           h("thead",null,h("tr",null,["Müşteri","Giren","Çıkan"].map((x,i)=>

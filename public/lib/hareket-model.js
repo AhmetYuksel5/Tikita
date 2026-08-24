@@ -17,6 +17,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export const HM_SURUM = "1";
+export const HM_TURLER = ["SATIS", "TAHSILAT", "MASRAF", "ODEME"];
 
 /* Hakediş düzeni kesim tarihi — TEK KAYNAK. admin/deneme/finans'taki üç kopya
    geçiş süresince durur; YENİ kod yalnız burayı okur. */
@@ -365,18 +366,24 @@ export function donemPivot(rows, birimAlan) {
    yürüyen bakiye burada, süzgeçten önce yazılır (ekstre sürekliliği).
    ───────────────────────────────────────────────────────────────────────── */
 export function kaleAnahtar(s) { return (s.tarafAd || s.tarafId || "—").trim() || "—"; }
+/* Bu tarafla ilgili TÜM hareketler — tür kısıtı YOK (kullanıcı isteği: "onunla
+   alakalı bütün hareketleri görebilmeliyim"). Yürüyen bakiye yalnız gerçekten
+   cari etkisi olan satırlarda (SATIŞ + normal/peşin tahsilat) ilerler; avans ve
+   kale adına rastgele denk gelen MASRAF/ÖDEME satırı `cariDisi:true` ile
+   işaretlenip listede görünür ama bakiyeye dokunmaz (bina "süzgeç bakiyeyi
+   yeniden hesaplamaz" kuralının karşılığı). */
 export function kaleEkstre(rows, kaleAd) {
-  const L = (rows || []).filter(s =>
-    kaleAnahtar(s) === kaleAd &&
-    (s.tur === "SATIS" ||
-     (s.tur === "TAHSILAT" && (s.altTur === "normal" || s.altTur === "pesin" || s.altTur === "avans"))));
+  const L = (rows || []).filter(s => kaleAnahtar(s) === kaleAd);
   L.sort((a, b) => (ms(a.tarih) - ms(b.tarih)) || ((a.tur === "SATIS" ? 0 : 1) - (b.tur === "SATIS" ? 0 : 1)) || String(a.ref).localeCompare(String(b.ref)));
   let run = 0;
   const out = L.map(s => {
+    const e = etki(s);
+    const avansMi = s.tur === "TAHSILAT" && s.altTur === "avans";
+    const cariMi = !avansMi && e.musteriCari !== 0;
     const borc = (s.tur === "SATIS") ? s.tutar : 0;
-    const alacak = (s.tur === "TAHSILAT" && s.altTur === "normal") ? s.tutar : 0;
-    run = r2(run + borc - alacak);
-    return { ...s, borc, alacak, bakiye: run, avansMi: s.altTur === "avans" };
+    const alacak = (s.tur === "TAHSILAT" && !avansMi) ? s.tutar : (s.tur === "MASRAF" || s.tur === "ODEME" ? s.tutar : 0);
+    if (cariMi) run = r2(run + borc - alacak);
+    return { ...s, borc, alacak, bakiye: run, avansMi, cariDisi: !cariMi && !avansMi };
   });
   return { rows: out, bakiye: run,
     avans: r2(L.filter(s => s.altTur === "avans").reduce((z, s) => z + s.tutar, 0)) };

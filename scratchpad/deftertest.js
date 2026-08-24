@@ -65,6 +65,7 @@ function tum(n, ad, bulunan) { bulunan = bulunan || [];
   (n.cocuk || []).forEach(c => tum(c, ad, bulunan));
   return bulunan;
 }
+const yaz = n => metin(n).join(" ");
 function metin(n, out) { out = out || [];
   if (n == null) return out;
   if (typeof n === "string" || typeof n === "number") { out.push(String(n)); return out; }
@@ -124,7 +125,7 @@ t("manuel ekle ikonu var", tum(agac, "button").some(b => (b.props.title||"").ind
 // tür süzgeci: yalnız SATIŞ
 stateSira = []; stateIdx = 0;
 const a2 = M.HareketDefteri({ rows, say: () => {} });   // state'i kur
-stateSira[1] = "SATIS";                                  // [0]=q, [1]=tur
+stateSira[1] = {SATIS:true,TAHSILAT:false,MASRAF:false,ODEME:false};  // [0]=q, [1]=turF
 stateIdx = 0;
 const agac2 = M.HareketDefteri({ rows, say: () => {} });
 const satis = rows.filter(r => r.tur === "SATIS").length;
@@ -133,7 +134,7 @@ t("tür süzgeci satırları daraltıyor", tum(agac2, "tr").length === satis + 1
 // ay süzgeci: 2026-07
 stateSira = []; stateIdx = 0;
 M.HareketDefteri({ rows, say: () => {} });
-stateSira[2] = "2026-07";                                // [2]=ay
+stateSira[3] = "2026-07";                                // [3]=ay
 stateIdx = 0;
 const agac3 = M.HareketDefteri({ rows, say: () => {} });
 const tem = rows.filter(r => (r.tarih || "").slice(0, 7) === "2026-07").length;
@@ -151,7 +152,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
   const gd = rows.find(r => r.ref === "gid:gd1");
-  stateSira[4] = { yeni:false, r:gd, f:{ tur:"MASRAF", tarih:"2026-08-15", taraf:"Kargo",
+  stateSira[5] = { yeni:false, r:gd, f:{ tur:"MASRAF", tarih:"2026-08-15", taraf:"Kargo",
     aciklama:"kargo bedeli", tutar:"55", giderTur:"Kargo" } };   // [4]=duzen
   stateIdx = 0;
   const a = M.HareketDefteri({ rows, say: () => {} });
@@ -167,7 +168,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
   const st = rows.find(r => r.ref === "har:s1");
-  stateSira[4] = { yeni:false, r:st, f:{ tur:"SATIS", tarih:"2026-08-16", taraf:"Kale B",
+  stateSira[5] = { yeni:false, r:st, f:{ tur:"SATIS", tarih:"2026-08-16", taraf:"Kale B",
     adet:"3", satisFiyat:"110", alisFiyat:"75", urunAd:"Kolye XL", aciklama:"" } };
   stateIdx = 0;
   const a2b = M.HareketDefteri({ rows, say: () => {} });
@@ -181,7 +182,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   // silme → remove(kaynakKol, kaynakId)
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
-  stateSira[4] = { yeni:false, r:gd, f:hdFormDoldurTest(gd) };
+  stateSira[5] = { yeni:false, r:gd, f:hdFormDoldurTest(gd) };
   stateIdx = 0;
   const a3 = M.HareketDefteri({ rows, say: () => {} });
   __yazim = [];
@@ -192,7 +193,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   // manuel ekle: MASRAF → gider
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
-  stateSira[4] = { yeni:true, r:null, f:{ tur:"MASRAF", tarih:"2026-08-20", taraf:"", aciklama:"kırtasiye",
+  stateSira[5] = { yeni:true, r:null, f:{ tur:"MASRAF", tarih:"2026-08-20", taraf:"", aciklama:"kırtasiye",
     tutar:"250", adet:"1", satisFiyat:"", alisFiyat:"", urunAd:"", giderTur:"Diğer" } };
   stateIdx = 0;
   const a4 = M.HareketDefteri({ rows, say: () => {} });
@@ -206,7 +207,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   // manuel ekle: SATIŞ → pazarlama_hareket tip:satis
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
-  stateSira[4] = { yeni:true, r:null, f:{ tur:"SATIS", tarih:"2026-08-20", taraf:"Kale C", aciklama:"",
+  stateSira[5] = { yeni:true, r:null, f:{ tur:"SATIS", tarih:"2026-08-20", taraf:"Kale C", aciklama:"",
     tutar:"", adet:"4", satisFiyat:"90", alisFiyat:"65", urunAd:"Anahtarlık", giderTur:"" } };
   stateIdx = 0;
   const a5 = M.HareketDefteri({ rows, say: () => {} });
@@ -234,6 +235,41 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
     hdDuzenlenirTest({ kaynakKol:"montaj_gorev", kaynakId:"y" }).olur === false);
   t("normal gider/satış satırı düzenlemeye AÇIK",
     hdDuzenlenirTest(gd).olur === true && hdDuzenlenirTest(st).olur === true);
+
+
+  /* ── TABLA GİZLEME: yalnız GÖRÜNÜM, TOPLAMLAR değişmez ── */
+  const D_TAB = { hareketler: [
+    { id: "x1", tip: "satis", tarih: YENI, adet: 1, satisFiyat: 100, alisFiyat: 60, yer: "Kale A" },
+    { id: "b1", tip: "tabla", tarih: YENI, tutar: 25, kullaniciAd: "Ece" },
+    { id: "b2", tip: "tabla", tarih: YENI, tutar: 15, kullaniciAd: "Can" }
+  ], giderler: [], sabitGiderler: [], montajGorevler: [], hakedisDonemler: [] };
+  const rowsTab = M.olayUret(D_TAB, { simdi: Date.parse("2026-08-23T12:00:00") }).rows;
+
+  stateSira = []; stateIdx = 0;
+  const T0 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("varsayılan: tabla satırları GÖRÜNÜR (3 satır+başlık)", tum(T0, "tr").length === 4);
+  const top0 = yaz(T0);
+
+  stateSira = []; stateIdx = 0;
+  M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  stateSira[2] = true;                          // [2] = tablaGizli
+  stateIdx = 0;
+  const T1 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("tablaGizli açık: tabla satırları LİSTEDE YOK (1 satır+başlık)", tum(T1, "tr").length === 2);
+  t("tablaGizli açık: BORÇ/ALACAK toplamı DEĞİŞMEDİ", (() => {
+    const y0 = top0.match(/Alacak [\d.,]+ ₺/), y1 = yaz(T1).match(/Alacak [\d.,]+ ₺/);
+    return y0 && y1 && y0[0] === y1[0]; })());
+  t("tablaGizli açık: hareket SAYISI da tam kalıyor", (() => {
+    const s0 = top0.match(/\d+ hareket/), s1 = yaz(T1).match(/\d+ hareket/);
+    return s0 && s1 && s0[0] === s1[0]; })());
+
+  /* ── TÜR TOGGLE: bağımsız açık/kapalı ── */
+  stateSira = []; stateIdx = 0;
+  M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  stateSira[1] = { SATIS: true, TAHSILAT: true, MASRAF: false, ODEME: true };
+  stateIdx = 0;
+  const T2 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("tür toggle: MASRAF (tabla) kapatılınca yalnız SATIŞ kalır", tum(T2, "tr").length === 2);
 
   console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
   process.exit(fail ? 1 : 0);
