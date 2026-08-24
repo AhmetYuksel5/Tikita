@@ -87,7 +87,7 @@ import { yedekTopla, yedekIndir, sonYedekIsaretle, sonYedekGun, yedekEskiMi, ymd
    raporlar oradan beslenecek; ekran kurulunca buraya import edilir. */
 import { olayUret as hmOlayUret, borcAlacak as hmBorcAlacak, satirAciklama as hmSatirAciklama,
          kaleBakiyeleri as hmBakiyeler, kaleEkstre as hmEkstre, donemRapor as hmDonemRapor,
-         genelOzet as hmGenel } from "./lib/hareket-model.js";
+         genelOzet as hmGenel, HM_TURLER } from "./lib/hareket-model.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -6723,6 +6723,8 @@ function mhIko(baslik,ikon,onClick,opt){ opt=opt||{};
 const HD_COLS=[["tarih","TARİH"],["donem","DÖNEM"],["tur","TÜR"],["taraf","TARAF"],["aciklama","AÇIKLAMA"],
   ["adet","ADET"],["borc","BORÇ"],["alacak","ALACAK"],["kisi","KİŞİ"],["kaynak","KAYNAK"],["ref","KAYIT NO"]];
 const HD_COLS_DEF={tarih:true,donem:true,tur:true,taraf:true,aciklama:true,adet:true,borc:true,alacak:true,kisi:false,kaynak:false,ref:false};
+const TUR_DONGU=["",...HM_TURLER];
+const TUR_ETIKET={"":"TÜMÜ",SATIS:"SATIŞ",TAHSILAT:"TAHSİLAT",MASRAF:"MASRAF",ODEME:"ÖDEME"};
 /* Dönem = "2026 AĞUSTOS" (bina defteriyle aynı okunuş; hafta sütunu bilerek YOK). */
 const HD_AYLAR=["OCAK","ŞUBAT","MART","NİSAN","MAYIS","HAZİRAN","TEMMUZ","AĞUSTOS","EYLÜL","EKİM","KASIM","ARALIK"];
 const hdDonem=t=>{ const d=new Date(t); return isNaN(+d)?"":(d.getFullYear()+" "+HD_AYLAR[d.getMonth()]); };
@@ -6762,13 +6764,10 @@ function hdCsvIndir(sutunlar,satirlar,dosyaAdi){
    yazı boyutu, dönem/tür süzgeci, arama, CSV çıktı. Satıra dokun → ham kayıt. */
 function HareketDefteri({rows,say}){
   const [q,setQ]=useState("");
-  /* Tür süzgeci TOGGLE'dır (kullanıcı isteği) — her tür bağımsız açık/kapalı.
-     Hepsi kapanacaksa TÜMÜ'ye döner (boş ekran anlamsız olmasın). */
-  const [turF,setTurF]=useState(()=>({SATIS:true,TAHSILAT:true,MASRAF:true,ODEME:true}));
-  const turHepsi=HM_TURLER.every(k=>turF[k]);
-  function turToggle(k){ setTurF(f=>{ const n={...f,[k]:!f[k]};
-    return HM_TURLER.some(x=>n[x])?n:{SATIS:true,TAHSILAT:true,MASRAF:true,ODEME:true}; }); setLim(200); }
-  function turTumu(){ setTurF({SATIS:true,TAHSILAT:true,MASRAF:true,ODEME:true}); setLim(200); }
+  /* Tür süzgeci TEK DÜĞMEDİR (kullanıcı isteği — bina MAAŞ > MOD DÜĞMESİ ile aynı dil):
+     basınca sırayla TÜMÜ → SATIŞ → TAHSİLAT → MASRAF → ÖDEME → TÜMÜ döner. */
+  const [tur,setTur]=useState("");
+  function turIlerle(){ setTur(t=>TUR_DONGU[(TUR_DONGU.indexOf(t)+1)%TUR_DONGU.length]); setLim(200); }
   /* TABLA gizle — yalnız GÖRÜNÜMDEN kalkar; toplamlar (top) HER ZAMAN tam
      listeden hesaplanır, bu toggle'dan ETKİLENMEZ (kullanıcı isteği: "rakamlara
      yansımasın"). Sık tekrarlanan tabla hareketleri listeyi kaplamasın diye. */
@@ -6791,14 +6790,14 @@ function HareketDefteri({rows,say}){
      hiçbir şey toplanmaz/gruplanmaz, her hareket kendi satırında durur. */
   const suz=useMemo(()=>{ const qn=q.trim().toLocaleLowerCase("tr");
     return (rows||[]).filter(r=>{
-      if(!turF[r.tur]) return false;
+      if(tur&&r.tur!==tur) return false;
       if(ay&&(r.tarih||"").slice(0,7)!==ay) return false;
       if(qn){ const hay=((r.tarafAd||"")+" "+(r.urunAd||"")+" "+(r.kullaniciAd||"")+" "+(r.altTur||"")+" "+
         hmSatirAciklama(r)+" "+(r.ref||"")+" "+r.tutar).toLocaleLowerCase("tr");
         if(hay.indexOf(qn)<0) return false; }
       return true;
     }).slice().sort((a,b)=>String(b.tarih||"").localeCompare(String(a.tarih||""))||String(a.ref).localeCompare(String(b.ref)));
-  },[rows,q,turF,ay]);
+  },[rows,q,tur,ay]);
   /* Toplamlar HER ZAMAN suz'dan (tabla gizleme dahil hiçbir görünüm ayarından
      etkilenmez); yalnız EKRANA ÇİZİLEN satırlar tabla gizliyken daralır. */
   const top=useMemo(()=>{ let b=0,a=0;
@@ -6818,10 +6817,6 @@ function HareketDefteri({rows,say}){
     whiteSpace:"nowrap",borderBottom:"1px solid var(--line)",position:"sticky",top:0,background:"var(--surf2)",zIndex:1};
   const ikonBtn={flexShrink:0,height:32,minWidth:32,padding:"0 9px",borderRadius:9,border:"1px solid var(--line)",
     background:"var(--surf)",color:"var(--mut)",fontSize:12,fontWeight:800,cursor:"pointer"};
-  const turCip=(k,l)=>{ const on=k?turF[k]:turHepsi;
-    return h("button",{key:k||"hepsi",type:"button",onClick:()=>k?turToggle(k):turTumu(),
-      style:{...ikonBtn,color:on?"var(--cyan)":"var(--mut)",borderColor:on?"var(--cyan)":"var(--line)",
-        background:on?"#eaf6fd":"var(--surf)"}},l); };
 
   /* ── DÜZENLEME · her satır kaynak kaydına yazar ────────────────────────
      Defter satırı türetilmiştir; düzenleme kaynağı değiştirir → satır ve tüm
@@ -6943,7 +6938,9 @@ function HareketDefteri({rows,say}){
       h("select",{value:ay,onChange:e=>{setAy(e.target.value);setLim(200);},
         style:{...ikonBtn,padding:"0 8px",color:ay?"var(--cyan)":"var(--mut)"}},
         h("option",{value:""},"Tüm aylar"),aylar.map(a=>h("option",{key:a,value:a},hdDonem(a+"-01")))),
-      turCip("","TÜMÜ"),turCip("SATIS","SATIŞ"),turCip("TAHSILAT","TAHSİLAT"),turCip("MASRAF","MASRAF"),turCip("ODEME","ÖDEME"),
+      h("button",{type:"button",title:"Tür süzgeci — dokun: TÜMÜ ▸ SATIŞ ▸ TAHSİLAT ▸ MASRAF ▸ ÖDEME",
+        onClick:turIlerle,style:{...ikonBtn,minWidth:76,color:tur?"var(--cyan)":"var(--mut)",
+          borderColor:tur?"var(--cyan)":"var(--line)",background:tur?"#eaf6fd":"var(--surf)"}},TUR_ETIKET[tur]),
       mhIko(tablaGizli?"Tabla hareketlerini göster":"Tabla hareketlerini gizle (toplamlar değişmez)",
         tablaGizli?MH_ICO.gozKapali:MH_ICO.goz,tablaTog,tablaGizli?{renk:"#B45309",bd:"#f0d9b5"}:null),
       mhIko("Manuel hareket ekle",MH_ICO.ekle,yeniAc,{renk:"#1FA855",bd:"#bfe6cd"}),

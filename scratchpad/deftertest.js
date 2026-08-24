@@ -125,7 +125,7 @@ t("manuel ekle ikonu var", tum(agac, "button").some(b => (b.props.title||"").ind
 // tür süzgeci: yalnız SATIŞ
 stateSira = []; stateIdx = 0;
 const a2 = M.HareketDefteri({ rows, say: () => {} });   // state'i kur
-stateSira[1] = {SATIS:true,TAHSILAT:false,MASRAF:false,ODEME:false};  // [0]=q, [1]=turF
+stateSira[1] = "SATIS";                                               // [0]=q, [1]=tur (tek değer, TÜMÜ="")
 stateIdx = 0;
 const agac2 = M.HareketDefteri({ rows, say: () => {} });
 const satis = rows.filter(r => r.tur === "SATIS").length;
@@ -263,13 +263,29 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
     const s0 = top0.match(/\d+ hareket/), s1 = yaz(T1).match(/\d+ hareket/);
     return s0 && s1 && s0[0] === s1[0]; })());
 
-  /* ── TÜR TOGGLE: bağımsız açık/kapalı ── */
+  /* ── TÜR SÜZGECİ: TEK DÜĞME, dokunuşta sırayla TÜMÜ▸SATIŞ▸TAHSİLAT▸MASRAF▸ÖDEME döner
+     (kullanıcı 2026-08-24: beş ayrı çip yerine tek simge, bina MAAŞ > MOD DÜĞMESİ gibi) ── */
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  stateSira[1] = { SATIS: true, TAHSILAT: true, MASRAF: false, ODEME: true };
+  stateSira[1] = "MASRAF";
   stateIdx = 0;
   const T2 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  t("tür toggle: MASRAF (tabla) kapatılınca yalnız SATIŞ kalır", tum(T2, "tr").length === 2);
+  t("tür süzgeci: MASRAF (tabla) seçilince yalnız tabla satırları kalır", tum(T2, "tr").length === 3);
+  t("tür süzgeci: TÜMÜ/SATIŞ/TAHSİLAT/MASRAF/ÖDEME için BEŞ AYRI çip YOK — tek düğme",
+    tum(T2, "button").filter(b => ["TÜMÜ","SATIŞ","TAHSİLAT","MASRAF","ÖDEME"].includes(yaz(b))).length === 1);
+
+  const turDugme = n => tum(n, "button").find(b => b.props.title === "Tür süzgeci — dokun: TÜMÜ ▸ SATIŞ ▸ TAHSİLAT ▸ MASRAF ▸ ÖDEME");
+  stateSira = []; stateIdx = 0;
+  const T3a = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("tür düğmesi varsayılan TÜMÜ yazıyor", yaz(turDugme(T3a)) === "TÜMÜ");
+  turDugme(T3a).props.onClick();
+  stateIdx = 0;
+  const T3b = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("bir dokunuş: TÜMÜ → SATIŞ", yaz(turDugme(T3b)) === "SATIŞ");
+  turDugme(T3b).props.onClick(); turDugme(T3b).props.onClick(); turDugme(T3b).props.onClick(); turDugme(T3b).props.onClick();
+  stateIdx = 0;
+  const T3c = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("beş dokunuş sonra baştan döner: TÜMÜ", yaz(turDugme(T3c)) === "TÜMÜ");
 
   console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
   process.exit(fail ? 1 : 0);
