@@ -98,7 +98,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L68";   // komuta (admin) deneme sürümü
+const SURUM="L69";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -967,7 +967,11 @@ function planIsleri(secim,BM,bekleme){
     /* aynı ürünün renk çeşitleri ayrı satır gelir — anahtarları çakışmasın */
     const renk=it.renk||null, vk=it.vk!=null?String(it.vk):String(ix);
     const renkAd=it.renkAd||"";
-    b.parcalar.forEach((r,ri)=>{ const ger=Math.max(1,num(r.ger));
+    /* 🧩 tek parça seçiliyse yalnız o satır işlenir; girilen adet doğrudan o
+       parçanın kendi adedi sayılır — takım gerek çarpanı devre dışı kalır */
+    const tekParca=it.parca&&(b.parcalar||[]).some(r=>r.ad===it.parca);
+    const satirlar=tekParca?b.parcalar.filter(r=>r.ad===it.parca):(b.parcalar||[]);
+    satirlar.forEach((r,ri)=>{ const ger=tekParca?1:Math.max(1,num(r.ger));
       const parca=n*ger; const cap=Math.max(1,num(r.plakaAdet));
       /* 🍽 Tabla bölünmez. Girilen adet EN AZ o kadar çıkacak şekilde tam tablaya
          yuvarlanır: 16'lık tablada 50 istenirse 4 tabla basılır, 64 adet çıkar. */
@@ -993,11 +997,13 @@ function planIsleri(secim,BM,bekleme){
    Tabla bölünmediği için girilen sayı bir ALT SINIR: 16'lık tablada 50 istenirse
    4 tabla basılır ve 64 adet çıkar. Parçalı üründe takım sayısı, parçaların
    en darına göre belirlenir. */
-function planUretimTek(u,adet,BM){
+function planUretimTek(u,adet,BM,parca){
   const b=BM&&BM[(u||{}).id]; const n=Math.max(0,Math.round(num(adet)));
   if(!b||!b.ok||n<=0) return null;
+  const tekParca=parca&&(b.parcalar||[]).some(r=>r.ad===parca);
+  const satirlar=tekParca?b.parcalar.filter(r=>r.ad===parca):(b.parcalar||[]);
   let tabla=0, takim=Infinity; const parcalar=[];
-  (b.parcalar||[]).forEach(r=>{ const ger=Math.max(1,num(r.ger)), cap=Math.max(1,num(r.plakaAdet));
+  satirlar.forEach(r=>{ const ger=tekParca?1:Math.max(1,num(r.ger)), cap=Math.max(1,num(r.plakaAdet));
     const t=Math.ceil(n*ger/cap), cikan=t*cap;
     tabla+=t; parcalar.push({ad:r.ad,tabla:t,cikan,ger,cap});
     takim=Math.min(takim,Math.floor(cikan/ger)); });
@@ -1007,7 +1013,7 @@ function planUretimTek(u,adet,BM){
 function planUretim(secim,BMT,turler){
   const acc={};
   (secim||[]).forEach(it=>{ const u=it&&it.u; if(!u||!u.id) return;
-    (turler||[]).forEach(t=>{ const r=planUretimTek(u,it.adet,BMT&&BMT[t]); if(!r) return;
+    (turler||[]).forEach(t=>{ const r=planUretimTek(u,it.adet,BMT&&BMT[t],it.parca); if(!r) return;
       const g=acc[u.id]=acc[u.id]||{};
       const a=g[t]=g[t]||{istenen:0,uretilen:0,tabla:0};
       a.istenen+=r.istenen; a.uretilen+=r.uretilen; a.tabla+=r.tabla; }); });
@@ -1854,7 +1860,7 @@ function planKapasite(oranlar,BMT,turler,makList,bekleme,hedefDk,filamentler,hed
   if(!G.length||num(hedefDk)<=0) return bos;
   /* renk seçimi oranla birlikte büyür */
   const kur=k=>G.map(x=>({u:x.u,adet:Math.max(1,Math.round(num(x.oran)*k)),
-    renk:x.renk||null,renkAd:x.renkAd||"",vk:x.vk}));
+    renk:x.renk||null,renkAd:x.renkAd||"",vk:x.vk,parca:x.parca||""}));
   const sure=k=>planOzet(kur(k),BMT,turler,makList,bekleme,filamentler,hedef,degisimDk).makespanDk;
   if(sure(1)>num(hedefDk)) return bos;
   let lo=1,hi=2;
@@ -4121,6 +4127,31 @@ function KomutaMesajSheet({ekip,onKaydet,bekle}){
 /* ————— 🧮 PLANLAMA ARACI — ne kadar sürer / bu sürede ne kadar çıkar ————— */
 /* 🎨 Bir ürünün renk çeşitleri: "50 kırmızı, 50 beyaz" gibi. Değişken yuvası olan
    ürünlerde planlama bu seçime göre filament hesaplar. */
+/* 🧩 çok parçalı üründe yalnız TEK bir parçayı planla — takım gerek çarpanı
+   devre dışı kalır, girilen adet doğrudan o parçanın kendi adedi sayılır. */
+function ParcaSecSheet({u,parcalar,mevcut,onKaydet,onClose}){
+  const [sec,setSec]=useState(mevcut||"");
+  const satir=(pt,baslik,alt)=>h("button",{key:pt||"__takim",onClick:()=>setSec(pt),
+    style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",
+      padding:"11px 13px",borderRadius:12,marginBottom:8,
+      background:sec===pt?"rgba(124,70,230,.09)":"var(--surf2)",
+      border:"1px solid "+(sec===pt?"#7c46e6":GC.line)}},
+    h("span",{style:{width:22,height:22,borderRadius:7,flexShrink:0,
+      border:"2px solid "+(sec===pt?"#7c46e6":GC.line),background:sec===pt?"#7c46e6":"#fff",
+      color:"#fff",fontSize:13,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}},
+      sec===pt?"✓":""),
+    h("div",{style:{flex:1,minWidth:0}},
+      h("div",{style:{fontSize:13,fontWeight:800,color:GC.txt}},baslik),
+      h("div",{style:{fontSize:10.5,color:GC.mut,fontWeight:700,marginTop:1}},alt)));
+  return h(Sheet,{ik:"🧩",hex:"#7c46e6",baslik:"Hangi parça · "+((u&&u.ad)||""),
+    alt:sec?("yalnız "+sec):"tüm takım",onClose,
+    cta:"Uygula",onCta:()=>onKaydet(sec)},
+    h("div",{style:{fontSize:11,color:GC.mut,fontWeight:700,marginBottom:12,lineHeight:1.5}},
+      "Her seferinde tüm parçalardan bir takım mı basılacak, yoksa yalnız birinden mi eksik var? "
+      +"Tek parça seçilirse girilen adet doğrudan o parçanın kendi adedi olur."),
+    satir("","Tüm takım","her parçadan gerektiği kadar birlikte basılır"),
+    (parcalar||[]).map(pt=>satir(pt,"Yalnız "+pt,"girilen adet bu parçanın kendi adedi olur")));
+}
 function RenkSecSheet({u,roller,filamentler,mevcut,varsayilan,onKaydet,onClose}){
   const flL=(filamentler||[]).filter(f=>(f.ad||"").trim());
   /* 🎨 Ürünün tarifinde hangi renk yazıyorsa o baştan işaretli gelir; değiştirmek
@@ -4384,6 +4415,8 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
   const [sec,setSec]=useState((T0&&T0.sec)||{});       // urunId -> adet / oran
   const [renkler,setRenkler]=useState((T0&&T0.renkler)||{});
   const [renkAc,setRenkAc]=useState(null);     // renk çeşidi sayfası açık ürün
+  const [parcaSec,setParcaSec]=useState((T0&&T0.parcaSec)||{});   // urunId -> yalnız bu parça (boş = tüm takım)
+  const [parcaAc,setParcaAc]=useState(null);   // parça seçim sayfası açık ürün
   const [degisim,setDegisim]=useState(T0?T0.degisim:PLAN_DEGISIM_DK);   // makara değişimi (dk)
   const [aktarAc,setAktarAc]=useState(false);            // takvime taşıma sayfası
   const [makaraAc,setMakaraAc]=useState(false);          // makine makine makara dökümü açık mı
@@ -4394,20 +4427,20 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
      İlk açılışta yazmıyoruz: hiçbir şeye dokunmadan taslak oluşmasın. */
   const ilkRef=useRef(true);
   useEffect(()=>{ if(ilkRef.current){ ilkRef.current=false; return; }
-    planTaslakYaz({mod,hedef,makine,secMak,bekleme,gun,saat,sec,renkler,degisim}); },
-    [mod,hedef,makine,secMak,bekleme,gun,saat,sec,renkler,degisim]);
+    planTaslakYaz({mod,hedef,makine,secMak,bekleme,gun,saat,sec,renkler,parcaSec,degisim}); },
+    [mod,hedef,makine,secMak,bekleme,gun,saat,sec,renkler,parcaSec,degisim]);
   /* 🧹 taslağı yalnız bu sıfırlar */
   const taslakTemizle=()=>{
     if(!confirm("🧹 Planlama temizlensin mi?\n\nSeçilen ürünler ve ayarlar sıfırlanır. "
       +"Üretim planına taşınmış işler bundan etkilenmez.")) return;
     planTaslakSil();
     setMod("adet"); setHedef("hiz"); setMakine(MAK); setSecMak(null);
-    setBekleme(15); setGun(1); setSaat(0); setSec({}); setRenkler({});
+    setBekleme(15); setGun(1); setSaat(0); setSec({}); setRenkler({}); setParcaSec({});
     setDegisim(PLAN_DEGISIM_DK); setAra(""); setMakaraAc(false); setDokum(false);
-    setSilOnay(""); setRenkAc(null);
+    setSilOnay(""); setRenkAc(null); setParcaAc(null);
   };
   const taslakVar=Object.keys(sec).some(k=>num(sec[k])>0)||!!secMak
-    ||Object.keys(renkler).length>0;
+    ||Object.keys(renkler).length>0||Object.keys(parcaSec).some(k=>parcaSec[k]);
   /* ürün hangi türlerde basılabiliyor — hedefe göre temsilci değer seçilir */
   const uBilgi=useMemo(()=>{ const o={};
     urunler.forEach(u=>{
@@ -4459,9 +4492,10 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
   /* renk çeşidi girilmişse her çeşit ayrı satır olur; yoksa tek satır */
   const satirla=(alan)=>{ const out=[];
     secili.forEach(u=>{ const V=(renkler[u.id]||[]).filter(v=>num(v.adet)>0);
+      const parca=parcaSec[u.id]||"";
       if(V.length) V.forEach((v,i)=>out.push({u,[alan]:num(v.adet),renk:v.renk,
-        renkAd:renkAdi(v.renk),vk:"v"+i}));
-      else out.push({u,[alan]:num(sec[u.id])}); });
+        renkAd:renkAdi(v.renk),vk:"v"+i,parca}));
+      else out.push({u,[alan]:num(sec[u.id]),parca}); });
     return out; };
   const secimAdet=satirla("adet");
   const oranlar=satirla("oran");
@@ -4639,7 +4673,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
                 /* tür sayısı yalnız değerler gerçekten ayrışıyorsa yazılır */
                 +((bi.turler.length>1&&(bi.dkEn!==bi.dkUst||bi.grEn!==bi.grUst))
                   ?(" · "+bi.turler.length+" makine türü"):"")
-                +(b.parcali?(" · "+b.parcalar.length+" parça"):"")
+                +(b.parcali?(parcaSec[u.id]?(" · yalnız "+parcaSec[u.id]):(" · "+b.parcalar.length+" parça")):"")
                 +" · stok "+num(u.stokta)
                 +(!T&&b.ornek<PLAN_ORNEK_AZ?" · ⚠ az örnek":"")),
               /* tabla bölünmez: istenen adet tam tablaya yuvarlanır */
@@ -4653,6 +4687,12 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
                   :(uretim[u.id].enAz+"–"+uretim[u.id].enCok+" adet"))
                 +((uretim[u.id].enAz>uretim[u.id].istenen)
                   ?(" · +"+(uretim[u.id].enAz-uretim[u.id].istenen)+" fazla"):"")):null),
+            /* çok parçalı üründe yalnız belirli bir parça seçilebilir */
+            (b.parcali&&b.parcalar.length>1)?h("button",{onClick:()=>setParcaAc(u),
+              style:{...GS.ibtn,flexShrink:0,padding:"6px 9px",fontSize:12,fontWeight:800,
+                background:parcaSec[u.id]?"#7c46e6":"#fff",
+                color:parcaSec[u.id]?"#fff":"#7c46e6",borderColor:"#d8ccff"}},
+              "🧩"):null,
             /* değişken (renk) yuvası olan üründe renk çeşidi seçimi */
             uRoller[u.id]?h("button",{onClick:()=>setRenkAc(u),
               style:{...GS.ibtn,flexShrink:0,padding:"6px 9px",fontSize:12,fontWeight:800,
@@ -4875,6 +4915,10 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
       onClose:()=>setAktarAc(false),
       onKaydet:async takvim=>{ if(onAktar){ await onAktar(takvim,urunler); }
         setAktarAc(false); }}):null,
+    parcaAc?h(ParcaSecSheet,{u:parcaAc,
+      parcalar:((uBilgi[parcaAc.id]&&uBilgi[parcaAc.id].b&&uBilgi[parcaAc.id].b.parcalar)||[]).map(r=>r.ad),
+      mevcut:parcaSec[parcaAc.id]||"",onClose:()=>setParcaAc(null),
+      onKaydet:pt=>{ const id=parcaAc.id; setParcaSec(s2=>({...s2,[id]:pt||""})); setParcaAc(null); }}):null,
     renkAc?h(RenkSecSheet,{u:renkAc,roller:uRoller[renkAc.id]||[],filamentler,
       varsayilan:uRolFil[renkAc.id]||{},
       mevcut:renkler[renkAc.id]||[],onClose:()=>setRenkAc(null),
