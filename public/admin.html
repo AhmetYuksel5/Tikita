@@ -98,7 +98,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L70";   // komuta (admin) deneme sürümü
+const SURUM="L71";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1412,7 +1412,7 @@ function planFilDenet(p){
     /* süresi olan ama hiçbir filamenti izlenmeyen baskı */
     izsiz:!izli&&num(p&&p.sureDk)>0};
 }
-function planTablo(plan,makineler,filamentler,baslaMs,bitMs,simdi){
+function planTablo(plan,makineler,filamentler,baslaMs,bitMs,simdi,urunler){
   const b0=num(baslaMs), b1=num(bitMs), NOW=num(simdi)||Date.now();
   const fl={}; (filamentler||[]).forEach(f=>{ if(f&&f.id) fl[f.id]=f; });
   const flAdi=id=>{ const f=fl[id];
@@ -1467,7 +1467,9 @@ function planTablo(plan,makineler,filamentler,baslaMs,bitMs,simdi){
       isSay++; adetTop+=num(P.adet)||1; gramTop+=num(P.gram); sureTop+=num(P.sureDk);
       fils.forEach(f=>{ flGram[f.filamentId]=(flGram[f.filamentId]||0)+f.gram; });
       satirlar.push({makineId:mk.id,makineAd:mAd,bas:x.b,bit:x.e,sureDk:num(P.sureDk),
-        ad:P.ad||"iş",parca:planParca(P),adet:num(P.adet)||1,gram:Math.round(num(P.gram)),
+        urunId:P.urunId||"",ad:P.ad||"iş",parca:planParca(P),
+        renk:(String(P.not||"").match(/^\s*🎨\s*(.+)$/)||[])[1]||"",
+        adet:num(P.adet)||1,gram:Math.round(num(P.gram)),
         filament:fils.map(f=>f.ad).join(" + ")||"—",
         durum:P.tablaAlindi?"tabla alındı":(P.basladi?(x.e<=NOW?"bitti":"basıyor"):"planlı")});
     });
@@ -1475,9 +1477,51 @@ function planTablo(plan,makineler,filamentler,baslaMs,bitMs,simdi){
   degisim.sort((a,b)=>a.t-b.t||(a.makineAd||"").localeCompare(b.makineAd||"","tr"));
   const filTop=Object.keys(flGram).map(id=>({filamentId:id,ad:flAdi(id),
     gram:Math.round(flGram[id])})).sort((a,b)=>b.gram-a.gram);
-  return {bas:b0,bit:b1,satirlar,degisim,filTop,
+  const urunOzet=planUrunOzet(satirlar,urunler);
+  return {bas:b0,bit:b1,satirlar,degisim,filTop,urunOzet,
     ozet:{makine:mlist.length,is:isSay,adet:adetTop,gram:Math.round(gramTop),
       sureDk:Math.round(sureTop),degisim:degisim.length}};
+}
+/* 📦 BU ARALIKTA NE ÇIKIYOR — ürün · parça · renk kırılımıyla adet özeti.
+   Çok parçalı üründe parçalar dengesizse takımı tamamlamak için kaç tabla
+   daha gerektiği not olarak yazılır ("2 tabla daha Üst bas"). */
+function planUrunOzet(satirlar,urunler){
+  const U={}; (urunler||[]).forEach(u=>{ if(u&&u.id) U[u.id]=u; });
+  const g={};
+  (satirlar||[]).forEach(r=>{ if(!r) return;
+    const k=(r.urunId||r.ad||"?")+"\u00a7"+(r.parca||"")+"\u00a7"+(r.renk||"");
+    const o=g[k]=g[k]||{anahtar:k,urunId:r.urunId||"",ad:r.ad||"iş",
+      parca:r.parca||"",renk:r.renk||"",tabla:0,adet:0,kap:0,not:""};
+    o.tabla++; o.adet+=num(r.adet); o.kap=Math.max(o.kap,num(r.adet)); });
+  const L=Object.values(g).sort((a,b)=>
+    (a.ad||"").localeCompare(b.ad||"","tr")
+    ||(a.parca||"").localeCompare(b.parca||"","tr")
+    ||(a.renk||"").localeCompare(b.renk||"","tr"));
+  /* ürün ürün: parçalar takımı tamamlıyor mu */
+  const byU={};
+  L.forEach(o=>{ if(o.urunId) (byU[o.urunId]=byU[o.urunId]||[]).push(o); });
+  Object.keys(byU).forEach(id=>{
+    const u=U[id]; const parts=((u&&u.parcalar)||[]).filter(Boolean);
+    if(parts.length<2) return;
+    const rows=byU[id];
+    const uret={}, kap={};
+    rows.forEach(o=>{ if(!o.parca) return;
+      uret[o.parca]=(uret[o.parca]||0)+o.adet;
+      kap[o.parca]=Math.max(kap[o.parca]||0,o.kap); });
+    if(!Object.keys(uret).length) return;      // parça bazlı planlanmamış — not yazma
+    const ger=pt=>Math.max(1,Math.round(num(((u&&u.parcaAdet)||{})[pt]||1)));
+    const takim=pt=>Math.floor((uret[pt]||0)/ger(pt));
+    const hedef=Math.max.apply(null,parts.map(takim));
+    if(!(hedef>0)) return;
+    const eksik=[];
+    parts.forEach(pt=>{
+      const acik=hedef*ger(pt)-(uret[pt]||0);
+      if(acik<=0) return;
+      const c=kap[pt]||0;
+      eksik.push(c>0?(Math.ceil(acik/c)+" tabla daha "+pt):(acik+" adet daha "+pt)); });
+    if(eksik.length) rows[0].not="not: "+eksik.join(", ")+" bas";
+  });
+  return L;
 }
 /* PNG dosya adı — aralığa göre */
 const planTabloAd=v=>{ const g=t=>{ const d=new Date(t);
@@ -1511,6 +1555,26 @@ function planTabloBolum(v){
   if((v.filTop||[]).length) B.push({baslik:"Filament ihtiyacı",
     kolon:[{ad:"Filament"},{ad:"Gram",sag:true}],
     satir:v.filTop.map(f=>[f.ad,f.gram.toLocaleString("tr")+" g"]),bos:""});
+  /* 📦 en altta: hangi üründen kaç adet çıkıyor — parça/renk kırılımı ve
+     takımı tamamlamak için gereken ek tabla notu yalnız varsa sütun açar */
+  {
+    const O=v.urunOzet||[];
+    const parcaVar2=O.some(o=>o&&o.parca);
+    const renkVar=O.some(o=>o&&o.renk);
+    const notVar=O.some(o=>o&&o.not);
+    B.push({baslik:"Üretim özeti · ne çıkıyor",
+      kolon:[{ad:"Adet",sag:true},{ad:"Ürün"},
+             ...(parcaVar2?[{ad:"Parça"}]:[]),
+             ...(renkVar?[{ad:"Renk"}]:[]),
+             {ad:"Tabla",sag:true},
+             ...(notVar?[{ad:"Not"}]:[])],
+      satir:O.map(o=>[String(o.adet),o.ad,
+             ...(parcaVar2?[o.parca||"tüm ürün"]:[]),
+             ...(renkVar?[o.renk||"—"]:[]),
+             String(o.tabla),
+             ...(notVar?[o.not||""]:[])]),
+      bos:"Bu aralıkta üretim yok."});
+  }
   return B;
 }
 /* 🖼 Bölümleri beyaz zeminli bir tabloya çizip PNG canvas döndürür.
@@ -5043,7 +5107,7 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
     const B0=(typeof b0==="number"&&b0>0)?b0:baslaMs;
     const B1=(typeof b1==="number"&&b1>B0)?b1:bitMs;
     try{
-      const veri=planTablo(plan,makineler,filamentler,B0,B1,now);
+      const veri=planTablo(plan,makineler,filamentler,B0,B1,now,(d&&d.stok)||[]);
       const cv=tabloCanvas(planTabloBolum(veri),"TİKİTA · Üretim planı",
         araAd(B0,B1)+"  ·  "+veri.ozet.is+" baskı · "+veri.ozet.adet+" adet · "
         +veri.ozet.gram.toLocaleString("tr")+" gr · "+dkYaz(veri.ozet.sureDk)+" baskı süresi · "
