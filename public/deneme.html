@@ -86,6 +86,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { kurAudit } from "./lib/tikita-audit.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -317,7 +318,11 @@ function raporHesap(hareketler,kod){ const [b0,ad]=donemAralik(kod);
 /* ————— YAZMA katmanı — CANLI · asıl deftere yazar (ana uygulama ile aynı) ————— */
 const OV="";  // canlı bağlandı — koleksiyonlar asıl adlarıyla
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...dd}=obj; await setDoc(doc(db,OV+coll,id),dd,{merge:true}); return id; }
+/* 📜 AUDIT — yazımlar audit çekirdeğinden geçer; OV önekliyken (deneme kipi)
+   audit kendiliğinden atlanır, gerçek log defteri kirlenmez. */
+const AUD=kurAudit({db,cn:c=>OV+c,kim:()=>{ const u=AUD.snapGet("kullanici",BEN_ID);
+  return {who:(u&&u.ad)||"Pazarlamacı",whoId:BEN_ID||""}; }});
+async function save(coll,obj){ return AUD.save(coll,obj); }
 /* 🕘 KAYDIN GİRİLDİĞİ AN — 'tarih' işlemin OLDUĞU gündür; geçmiş tarihli işlemde
    bu geriye alınır. "Son işlemlerin" listesi kaydın ne zaman GİRİLDİĞİNE bakmalı,
    yoksa dün girilen geçmiş kayıt listede hiç görünmez ve geri alınamaz.
@@ -331,7 +336,7 @@ const kayitMs=x=>{ if(!x) return 0;
   return new Date(x.tarih).getTime()||0; };
 // 'girildi' YALNIZCA geçmişe girilen kayda yazılır — varlığı tek başına işarettir
 const gecmisKayit=x=>!!x&&(!!x.girildi||x.kaynak==="gecmis");
-async function remove(coll,id){ await deleteDoc(doc(db,OV+coll,id)); }
+async function remove(coll,id){ return AUD.remove(coll,id); }
 // bir tahsilatın üretici(önce)/pazarlamacı(sonra) bölüşümü — birebir ana uygulama
 const payBol=(x,d,onceki)=>{ const K=num(x.adet)*num(x.alisFiyat); const o=num(onceki);
   const uOnce=Math.min(o,K), uSonra=Math.min(o+d,K); const u=Math.max(0,uSonra-uOnce); return {u, p:Math.max(0,d-u)}; };
@@ -505,7 +510,10 @@ function hataBildir(){ if(!VERI_HATA){ VERI_HATA=true; hataDinle.forEach(f=>f())
 function useVeriHata(){ const [,f]=useState(0); useEffect(()=>{ const g=()=>f(x=>x+1); hataDinle.add(g); return ()=>hataDinle.delete(g); },[]); return VERI_HATA; }
 function useColl(name){ const [rows,setRows]=useState(null);
   useEffect(()=>{ const t=setTimeout(()=>setRows(r=>{ if(r===null){ hataBildir(); return []; } return r; }),18000);   // sonsuz bekleme yok — mobil bağlantıda erken pes etme
-    const un=onSnapshot(collection(db,name),s=>{clearTimeout(t);setRows(s.docs.map(d=>({id:d.id,...d.data()})));},
+    const un=onSnapshot(collection(db,name),s=>{clearTimeout(t);
+        const R=s.docs.map(d=>({id:d.id,...d.data()}));
+        AUD.snapPut(name,R);   // audit "önce"si bu aynadan okunur
+        setRows(R);},
       e=>{console.error(name,e);clearTimeout(t);hataBildir();setRows(r=>r===null?[]:r);});
     return ()=>{clearTimeout(t);un();}; },[]);
   return rows; }
@@ -3551,7 +3559,11 @@ function App(){
     catch(e){ console.error(e); say("⚠ Düzeltilemedi"); }
     finally{ setSbekle(false); } }
   // deneme işlemini izole (demo_) kaydet — gerçek defter korunur
-  async function performWrite(p){
+  /* 📜 Tek eylem = tek log satırı: satış/tahsilat/konsinye akışı 3-6 doküman yazar;
+     op damgasıyla gruplanır. `telafi` etiketi genel geri almayı KAPATIR — bu kayıtlar
+     yalnız ekrandaki ↩️ (geriAlKayit) ile, bağlı sayaçlar ters çevrilerek geri alınır. */
+  async function performWrite(p){ return AUD.op(()=>__performWrite(p),"pazarlama_hareket",null,{telafi:"geriAlKayit"}); }
+  async function __performWrite(p){
     const k=p.k, key=k?k.key:null;
     const now=p.gecTarih?new Date(p.gecTarih+"T12:00:00").toISOString():new Date().toISOString();   // 📅 geçmiş kayıt: seçilen gün
     /* 📅 geçmiş kayıt: 'tarih' seçilen gün, 'girildi' fiilen ne zaman girildiği.
@@ -3724,7 +3736,8 @@ function App(){
     if(p.kalici){ say("✓ "+(p.mesaj||"işlendi")); } else { setSheet(null); setReward({mesaj:p.mesaj,xp:p.xp}); }
     return true; };
   // (toplu silme kaldırıldı — canlı defterde tekil geri alma kullanılır)
-  const geriAlKayit=async(x)=>{ const o=ovOzet(x); if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
+  const geriAlKayit=async(x)=>AUD.op(()=>__geriAlKayit(x),"pazarlama_hareket:delete","↩ Kayıt geri alındı");
+  const __geriAlKayit=async(x)=>{ const o=ovOzet(x); if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
     try{
       const ad2=num(x.adet); const gecmisMi=x.kaynak==="gecmis";
       const sonKons=()=>emirHar.filter(h2=>h2.tip==="konsinye"&&h2.id!==x.id&&kkOf(h2)===kkOf(x)&&(h2.urunAd||"?")===(x.urunAd||"?")).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih))[0];
