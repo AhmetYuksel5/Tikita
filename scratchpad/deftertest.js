@@ -12,8 +12,9 @@ function kes(bas, son) {
   const j = admin.indexOf(son, i); if (j < 0) throw new Error("son bulunamadı: " + son);
   return admin.slice(i, j);
 }
+const ikonlar = kes("const MH_ICO={", "/* ── DEFTER (HAREKETLER)");
 const sabitler = kes("const HD_COLS=[", "function HareketDefteri");
-const defter = kes("function HareketDefteri(", "\nfunction RaporA(");
+const defter = kes("function HareketDefteri(", "/* ═══════════ 💼 MUHASEBE");
 
 /* sahte React — hook'lar tek geçiş için yeterli */
 let stateSira = [], stateIdx = 0;
@@ -48,6 +49,7 @@ vm.runInContext(`
     return p(d.getDate())+"."+p(d.getMonth()+1)+"."+d.getFullYear();};
   const hdFmk=n=>{const v=num(n);return v?v.toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2}):"";};
   function hdCsvIndir(){ __csv=(__csv||0)+1; }
+  ${ikonlar}
   ${sabitler.replace(/const hdFd=[\s\S]*?};\n/, "").replace(/const hdFmk=[\s\S]*?};\n/, "").replace(/function hdCsvIndir[\s\S]*?\n}\n/, "")}
   ${defter}
   __out={HareketDefteri,olayUret,hdDuzenlenir,hdFormDoldur};
@@ -112,12 +114,12 @@ t("alacak sütununda tahsilat (120,00)", govdeMetin.indexOf("120,00") >= 0);
 t("tür rozetleri basılı", ["SATIŞ","TAHSİL","MASRAF","ÖDEME"].every(x => govdeMetin.indexOf(x) >= 0));
 t("toplam şeridi: hareket sayısı + borç + alacak",
   govdeMetin.indexOf(rows.length + " hareket") >= 0 && govdeMetin.indexOf("Borç") >= 0 && govdeMetin.indexOf("Alacak") >= 0);
-t("araç çubuğu: ay seçici + tür çipleri + sütun + CSV",
+t("araç çubuğu: ay seçici + tür çipleri + ikon düğmeler",
   govdeMetin.indexOf("Tüm aylar") >= 0 && govdeMetin.indexOf("TÜMÜ") >= 0 &&
-  govdeMetin.indexOf("⚙ Sütun") >= 0 && govdeMetin.indexOf("⤓ CSV") >= 0);
+  tum(agac, "svg").length >= 3);
 t("arama kutusunda yalnız 'Ara' yazıyor", tum(agac, "input").some(x => x.props.placeholder === "Ara"));
 t("dönem sütunu 2026 AĞUSTOS biçiminde", govdeMetin.indexOf("2026 AĞUSTOS") >= 0);
-t("manuel ekle düğmesi var", govdeMetin.indexOf("+ Ekle") >= 0);
+t("manuel ekle ikonu var", tum(agac, "button").some(b => (b.props.title||"").indexOf("Manuel hareket ekle") >= 0));
 
 // tür süzgeci: yalnız SATIŞ
 stateSira = []; stateIdx = 0;

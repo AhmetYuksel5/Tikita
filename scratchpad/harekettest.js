@@ -4,7 +4,7 @@ const fs = require("fs"), path = require("path"), vm = require("vm");
 const body = fs.readFileSync(path.join(__dirname, "../public/lib/hareket-model.js"), "utf8")
   .replace(/^export\s+/gm, "");
 const ctx = vm.createContext({ console });
-vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar,urunKarlilik,borcAlacak,satirAciklama};", ctx);
+vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar,urunKarlilik,borcAlacak,satirAciklama,genelOzet,donemRapor};", ctx);
 const M = ctx.__out;
 
 let ok = 0, fail = 0;
@@ -200,6 +200,49 @@ t("satır açıklaması: satışta ürün × adet", M.satirAciklama(bul("har:s1"
 t("satır açıklaması: iç transfer okunur", M.satirAciklama(bul("har:n1")).indexOf("Nakit teslim") === 0);
 t("satır açıklaması: sabit gider kendi metnini korur", M.satirAciklama(bul("sab:sb1:2026-07")).indexOf("Kira") === 0);
 t("satır açıklaması her satırda dolu", rows.every(r => String(M.satirAciklama(r)).length > 0));
+
+
+/* ── GENEL ÖZET — "DENK ✓" gerçekten denk mi? ── */
+const G = M.genelOzet(rows);
+t("genel: satış toplamı", G.satis === eskiCiro);
+t("genel: tahakkuk masrafı ayrı (tabla+montaj)", G.tahakkuk === 25 + 40 + 20);
+t("genel: numune ayrı (hediye+stant hediye)", G.numune === 30 + 0 + 30);
+t("genel: avans ayrı sayılıyor", G.avans === 40);
+t("**DENK**: kasada olması gereken == nerede (fark 0)", Math.abs(G.fark) < 0.01);
+t("genel: nerede = alacak + merkez + saha", Math.abs(G.nerede - (G.alacak + G.merkez + G.saha)) < 0.01);
+// rastgele korpusla denklik (matematik kuralı bozulmasın)
+(function(){
+  let hep = true;
+  for (let k = 0; k < 40; k++) {
+    const H = [], Gd = [];
+    const rnd = (n) => Math.floor(((k * 9301 + n * 49297) % 233280) / 233280 * 500) + 10;
+    for (let i = 0; i < 6; i++) {
+      const tip = ["satis","tahsilat","tabla","hediye","nakitTeslim","stant"][(k + i) % 6];
+      const o = { id: "r" + k + i, tip, tarih: (i % 2 ? ESKI : YENI), yer: "K" + (i % 3), kullaniciAd: "P" + (i % 2) };
+      if (tip === "satis") { o.adet = 1 + (i % 3); o.satisFiyat = rnd(i); o.alisFiyat = rnd(i) / 2; o.maliyetBirim = 10;
+        if ((k + i) % 3 === 0) o.gerilla = true; }
+      else if (tip === "stant") { o.fiyat = rnd(i); o.mod = (k % 2) ? "satis" : "hediye"; }
+      else if (tip === "hediye") { o.adet = 1; o.maliyetBirim = 15; }
+      else { o.tutar = rnd(i); if (tip === "tahsilat" && (k + i) % 4 === 0) o.avans = true; }
+      H.push(o);
+    }
+    Gd.push({ id: "g" + k, tur: (k % 2) ? "Kargo" : "Pazarlamacı hakedişi", tutar: rnd(k), tarih: YENI });
+    const rr = M.olayUret({ hareketler: H, giderler: Gd, sabitGiderler: [], montajGorevler: [], hakedisDonemler: [] },
+      { simdi: SIMDI }).rows;
+    if (Math.abs(M.genelOzet(rr).fark) > 0.01) hep = false;
+  }
+  t("DENK kuralı 40 rastgele korpusta da tutuyor", hep);
+})();
+
+/* ── DÖNEM RAPORU (bina RAPOR karşılığı) ── */
+const DR = M.donemRapor(rows, "2026-08");
+t("dönem raporu: giren = o ayın tahsilatları", DR.giren > 0);
+t("dönem raporu: iç transfer girmiyor", !DR.satirlar.some(x => x.ad === "Ece" && x.giren === 90));
+t("dönem raporu: satış (tahakkuk) nakit raporuna girmiyor", (() => {
+  const k = DR.satirlar.find(x => x.ad === "Kale A");
+  return k && k.giren === 160; })());   // t1 120 + avans 40
+t("dönem raporu: kalan = giren − çıkan", DR.kalan === Math.round((DR.giren - DR.cikan) * 100) / 100);
+t("dönem raporu: başka dönem süzülüyor", M.donemRapor(rows, "2026-07").giren !== DR.giren);
 
 console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
 process.exit(fail ? 1 : 0);

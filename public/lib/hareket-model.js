@@ -63,13 +63,15 @@ export function etki(s) {
     // NAKİT HER ZAMAN TAHSİLAT SATIRINDAN GİRER — peşin satışta bile kasa etkisi
     // sentetik "pesin" tahsilat satırındadır; SATIŞ satırı kasaya dokunmaz.
     // (İkisi de +1 sayılsaydı peşin para ÇİFT sayılırdı.)
-    if (s.pesin) return { kasa: 0, musteriCari: 0, perCari: 0, pivot: true };    // gerilla/stant: borç hiç doğmaz
-    return { kasa: 0, musteriCari: +1, perCari: 0, pivot: true };                 // vadeli: kale borçlanır
+    // Cari: peşin satış da borç doğurur, sentetik tahsilat aynı anda kapatır →
+    // tam tahsilde bakiye 0; KISMİ tahsilde kalan açık GÖRÜNÜR (gerilla satışta
+    // 200 verilip 150 alındıysa 50 ₺ alacaktır — eskiden hiçbir yerde yoktu).
+    return { kasa: 0, musteriCari: +1, perCari: 0, pivot: true };
   }
   if (t === "TAHSILAT") {
     if (a === "icTransfer") return { kasa: 0, musteriCari: 0, perCari: 0, pivot: false };  // saha→merkez, toplam nakit DEĞİŞMEZ
     if (a === "avans")      return { kasa: +1, musteriCari: 0, perCari: 0, pivot: false }; // sayımsız avans cariye mahsup edilmez
-    if (a === "pesin")      return { kasa: +1, musteriCari: 0, perCari: 0, pivot: false }; // sentetik peşin — borç hiç doğmadı
+    if (a === "pesin")      return { kasa: +1, musteriCari: -1, perCari: 0, pivot: false }; // peşin satışın borcunu kapatır
     return { kasa: +1, musteriCari: -1, perCari: 0, pivot: false };
   }
   if (t === "MASRAF") {
@@ -366,7 +368,8 @@ export function kaleAnahtar(s) { return (s.tarafAd || s.tarafId || "—").trim()
 export function kaleEkstre(rows, kaleAd) {
   const L = (rows || []).filter(s =>
     kaleAnahtar(s) === kaleAd &&
-    ((s.tur === "SATIS" && !s.pesin) || (s.tur === "TAHSILAT" && s.altTur === "normal") || (s.tur === "TAHSILAT" && s.altTur === "avans")));
+    (s.tur === "SATIS" ||
+     (s.tur === "TAHSILAT" && (s.altTur === "normal" || s.altTur === "pesin" || s.altTur === "avans"))));
   L.sort((a, b) => (ms(a.tarih) - ms(b.tarih)) || ((a.tur === "SATIS" ? 0 : 1) - (b.tur === "SATIS" ? 0 : 1)) || String(a.ref).localeCompare(String(b.ref)));
   let run = 0;
   const out = L.map(s => {
@@ -443,6 +446,70 @@ export function urunKarlilik(rows) {
   });
   return Object.values(M).map(o => ({ ...o, tikitaKar: r2(o.ciroVeris - o.maliyet) }))
     .sort((a, b) => b.tikitaKar - a.tikitaKar);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   DÖNEM RAPORU — bina RAPOR ekranının Tikita karşılığı: seçilen dönemde
+   TARAF bazında GİREN / ÇIKAN para + TOPLAM + KALAN.
+   Giren = o taraftan gelen tahsilat (peşin dâhil) · Çıkan = masraf + ödeme.
+   İç transfer (saha→merkez) girmez: para taşınır, işletmeye girmez/çıkmaz.
+   ───────────────────────────────────────────────────────────────────────── */
+export function donemRapor(rows, donem) {
+  const M = {};
+  (rows || []).forEach(s => {
+    if (donem && ayKod(ms(s.tarih)) !== donem) return;
+    if (s.tur === "TAHSILAT" && s.altTur === "icTransfer") return;
+    let giren = 0, cikan = 0;
+    if (s.tur === "TAHSILAT") giren = s.tutar;
+    else if (s.tur === "ODEME") cikan = s.tutar;
+    else if (s.tur === "MASRAF") {
+      // Yalnız FİİLEN para çıkanlar: tabla/montaj tahakkuku (henüz ödenmedi) ve
+      // numune (stok kaybı, nakit değil) nakit raporuna girmez.
+      if (s.altTur === "tabla" || s.altTur === "montajIscilik" || s.altTur === "numune") return;
+      cikan = s.tutar;
+    }
+    else return;                                   // SATIŞ tahakkuktur, nakit raporuna girmez
+    const k = (s.tarafAd || "").trim() || (s.tur === "MASRAF" ? (s.altTur || "Masraf") : "—");
+    const o = M[k] || (M[k] = { ad: k, giren: 0, cikan: 0 });
+    o.giren = r2(o.giren + giren); o.cikan = r2(o.cikan + cikan);
+  });
+  const satirlar = Object.values(M).filter(o => o.giren || o.cikan)
+    .sort((a, b) => (b.giren - b.cikan) - (a.giren - a.cikan));
+  const giren = r2(satirlar.reduce((z, o) => z + o.giren, 0));
+  const cikan = r2(satirlar.reduce((z, o) => z + o.cikan, 0));
+  return { satirlar, giren, cikan, kalan: r2(giren - cikan) };
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   GENEL — bina GENEL ekranının karşılığı. "KASADA KALMASI GEREKEN" ile
+   paranın FİİLEN bulunduğu yerler (müşteri alacağı + saha + merkez) DENK olmalı.
+
+   Denklik türetimi (testle sabitlenmiştir, bozma):
+     alacak = vadeli satış − normal tahsilat
+     nakit  = tüm tahsilat (normal+avans+peşin) − nakit masraf − ödeme
+     ⇒ alacak + nakit = satış + avans − nakitMasraf − ödeme
+   Bu yüzden "kasada olması gereken" hesabına AVANS eklenir, tahakkuk masrafları
+   (tabla · montaj işçiliği — henüz ödenmedi) ve numune (nakit değil, stok) GİRMEZ.
+   ───────────────────────────────────────────────────────────────────────── */
+export function genelOzet(rows) {
+  let satis = 0, nakitMasraf = 0, tahakkuk = 0, numune = 0, odeme = 0, avans = 0;
+  (rows || []).forEach(s => {
+    if (s.tur === "SATIS") { satis = r2(satis + s.tutar); return; }
+    if (s.tur === "ODEME") { odeme = r2(odeme + s.tutar); return; }
+    if (s.tur === "TAHSILAT") { if (s.altTur === "avans") avans = r2(avans + s.tutar); return; }
+    if (s.tur === "MASRAF") {
+      if (s.altTur === "tabla" || s.altTur === "montajIscilik") tahakkuk = r2(tahakkuk + s.tutar);
+      else if (s.altTur === "numune") numune = r2(numune + s.tutar);
+      else nakitMasraf = r2(nakitMasraf + s.tutar);
+    }
+  });
+  const kalan = r2(satis - nakitMasraf);
+  const kasadaOlmali = r2(kalan + avans - odeme);
+  const n = nakitOzet(rows);
+  const alacak = r2(kaleBakiyeleri(rows).reduce((z, x) => z + x.bakiye, 0));
+  const nerede = r2(alacak + n.merkez + n.saha);
+  return { satis, nakitMasraf, tahakkuk, numune, odeme, avans, kalan, kasadaOlmali,
+    alacak, merkez: n.merkez, saha: n.saha, nerede, fark: r2(nerede - kasadaOlmali) };
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
