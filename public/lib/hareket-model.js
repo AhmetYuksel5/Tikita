@@ -83,6 +83,50 @@ export function etki(s) {
   return { kasa: 0, musteriCari: 0, perCari: 0, pivot: false };
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   BORÇ / ALACAK — defter sütunlarının TEK KAYNAĞI.
+   Bina hareket defteriyle BİREBİR aynı kural: hizmet satırı BORÇ, diğer üç tür
+   ALACAK sütununa yazılır (TEMİZLİK HİZMETİ→borc · TAHSİLAT/MASRAF/ÖDEME→alacak).
+   Tikita karşılığı: SATIŞ→borç · TAHSİLAT/MASRAF/ÖDEME→alacak.
+   ───────────────────────────────────────────────────────────────────────── */
+export function borcAlacak(s) {
+  if (!s) return { borc: 0, alacak: 0 };
+  return (s.tur === "SATIS") ? { borc: r2(s.tutar), alacak: 0 }
+                             : { borc: 0, alacak: r2(s.tutar) };
+}
+
+/* Defter satırının kısa açıklaması — tabloda tek sütunda okunur olsun.
+   Satışta ürün+adet, ödemede/masrafta kalem adı, tahsilatta kaynak. */
+export function satirAciklama(s) {
+  if (!s) return "";
+  if (s.aciklama) return s.aciklama;
+  if (s.tur === "SATIS") {
+    if (s.altTur === "stant") return "Stant bedeli";
+    return (s.urunAd || "Satış") + (num(s.adet) ? " × " + num(s.adet) : "");
+  }
+  if (s.tur === "TAHSILAT") {
+    if (s.altTur === "icTransfer") return "Nakit teslim (saha → merkez)";
+    if (s.altTur === "avans") return "Sayımsız avans";
+    if (s.altTur === "pesin") return "Peşin alındı" + (s.urunAd ? " · " + s.urunAd : "");
+    return "Tahsilat";
+  }
+  if (s.tur === "MASRAF") {
+    if (s.altTur === "numune") return "Numune/hediye" + (s.urunAd ? " · " + s.urunAd : "");
+    if (s.altTur === "tabla") return "Tabla ücreti";
+    if (s.altTur === "montajIscilik") return "Montaj işçiliği" + (num(s.adet) ? " × " + num(s.adet) : "");
+    if (s.altTur === "sabit") return "Sabit gider";
+    if (s.altTur === "stokAlim") return "Stok alımı";
+    return s.tarafAd || "Masraf";
+  }
+  if (s.tur === "ODEME") {
+    if (s.altTur === "hakedis") return "Pazarlamacı hakedişi";
+    if (s.altTur === "montajIscilik") return "Montaj işçiliği ödemesi";
+    if (s.altTur === "tablaOde") return "Tabla ödemesi";
+    return "Ödeme";
+  }
+  return s.altTur || "";
+}
+
 /* Nakit hangi kasada? — "merkez" | "saha". Kesim (HAKEDIS_BAS) ÖNCESİ düzende
    saha kasası kavramı yok (para bölüşülüp anında teslim ediliyordu). */
 export function kasaYeri(s) {
