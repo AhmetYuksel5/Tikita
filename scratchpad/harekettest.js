@@ -4,7 +4,7 @@ const fs = require("fs"), path = require("path"), vm = require("vm");
 const body = fs.readFileSync(path.join(__dirname, "../public/lib/hareket-model.js"), "utf8")
   .replace(/^export\s+/gm, "");
 const ctx = vm.createContext({ console });
-vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar,urunKarlilik};", ctx);
+vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar,urunKarlilik,borcAlacak,satirAciklama};", ctx);
 const M = ctx.__out;
 
 let ok = 0, fail = 0;
@@ -185,6 +185,21 @@ t("ürün kârlılığı: zarar eden ürün eksi", (() => { const b = UK.find(x 
   return b && b.tikitaKar === -5; })());
 t("ürün kârlılığı: stant ürün DEĞİL, listede yok", !UK.find(x => x.urun === "?" || x.urun === ""));
 t("ürün kârlılığı sıralı (kâr çoktan aza)", UK[0].urun === "Kolye");
+
+/* ── DEFTER SÜTUNLARI: borç/alacak (bina kuralı) + satır açıklaması ── */
+t("borç/alacak: SATIŞ borç sütununa", (() => { const b = M.borcAlacak(bul("har:s1")); return b.borc === 200 && b.alacak === 0; })());
+t("borç/alacak: TAHSİLAT/MASRAF/ÖDEME alacak sütununa", (() => {
+  const th = M.borcAlacak(bul("har:t1")), ms = M.borcAlacak(bul("gid:gd1")), od = M.borcAlacak(bul("gid:gd4"));
+  return th.alacak === 120 && th.borc === 0 && ms.alacak === 45 && od.alacak === 300; })());
+t("borç/alacak: peşin satış da BORÇ sütununda (bina hizmet kuralı)", M.borcAlacak(bul("har:g1")).borc === 80);
+t("borç toplamı = Σ satış · alacak toplamı = diğer üçü", (() => {
+  let b = 0, a = 0; rows.forEach(r => { const x = M.borcAlacak(r); b += x.borc; a += x.alacak; });
+  return Math.round(b * 100) / 100 === eskiCiro &&
+         Math.round(a * 100) / 100 === Math.round((S(s => s.tur !== "SATIS")) * 100) / 100; })());
+t("satır açıklaması: satışta ürün × adet", M.satirAciklama(bul("har:s1")).indexOf("×") > 0);
+t("satır açıklaması: iç transfer okunur", M.satirAciklama(bul("har:n1")).indexOf("Nakit teslim") === 0);
+t("satır açıklaması: sabit gider kendi metnini korur", M.satirAciklama(bul("sab:sb1:2026-07")).indexOf("Kira") === 0);
+t("satır açıklaması her satırda dolu", rows.every(r => String(M.satirAciklama(r)).length > 0));
 
 console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
 process.exit(fail ? 1 : 0);
