@@ -117,13 +117,25 @@ export function yedekIndir(payload, dosyaAdi) {
   const t = new Date();
   const fn = dosyaAdi || ("tikita-yedek-" + ymdYerel(t) + "-" +
     String(t.getHours()).padStart(2, "0") + String(t.getMinutes()).padStart(2, "0") + ".json");
-  const blob = new Blob([JSON.stringify(payload)], { type: "application/json;charset=utf-8" });
+  /* Başa UTF-8 BOM konur — dosya BOM'suz da geçerli UTF-8'dir ama Windows Not
+     Defteri / Android görüntüleyiciler / Excel kodlamayı yanlış tahmin edip
+     Türkçe harfleri "Ã§ Ã¶ ÅŸ" gösteriyordu (PersonelTakip CSV dersiyle aynı).
+     JSON.parse BOM'u SEVMEZ → geri okuma HER ZAMAN yedekOku'dan geçmeli. */
+  const blob = new Blob(["\uFEFF", JSON.stringify(payload)], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = fn;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   return fn;
+}
+
+/* Yedek dosyasını geri okuma — BOM'u ayıklar (JSON.parse BOM'lu metni reddeder).
+   Yedekten okuyan HER yol buradan geçer; çıplak JSON.parse KULLANMA. */
+export function yedekOku(metin) {
+  let s = String(metin || "");
+  if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+  return JSON.parse(s);
 }
 
 /* Son yedek takibi — 7 günü geçince ayar düğmesinde rozet çıkar. */
