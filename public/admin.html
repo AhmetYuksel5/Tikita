@@ -91,7 +91,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L67";   // komuta (admin) deneme sürümü
+const SURUM="L68";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -3002,6 +3002,26 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
      kaç tabla gerektiği bulunur ve tablalar arka arkaya takvime dizilir. */
   const [tabla,setTabla]=useState(1);
   const [hedef,setHedef]=useState("");
+  /* 🧵 ÇOKLU FİLAMENT — makinede takılı olan (en çok 4 yuva) kalan gramıyla gösterilir;
+     planlama aşaması olduğu için takılı OLMAYAN bir filament de seçilebilir — o zaman
+     satırda uyarı çıkar, tabla toplanınca hangi filamentin takılması gerektiği söylenir. */
+  const mkSlotlar=seciliMak?makMakaralar(seciliMak):[];
+  const mkTakiliOzet=(()=>{ const m={};
+    mkSlotlar.forEach(sl=>{ const fl=(filamentler||[]).find(f=>f&&f.id===sl.filamentId)||null;
+      const k=makKalan(sl,fl);
+      const o=m[sl.filamentId]=m[sl.filamentId]||{filamentId:sl.filamentId,kalan:0,bilinmiyor:false};
+      if(k==null) o.bilinmiyor=true; else o.kalan+=k; });
+    return Object.values(m); })();
+  const mkTakiliIdSet=new Set(mkTakiliOzet.map(x=>x.filamentId));
+  const digerFilamentler=(filamentler||[]).filter(f=>f&&f.id&&!mkTakiliIdSet.has(f.id));
+  const filEkle=id=>{ if(!id) return; setTarifFil(L=>{ if(L.some(x=>x.filamentId===id)) return L;
+      const kalanGr=Math.max(0,Math.round(num(gram)-L.reduce((s2,x)=>s2+num(x.gram),0)));
+      const N=[...L,{filamentId:id,gram:kalanGr}]; setFilamentId(N[0].filamentId); return N; }); };
+  const filCikar=id=>setTarifFil(L=>{ const N=L.filter(x=>x.filamentId!==id);
+    setFilamentId(N.length?N[0].filamentId:""); return N; });
+  const filGramYaz=(id,v)=>setTarifFil(L=>{ const i=L.findIndex(x=>x.filamentId===id);
+    if(i<0) return L; const N=L.slice(); N[i]={...N[i],gram:v}; return N; });
+  const filTemizle=()=>{ setTarifFil([]); setFilamentId(""); };
   const tarifUygula=(kat)=>{ if(!tarif) return;   // tarif = seçili makinenin türüne çözülmüş
     const k=Math.max(1,Math.round(num(kat)||1));
     setTabla(k);                       // k tabla → k ayrı baskı, peş peşe
@@ -3199,10 +3219,46 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,bekle,kayit,pr
     (!duzen&&bas&&(new Date(bas).getTime()+num(sure)*60000<=Date.now()))?h("div",{style:{padding:"9px 12px",borderRadius:11,background:"#f0fdf4",border:"1px solid #86efac",fontSize:12,fontWeight:700,color:"#166534",marginBottom:12}},
       "Bu saat geçmişte — baskı 'zaten basıldı' olarak o saate kaydedilir (şimdiki saate çekilmez)."):null,
     (filamentler&&filamentler.length)?h("div",{style:{marginBottom:12}},
-      h("div",{className:"lbl",style:{marginBottom:8,color:(!filamentId&&num(gram)>0)?"#c2410c":undefined}},(!filamentId&&num(gram)>0)?"Filament — seçilmezse stoktan düşülmez":"Filament"),
-      h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
-        h(Chip,{on:!filamentId,onClick:()=>setFilamentId("")},"—"),
-        filamentler.map(fl=>h(Chip,{key:fl.id,on:filamentId===fl.id,onClick:()=>setFilamentId(fl.id)},(flKod(fl)?flKod(fl)+" · ":"")+flAd(fl))))):null,
+      h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}},
+        h("div",{className:"lbl"},(!tarifFil.length&&num(gram)>0)?"Filament — seçilmezse stoktan düşülmez":"Filament"),
+        tarifFil.length?h("button",{onClick:filTemizle,
+          style:{fontSize:10.5,fontWeight:700,color:"var(--mut)",padding:"3px 9px",borderRadius:8,
+            background:"var(--surf2)",border:"1px solid var(--line)"}},"× Temizle"):null),
+      /* seçili filamentler — her biri gram girilebilir satır, takılı değilse uyarır */
+      tarifFil.length?h("div",{style:{display:"grid",gap:7,marginBottom:10}},
+        tarifFil.map(r=>{ const fl=(filamentler||[]).find(f=>f&&f.id===r.filamentId)||null;
+          const takiliMi=mkTakiliIdSet.has(r.filamentId);
+          return h("div",{key:r.filamentId,style:{display:"flex",alignItems:"center",gap:8,
+            padding:"8px 10px",borderRadius:11,
+            background:takiliMi?"var(--surf2)":"#fff7ed",
+            border:"1px solid "+(takiliMi?"var(--line)":"#fdba74")}},
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:12.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                (flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?")),
+              takiliMi?null:h("div",{style:{fontSize:10.5,fontWeight:700,color:"#9a3412",marginTop:1}},
+                "🔄 makinede takılı değil — tabla toplanırken takılması istenecek")),
+            h("input",{type:"number",inputMode:"numeric",value:(r.gram||r.gram===0)?r.gram:"",
+              placeholder:"gr",onChange:e=>filGramYaz(r.filamentId,e.target.value),
+              style:{...inp,width:74,textAlign:"center",padding:"7px 4px",fontSize:13}}),
+            h("button",{onClick:()=>filCikar(r.filamentId),
+              style:{width:26,height:26,borderRadius:8,flexShrink:0,background:"var(--surf2)",
+                border:"1px solid var(--line)",color:"var(--mut)",fontSize:14,fontWeight:800}},"×")); })):null,
+      /* makinede takılı olanlar — kalan gramıyla, dokununca eklenir/çıkarılır */
+      mkTakiliOzet.length?h("div",{style:{marginBottom:8}},
+        h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut)",marginBottom:6}},"🧵 Makinede takılı"),
+        h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
+          mkTakiliOzet.map(x=>{ const fl=(filamentler||[]).find(f=>f&&f.id===x.filamentId)||null;
+            const secili=tarifFil.some(r=>r.filamentId===x.filamentId);
+            return h(Chip,{key:x.filamentId,on:secili,onClick:()=>secili?filCikar(x.filamentId):filEkle(x.filamentId)},
+              (flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?")
+              +(x.bilinmiyor?" · ?":(" · ~"+Math.round(x.kalan)+" g"))); }))):null,
+      digerFilamentler.length?h("div",null,
+        h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut)",marginBottom:6}},
+          mkTakiliOzet.length?"Makinede takılı değil":"Filamentler"),
+        h("div",{style:{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}},
+          digerFilamentler.map(fl=>{ const secili=tarifFil.some(r=>r.filamentId===fl.id);
+            return h(Chip,{key:fl.id,on:secili,onClick:()=>secili?filCikar(fl.id):filEkle(fl.id)},
+              (flKod(fl)?flKod(fl)+" · ":"")+(flRenk(fl)||flAd(fl))); }))):null):null,
     h("input",{value:nott,onChange:e=>setNott(e.target.value),placeholder:"Not (ops.)",style:{...inp,fontSize:14,fontWeight:600,marginBottom:12}}),
     num(sure)>0?h("div",{style:{fontSize:12,color:"var(--mut)",padding:"9px 12px",borderRadius:11,background:"var(--surf2)"}},
       "Maliyet ~"+tl(maliyet)+(num(adet)>0?(" · birim ~"+tl(maliyet/num(adet))):"")+" (makine 12₺/sa"+(filSec?" + filament":"")+")"
@@ -8060,7 +8116,16 @@ function App(){
     if(!confirm(msj)) return;
     setIsBekle(true);
     try{ for(const x of L) await save("plan",{id:x.id,tablaAlindi:true});
-      setModal(null); say(L.length>1?(L.length+" tabla toplandı"):("Tabla toplandı · "+(L[0].ad||"iş"))); }
+      setModal(null);
+      /* 🔄 tabla toplanınca o makinede sırada hangi filamentin takılması gerektiğini söyle —
+         planlama sırasında makinede takılı olmayan filament seçilmiş olabilir */
+      const mk=(makineler||[]).find(y=>y&&y.id===L[0].makineId);
+      const eksik=mk?makEksik(mk,plan,Date.now()):[];
+      const flAdi=id=>{ const f=(filamentler||[]).find(x=>x&&x.id===id);
+        return f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?")):"?"; };
+      const not=eksik.length?(" · 🔄 takılmalı: "+eksik.slice(0,2).map(x=>flAdi(x.filamentId)).join(", ")
+        +(eksik.length>2?(" +"+(eksik.length-2)):"")):"";
+      say((L.length>1?(L.length+" tabla toplandı"):("Tabla toplandı · "+(L[0].ad||"iş")))+not); }
     catch(e){ console.error(e); say("İşlenemedi"); } finally{ setIsBekle(false); } }
   const [silinen,setSilinen]=useState(null); const silT=useRef(null);
   /* 🔀 tablayı başka makineye taşı — kaynak makinede açılan delik kapanır */
