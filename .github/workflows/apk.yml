@@ -1,0 +1,112 @@
+name: APK derle ve yayınla
+#
+# APK'yı derler, imzalar ve GitHub > Releases'a yükler. Telefondan o sayfadaki
+# .apk dosyasına dokunup kurabilirsin.
+#
+# ELLE çalışır (Actions > bu iş akışı > "Run workflow"). Her push'ta derlemez:
+# APK bir TWA sarmalayıcıdır — site güncellendiğinde uygulama içeriği ZATEN
+# güncellenir. Yalnız ikon/ad/adres değişince yeniden derlemek gerekir.
+#
+# Gereken repo secret'ları (Settings > Secrets and variables > Actions):
+#   ANDROID_KEYSTORE_B64       imzalama anahtarının base64'ü
+#   ANDROID_KEYSTORE_PASSWORD  o anahtarın şifresi
+# Anahtar DEĞİŞMEMELİ — değişirse telefon yeni APK'yı "farklı uygulama" sayar
+# ve güncelleme kurulmaz (önce eskisini silmek gerekir).
+
+on:
+  workflow_dispatch:
+    inputs:
+      surum:
+        description: "Sürüm adı (örn. 1.0.1) — boş bırakılırsa 1.0.<çalışma no>"
+        required: false
+        default: ""
+  # Yalnız APK'yı GERÇEKTEN değiştiren dosyalar dokununca derler (ikon, ad,
+  # adres, imza parmak izi). Site içeriği değişince derlemez — TWA'da gerek yok.
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/apk.yml"
+      - "public/.well-known/assetlinks.json"
+
+permissions:
+  contents: write
+
+jobs:
+  derle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kaynağı al
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Sürümü belirle
+        id: s
+        run: |
+          SURUM="${{ inputs.surum }}"
+          if [ -z "$SURUM" ]; then SURUM="1.0.${{ github.run_number }}"; fi
+          echo "surum=$SURUM" >> "$GITHUB_OUTPUT"
+          echo "Sürüm: $SURUM (versionCode ${{ github.run_number }})"
+
+      - name: İmzalama anahtarını çöz
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KS_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 secret'ı tanımlı değil — imzasız APK telefona KURULMAZ. Kurulum için APK_KURULUM.md'ye bak."
+            exit 1
+          fi
+          printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/tikita.jks"
+          echo "anahtar boyutu: $(wc -c < "$RUNNER_TEMP/tikita.jks") bayt"
+
+      - name: APK derle
+        working-directory: android
+        env:
+          TIKITA_KEYSTORE: ${{ runner.temp }}/tikita.jks
+          TIKITA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TIKITA_VERSION_CODE: ${{ github.run_number }}
+          TIKITA_VERSION_NAME: ${{ steps.s.outputs.surum }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: APK'yı adlandır
+        id: apk
+        run: |
+          SRC=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          if [ -z "$SRC" ]; then echo "::error::APK üretilmedi"; exit 1; fi
+          OUT="tikita-${{ steps.s.outputs.surum }}.apk"
+          cp "$SRC" "$OUT"
+          echo "yol=$OUT" >> "$GITHUB_OUTPUT"
+          ls -la "$OUT"
+
+      - name: İmzayı doğrula
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "${{ steps.apk.outputs.yol }}"
+
+      - name: Actions eki olarak da sakla
+        uses: actions/upload-artifact@v4
+        with:
+          name: tikita-apk
+          path: ${{ steps.apk.outputs.yol }}
+
+      - name: Releases'a yükle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ETIKET="apk-v${{ steps.s.outputs.surum }}"
+          gh release create "$ETIKET" "${{ steps.apk.outputs.yol }}" \
+            --title "Tikita ${{ steps.s.outputs.surum }}" \
+            --latest \
+            --notes "Android APK (TWA). Telefonda bu dosyaya dokunup kur; \"bilinmeyen kaynak\" izni sorulursa onayla.
+
+          Uygulamanın içeriği https://tikita-2026.web.app adresinden CANLI gelir — site güncellenince APK'yı yeniden kurmana gerek yoktur."
