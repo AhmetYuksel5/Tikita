@@ -55,6 +55,13 @@ vm.runInContext(`
   __out={HareketDefteri,olayUret,hdDuzenlenir,hdFormDoldur};
 `, ctx);
 const M = ctx.__out;
+/* useState SIRASI KAYNAKTAN TÜRER — elle "stateSira[3]" yazmak, bileşene yeni bir
+   state eklendiğinde bütün testleri sessizce yanlış hücreye bakar hâle getiriyordu.
+   S.ay / S.colMenu gibi adlarla kullan; sıra değişirse burası kendiliğinden düzelir. */
+const S = {};
+(defter.match(/const\s*\[\s*(\w+)\s*,\s*set\w+\s*\]\s*=\s*useState/g) || [])
+  .forEach((m, i) => { S[/\[\s*(\w+)/.exec(m)[1]] = i; });
+
 const hdDuzenlenirTest = M.hdDuzenlenir, hdFormDoldurTest = M.hdFormDoldur;
 
 /* ağaç gezici */
@@ -100,8 +107,10 @@ const basliklar = thler.map(x => metin(x).join(""));
 
 t("çıktı gerçek bir TABLO (<table>)", tablolar.length === 1);
 t("başlık satırı var (<thead>/<th>)", tum(agac, "thead").length === 1 && thler.length > 0);
+// TÜR başlığı süzgeç kapısı olduğu için sonuna " ▾"/" ●" işareti alır.
 t("varsayılan sütunlar: TARİH/DÖNEM/TÜR/TARAF/AÇIKLAMA/ADET/BORÇ/ALACAK",
-  ["TARİH","DÖNEM","TÜR","TARAF","AÇIKLAMA","ADET","BORÇ","ALACAK"].every(b => basliklar.includes(b)));
+  ["TARİH","DÖNEM","TÜR","TARAF","AÇIKLAMA","ADET","BORÇ","ALACAK"]
+    .every(b => basliklar.some(x => x.replace(/\s*[▾●]$/, "") === b)));
 t("KİŞİ/KAYNAK/KAYIT NO varsayılanda KAPALI", !basliklar.includes("KİŞİ") && !basliklar.includes("KAYIT NO"));
 t("her hareket kendi satırında (gruplama yok)", trler.length === rows.length + 1); // +1 başlık
 t("hücre sayısı = satır × sütun", tdler.length === rows.length * basliklar.length);
@@ -115,9 +124,8 @@ t("alacak sütununda tahsilat (120,00)", govdeMetin.indexOf("120,00") >= 0);
 t("tür rozetleri basılı", ["SATIŞ","TAHSİL","MASRAF","ÖDEME"].every(x => govdeMetin.indexOf(x) >= 0));
 t("toplam şeridi: hareket sayısı + borç + alacak",
   govdeMetin.indexOf(rows.length + " hareket") >= 0 && govdeMetin.indexOf("Borç") >= 0 && govdeMetin.indexOf("Alacak") >= 0);
-t("araç çubuğu: ay seçici + tür çipleri + ikon düğmeler",
-  govdeMetin.indexOf("Tüm aylar") >= 0 && govdeMetin.indexOf("TÜMÜ") >= 0 &&
-  tum(agac, "svg").length >= 3);
+t("araç çubuğu: ay seçici + ikon düğmeler (tür çipleri KALDIRILDI)",
+  govdeMetin.indexOf("Tüm aylar") >= 0 && tum(agac, "svg").length >= 3);
 t("arama kutusunda yalnız 'Ara' yazıyor", tum(agac, "input").some(x => x.props.placeholder === "Ara"));
 t("dönem sütunu 2026 AĞUSTOS biçiminde", govdeMetin.indexOf("2026 AĞUSTOS") >= 0);
 t("manuel ekle ikonu var", tum(agac, "button").some(b => (b.props.title||"").indexOf("Manuel hareket ekle") >= 0));
@@ -125,7 +133,7 @@ t("manuel ekle ikonu var", tum(agac, "button").some(b => (b.props.title||"").ind
 // tür süzgeci: yalnız SATIŞ
 stateSira = []; stateIdx = 0;
 const a2 = M.HareketDefteri({ rows, say: () => {} });   // state'i kur
-stateSira[1] = "SATIS";                                               // [0]=q, [1]=tur (tek değer, TÜMÜ="")
+stateSira[S.turF] = { SATIS: true, TAHSILAT: false, MASRAF: false, ODEME: false };                                               
 stateIdx = 0;
 const agac2 = M.HareketDefteri({ rows, say: () => {} });
 const satis = rows.filter(r => r.tur === "SATIS").length;
@@ -134,7 +142,7 @@ t("tür süzgeci satırları daraltıyor", tum(agac2, "tr").length === satis + 1
 // ay süzgeci: 2026-07
 stateSira = []; stateIdx = 0;
 M.HareketDefteri({ rows, say: () => {} });
-stateSira[3] = "2026-07";                                // [3]=ay
+stateSira[S.ay] = "2026-07";
 stateIdx = 0;
 const agac3 = M.HareketDefteri({ rows, say: () => {} });
 const tem = rows.filter(r => (r.tarih || "").slice(0, 7) === "2026-07").length;
@@ -152,8 +160,8 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
   const gd = rows.find(r => r.ref === "gid:gd1");
-  stateSira[5] = { yeni:false, r:gd, f:{ tur:"MASRAF", tarih:"2026-08-15", taraf:"Kargo",
-    aciklama:"kargo bedeli", tutar:"55", giderTur:"Kargo" } };   // [4]=duzen
+  stateSira[S.duzen] = { yeni:false, r:gd, f:{ tur:"MASRAF", tarih:"2026-08-15", taraf:"Kargo",
+    aciklama:"kargo bedeli", tutar:"55", giderTur:"Kargo" } };
   stateIdx = 0;
   const a = M.HareketDefteri({ rows, say: () => {} });
   const kaydetBtn = tum(a, "button").find(b => String(metin(b).join("")).indexOf("Kaydet") >= 0);
@@ -168,7 +176,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
   const st = rows.find(r => r.ref === "har:s1");
-  stateSira[5] = { yeni:false, r:st, f:{ tur:"SATIS", tarih:"2026-08-16", taraf:"Kale B",
+  stateSira[S.duzen] = { yeni:false, r:st, f:{ tur:"SATIS", tarih:"2026-08-16", taraf:"Kale B",
     adet:"3", satisFiyat:"110", alisFiyat:"75", urunAd:"Kolye XL", aciklama:"" } };
   stateIdx = 0;
   const a2b = M.HareketDefteri({ rows, say: () => {} });
@@ -182,7 +190,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   // silme → remove(kaynakKol, kaynakId)
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
-  stateSira[5] = { yeni:false, r:gd, f:hdFormDoldurTest(gd) };
+  stateSira[S.duzen] = { yeni:false, r:gd, f:hdFormDoldurTest(gd) };
   stateIdx = 0;
   const a3 = M.HareketDefteri({ rows, say: () => {} });
   __yazim = [];
@@ -193,7 +201,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   // manuel ekle: MASRAF → gider
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
-  stateSira[5] = { yeni:true, r:null, f:{ tur:"MASRAF", tarih:"2026-08-20", taraf:"", aciklama:"kırtasiye",
+  stateSira[S.duzen] = { yeni:true, r:null, f:{ tur:"MASRAF", tarih:"2026-08-20", taraf:"", aciklama:"kırtasiye",
     tutar:"250", adet:"1", satisFiyat:"", alisFiyat:"", urunAd:"", giderTur:"Diğer" } };
   stateIdx = 0;
   const a4 = M.HareketDefteri({ rows, say: () => {} });
@@ -207,7 +215,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
   // manuel ekle: SATIŞ → pazarlama_hareket tip:satis
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows, say: () => {} });
-  stateSira[5] = { yeni:true, r:null, f:{ tur:"SATIS", tarih:"2026-08-20", taraf:"Kale C", aciklama:"",
+  stateSira[S.duzen] = { yeni:true, r:null, f:{ tur:"SATIS", tarih:"2026-08-20", taraf:"Kale C", aciklama:"",
     tutar:"", adet:"4", satisFiyat:"90", alisFiyat:"65", urunAd:"Anahtarlık", giderTur:"" } };
   stateIdx = 0;
   const a5 = M.HareketDefteri({ rows, say: () => {} });
@@ -252,7 +260,7 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
 
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  stateSira[2] = true;                          // [2] = tablaGizli
+  stateSira[S.tablaGizli] = true;
   stateIdx = 0;
   const T1 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
   t("tablaGizli açık: tabla satırları LİSTEDE YOK (1 satır+başlık)", tum(T1, "tr").length === 2);
@@ -263,29 +271,74 @@ function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }
     const s0 = top0.match(/\d+ hareket/), s1 = yaz(T1).match(/\d+ hareket/);
     return s0 && s1 && s0[0] === s1[0]; })());
 
-  /* ── TÜR SÜZGECİ: TEK DÜĞME, dokunuşta sırayla TÜMÜ▸SATIŞ▸TAHSİLAT▸MASRAF▸ÖDEME döner
-     (kullanıcı 2026-08-24: beş ayrı çip yerine tek simge, bina MAAŞ > MOD DÜĞMESİ gibi) ── */
+  /* ── TÜR SÜZGECİ: ARAÇ ÇUBUĞUNDA DEĞİL, TÜR SÜTUN BAŞLIĞINDA
+     (kullanıcı 2026-08-24: "tümü satış tahsilat masraf ödeme kısmını tamamen
+     kaldır, tür sütununun başlığına tıklayınca ufak bir filtre modalı açılsın") ── */
+  stateSira = []; stateIdx = 0;
+  const T2a = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("araç çubuğunda TÜMÜ/SATIŞ/TAHSİLAT/MASRAF/ÖDEME çipi KALMADI",
+    tum(T2a, "button").filter(b => ["TÜMÜ","SATIŞ","TAHSİLAT","MASRAF","ÖDEME"].includes(yaz(b))).length === 0);
+
+  const turBas = n => tum(n, "th").find(x => yaz(x).indexOf("TÜR") >= 0);
+  t("TÜR sütun başlığı var ve tıklanabilir", !!(turBas(T2a) && turBas(T2a).props.onClick));
+  t("süzgeç kapalıyken başlıkta ▾ işareti", yaz(turBas(T2a)).indexOf("▾") >= 0);
+  t("süzgeç penceresi KAPALI başlar", yaz(T2a).indexOf("Tümünü seç") < 0);
+
+  // başlığa dokun → pencere açılır
+  turBas(T2a).props.onClick();
+  stateIdx = 0;
+  const T2b = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("başlığa dokununca süzgeç penceresi açılır", yaz(T2b).indexOf("Tümünü seç") >= 0);
+  t("pencerede dört tür de listelenir",
+    ["SATIŞ","TAHSİLAT","MASRAF","ÖDEME"].every(x => yaz(T2b).indexOf(x) >= 0));
+  t("pencerede dört onay kutusu var",
+    tum(T2b, "input").filter(x => x.props.type === "checkbox").length === 4);
+
+  // MASRAF'ın tikini kaldır → tabla satırları düşer
   stateSira = []; stateIdx = 0;
   M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  stateSira[1] = "MASRAF";
+  stateSira[S.turF] = { SATIS: true, TAHSILAT: true, MASRAF: false, ODEME: true };
   stateIdx = 0;
-  const T2 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  t("tür süzgeci: MASRAF (tabla) seçilince yalnız tabla satırları kalır", tum(T2, "tr").length === 3);
-  t("tür süzgeci: TÜMÜ/SATIŞ/TAHSİLAT/MASRAF/ÖDEME için BEŞ AYRI çip YOK — tek düğme",
-    tum(T2, "button").filter(b => ["TÜMÜ","SATIŞ","TAHSİLAT","MASRAF","ÖDEME"].includes(yaz(b))).length === 1);
+  const T2c = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("MASRAF tiki kalkınca tabla satırları listeden düşer (1 satır + başlık)",
+    tum(T2c, "tr").length === 2);
+  t("süzgeç açıkken başlıkta ● işareti", yaz(turBas(T2c)).indexOf("●") >= 0);
 
-  const turDugme = n => tum(n, "button").find(b => b.props.title === "Tür süzgeci — dokun: TÜMÜ ▸ SATIŞ ▸ TAHSİLAT ▸ MASRAF ▸ ÖDEME");
+  /* ── SÜTUN GENİŞLİĞİ ayarlanabilir (kullanıcı 2026-08-24) ── */
   stateSira = []; stateIdx = 0;
-  const T3a = M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  t("tür düğmesi varsayılan TÜMÜ yazıyor", yaz(turDugme(T3a)) === "TÜMÜ");
-  turDugme(T3a).props.onClick();
+  const W0 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  const kol = n => tum(n, "col");
+  t("tabloda colgroup var (genişlikler uygulanıyor)", kol(W0).length > 0);
+  t("tablo tableLayout:fixed — yoksa tarayıcı genişliği ezer", (() => {
+    const tb = tum(W0, "table")[0];
+    return tb && tb.props.style && tb.props.style.tableLayout === "fixed"; })());
+  const w0 = kol(W0)[0].props.style.width;
+  // sütun penceresini aç, ilk sütunu genişlet
+  stateSira[S.colMenu] = true;
   stateIdx = 0;
-  const T3b = M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  t("bir dokunuş: TÜMÜ → SATIŞ", yaz(turDugme(T3b)) === "SATIŞ");
-  turDugme(T3b).props.onClick(); turDugme(T3b).props.onClick(); turDugme(T3b).props.onClick(); turDugme(T3b).props.onClick();
+  const W1 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("sütun penceresinde genişlik başlığı var", yaz(W1).indexOf("Sütun genişliği") >= 0);
+  const arti = tum(W1, "button").find(b => (b.props["aria-label"] || "").indexOf("TARİH genişlet") >= 0);
+  t("her sütunun −/+ genişlik düğmesi var", !!arti);
+  arti.props.onClick();
   stateIdx = 0;
-  const T3c = M.HareketDefteri({ rows: rowsTab, say: () => {} });
-  t("beş dokunuş sonra baştan döner: TÜMÜ", yaz(turDugme(T3c)) === "TÜMÜ");
+  const W2 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  t("+ dokunuşu sütunu GERÇEKTEN genişletti", parseInt(kol(W2)[0].props.style.width) > parseInt(w0));
+  const sifirla = tum(W1, "button").find(b => yaz(b) === "Sıfırla");
+  t("Sıfırla düğmesi var", !!sifirla);
+  sifirla.props.onClick();
+  stateIdx = 0;
+  t("Sıfırla varsayılana döndürdü",
+    kol(M.HareketDefteri({ rows: rowsTab, say: () => {} }))[0].props.style.width === w0);
+
+  /* ── TABLA gizleme simgesi: PersonelTakip'teki "topla" (katman) ikonu ── */
+  stateSira = []; stateIdx = 0;
+  const I0 = M.HareketDefteri({ rows: rowsTab, say: () => {} });
+  const tablaBtn = tum(I0, "button").find(b => (b.props.title || "").indexOf("Tabla hareketlerini gizle") >= 0);
+  t("tabla gizleme düğmesi araç çubuğunda", !!tablaBtn);
+  t("simgesi PersonelTakip'in 'topla' katman ikonu", (() => {
+    const yollar = tum(tablaBtn, "path").map(x => x.props.d);
+    return yollar.indexOf("m12 3 9 5-9 5-9-5 9-5z") >= 0 && yollar.indexOf("m3 13 9 5 9-5") >= 0; })());
 
   console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
   process.exit(fail ? 1 : 0);

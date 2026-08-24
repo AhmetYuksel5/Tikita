@@ -4,7 +4,7 @@ const fs = require("fs"), path = require("path"), vm = require("vm");
 const body = fs.readFileSync(path.join(__dirname, "../public/lib/hareket-model.js"), "utf8")
   .replace(/^export\s+/gm, "");
 const ctx = vm.createContext({ console });
-vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar,urunKarlilik,borcAlacak,satirAciklama,genelOzet,donemRapor};", ctx);
+vm.runInContext(body + "\n;__out={HAKEDIS_BAS,HAKEDIS_BAS_MS,haftaKod,ayKod,etki,kasaYeri,olayUret,donemPivot,kaleEkstre,kaleBakiyeleri,personelCari,nakitOzet,mutabakat,kaleAnahtar,urunKarlilik,borcAlacak,satirAciklama,genelOzet,donemRapor,kisiAd,cariler,cariEtki};", ctx);
 const M = ctx.__out;
 
 let ok = 0, fail = 0;
@@ -279,6 +279,80 @@ t("ekstre: avans satırı cariDisi DEĞİL ama bakiyeyi de değiştirmiyor (ayr�
   const EX = M.kaleEkstre(rows2, "Kale X");
   const av = EX.rows.find(s => s.avansMi);
   return av && av.cariDisi === false && EX.bakiye === 40 && EX.avans === 30; })());
+
+
+/* ══ KİŞİ ADI: hakediş/montaj ödemesi giderinde kullaniciAd YOKTUR ══
+   Canlı veride tam bu yüzden 6 personel 24 sahte cariye bölünmüştü. */
+const KUL = [{ id: "u_emir", ad: "Emir" }, { id: "u_erdem", ad: "Erdem" }];
+const DK = {
+  hareketler: [
+    { id: "tb1", tip: "tabla", tarih: "2026-08-10T10:00:00", tutar: 285, kullaniciId: "u_emir", kullaniciAd: "Emir" }
+  ],
+  giderler: [
+    // gerçek kayıt şekli: kullaniciAd YOK, id var, açıklama "Ad · dönem"
+    { id: "gh1", tur: "Pazarlamacı hakedişi", tutar: 3052, tarih: "2026-08-14T10:00:00",
+      kullaniciId: "u_emir", aciklama: "Emir · 08 Ağu–14 Ağu" },
+    { id: "gh2", tur: "Pazarlamacı hakedişi", tutar: 1437, tarih: "2026-08-23T10:00:00",
+      kullaniciId: "u_emir", aciklama: "Emir · 15 Ağu–21 Ağu" },
+    // montaj ödemesinde id de YOK — yalnız açıklama var
+    { id: "gm1", tur: "Montaj işçiliği", tutar: 61, tarih: "2026-08-23T10:00:00",
+      aciklama: "Erdem · 61 × Yunus Balığı" }
+  ],
+  sabitGiderler: [], montajGorevler: [], hakedisDonemler: [], kullanicilar: KUL
+};
+const rK = M.olayUret(DK, { simdi: SIMDI }).rows;
+const adlar = [...new Set(rK.filter(x => x.tarafTip === "kullanici").map(x => x.tarafAd))].sort();
+t("kişi adı: 'Emir · 08 Ağu–14 Ağu' AYRI cari yaratmıyor", adlar.join("|") === "Emir|Erdem");
+t("kişi adı: kullanici koleksiyonundaki ad kazanır (id'den çözülür)",
+  rK.filter(x => x.ref === "gid:gh1")[0].tarafAd === "Erdem" === false &&
+  rK.filter(x => x.ref === "gid:gh1")[0].tarafAd === "Emir");
+t("kişi adı: id yoksa açıklamanın ' · ' ÖNCESİ alınır",
+  rK.filter(x => x.ref === "gid:gm1")[0].tarafAd === "Erdem");
+t("kisiAd saf yardımcı: üç kaynağı da sırayla dener",
+  M.kisiAd({ kullaniciId: "u_emir" }, { u_emir: "Emir" }) === "Emir" &&
+  M.kisiAd({ kullaniciAd: "Safa" }, {}) === "Safa" &&
+  M.kisiAd({ aciklama: "Cihat · 3 × Kolye" }, {}) === "Cihat" &&
+  M.kisiAd({}, {}) === "");
+
+/* ══ CARİ: müşteri + personel, bakiyesi sıfır olan DÂHİL ══ */
+const CK = M.cariler(rK);
+t("cari: personel de listede", CK.some(x => x.tip === "kullanici" && x.ad === "Emir"));
+t("cari: MARJ hakedişi ödemesi bakiyeye GİRMEZ (karşılıksız eksi doğuruyordu)", (() => {
+  const e = CK.find(x => x.ad === "Emir");
+  return e.bakiye === 285 && e.hakedisOde === 4489; })());
+t("cari: montaj ödemesi normal cari azalışıdır (hakediş gibi ayrılmaz)", (() => {
+  const e = CK.find(x => x.ad === "Erdem");
+  return e.azalis === 61 && e.hakedisOde === 0 && e.bakiye === -61; })());
+
+const DC = {
+  hareketler: [
+    { id: "c1", tip: "satis", tarih: "2026-08-10T10:00:00", adet: 1, satisFiyat: 100, alisFiyat: 60, yer: "Borçlu" },
+    { id: "c2", tip: "satis", tarih: "2026-08-10T10:00:00", adet: 1, satisFiyat: 100, alisFiyat: 60, yer: "Kapali" },
+    { id: "c3", tip: "tahsilat", tarih: "2026-08-11T10:00:00", tutar: 100, yer: "Kapali" }
+  ], giderler: [], sabitGiderler: [], montajGorevler: [], hakedisDonemler: []
+};
+const CC = M.cariler(M.olayUret(DC, { simdi: SIMDI }).rows);
+t("cari: bakiyesi SIFIR olan müşteri de listelenir (eskiden gizleniyordu)",
+  CC.length === 2 && CC.some(x => x.ad === "Kapali" && x.bakiye === 0));
+t("cari: hareket sayısı ve son tarih taşınır", (() => {
+  const k = CC.find(x => x.ad === "Kapali");
+  return k.n === 2 && k.sonTarih.slice(0, 10) === "2026-08-11"; })());
+t("cari: tedarikçi CARİ DEĞİLDİR (masraf ödeme anında kapanır)",
+  M.cariler(M.olayUret({ hareketler: [], giderler: [{ id: "x", tur: "Kargo", tutar: 45, tarih: "2026-08-01T10:00:00" }],
+    sabitGiderler: [], montajGorevler: [], hakedisDonemler: [] }, { simdi: SIMDI }).rows).length === 0);
+
+/* ══ EKSTRE tipe göre süzer — ad çakışması cariyi kirletmez ══ */
+const DX = {
+  hareketler: [{ id: "x1", tip: "satis", tarih: "2026-08-10T10:00:00", adet: 1, satisFiyat: 100, alisFiyat: 60, yer: "ORTAK" }],
+  giderler: [{ id: "x2", tur: "ORTAK", tutar: 40, tarih: "2026-08-12T10:00:00" }],
+  sabitGiderler: [], montajGorevler: [], hakedisDonemler: []
+};
+const rX = M.olayUret(DX, { simdi: SIMDI }).rows;
+t("ekstre: aynı adlı TEDARİKÇİ masrafı müşteri ekstresine girmez", (() => {
+  const E = M.kaleEkstre(rX, "ORTAK", "musteri");
+  return E.rows.length === 1 && E.bakiye === 100; })());
+t("ekstre: tip verilmezse eski davranış (hepsi) korunur",
+  M.kaleEkstre(rX, "ORTAK").rows.length === 2);
 
 console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
 process.exit(fail ? 1 : 0);

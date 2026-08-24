@@ -46,6 +46,24 @@ export const ayKod = t => { const d = new Date(t);
 export const ODEME_GIDER_TUR = { "Pazarlamacı hakedişi": "hakedis", "Montaj işçiliği": "montajIscilik" };
 export const STOK_ALIM_TUR = { "Filament alımı": 1, "Sarf malzemesi alımı": 1, "Yedek parça alımı": 1 };
 
+/* ── KİŞİ ADI TEK KAYNAK — `kisiAd(x, adMap)` ────────────────────────────
+   Hakediş/montaj ÖDEME giderlerinde `kullaniciAd` YAZILMAZ; yalnız bazen
+   `kullaniciId`, çoğu zaman sadece `aciklama` = "Emir · 08 Ağu–14 Ağu" vardır.
+   Ad doğrudan açıklamadan alınırsa aynı kişi her ödemede AYRI bir cari olur
+   ("Emir", "Emir · 08 Ağu–14 Ağu", "Emir · 15 Ağu–21 Ağu") ve ödemeler hak
+   edişle netleşmez — canlı veride tam bu oluyordu (24 sahte taraf).
+   Sıra: kullanici koleksiyonundaki ad (yetkili) → kaydın kullaniciAd'ı →
+   açıklamanın " · "den ÖNCEKİ parçası. */
+export function kisiAd(x, adMap) {
+  const id = (x && x.kullaniciId) || "";
+  if (id && adMap && adMap[id]) return adMap[id];
+  const ad = ((x && x.kullaniciAd) || "").trim();
+  if (ad) return ad;
+  const ac = ((x && x.aciklama) || "").trim();
+  if (!ac) return "";
+  return ac.split(" · ")[0].trim();
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    ETKİ TABLOSU — satırın kasa/cari/K-Z etkisi TÜRDEN türetilir; satırda
    borc/alacak SAKLANMAZ (çift-yazım tutarsızlık yüzeyi açar — A kararı).
@@ -173,8 +191,12 @@ export function olayUret(D, opts) {
     kaynakKol: "", kaynakId: "",
     ...(ek || {})
   });
+  // kullanici koleksiyonu verilmişse id→ad haritası (adın YETKİLİ kaynağı).
+  const adMap = {};
+  (D.kullanicilar || []).forEach(k => { if (k && k.id && k.ad) adMap[k.id] = String(k.ad).trim(); });
+
   const kale = x => ({ tarafTip: "musteri", tarafId: x.musteriId || (x.yer || "").trim(), tarafAd: (x.yer || "").trim() });
-  const per = x => ({ tarafTip: "kullanici", tarafId: x.kullaniciId || "", tarafAd: x.kullaniciAd || "" });
+  const per = x => ({ tarafTip: "kullanici", tarafId: x.kullaniciId || "", tarafAd: kisiAd(x, adMap) });
 
   /* ══ pazarlama_hareket ══ */
   (D.hareketler || []).forEach(x => {
@@ -267,7 +289,7 @@ export function olayUret(D, opts) {
     const ot = ODEME_GIDER_TUR[g.tur];
     if (ot) {
       ekle(satir("gid:" + g.id, "ODEME", ot, g,
-        { tarafTip: "kullanici", tarafId: g.kullaniciId || "", tarafAd: g.kullaniciAd || (g.aciklama || ""),
+        { tarafTip: "kullanici", tarafId: g.kullaniciId || "", tarafAd: kisiAd(g, adMap),
           tutar: t, kaynakKol: "gider", kaynakId: g.id }));
       return;
     }
@@ -310,7 +332,7 @@ export function olayUret(D, opts) {
     ekle({ ref: "mg:" + g.id + ":h", tur: "MASRAF", altTur: "montajIscilik",
       tarih, girildi: null,
       kullaniciId: g.kullaniciId || "", kullaniciAd: g.kullaniciAd || "",
-      tarafTip: "kullanici", tarafId: g.kullaniciId || "", tarafAd: g.kullaniciAd || "",
+      tarafTip: "kullanici", tarafId: g.kullaniciId || "", tarafAd: kisiAd(g, adMap),
       urunId: g.urunId || "", urunAd: g.urunAd || "", adet: teslim,
       birim: { satis: 0, veris: 0, maliyet: 0 },
       tutar: teslim * bir, pesin: false, sentetik: false,
@@ -366,28 +388,88 @@ export function donemPivot(rows, birimAlan) {
    yürüyen bakiye burada, süzgeçten önce yazılır (ekstre sürekliliği).
    ───────────────────────────────────────────────────────────────────────── */
 export function kaleAnahtar(s) { return (s.tarafAd || s.tarafId || "—").trim() || "—"; }
+
+/* CARİ YALNIZ MÜŞTERİ DEĞİLDİR (kullanıcı 2026-08-24: "bir ödeme mi yaptım o
+   aslında bir caridir, Emir'e tabla ödemesi mi yaptım o da bir cari harekettir").
+   İki gerçek cari tipi vardır ve İŞARETLERİ TERSTİR — tek sütunda toplanamazlar:
+     musteri   : bakiye = satış − tahsilat  → (+) MÜŞTERİ BİZE BORÇLU
+     kullanici : bakiye = tahakkuk − ödeme  → (+) BİZ PERSONELE BORÇLUYUZ
+   Bu yüzden `cariler()` tipi de döndürür ve ekran her öbeği kendi diliyle
+   etiketler. Tedarikçi CARİ DEĞİLDİR: masraf ödeme anında kapanır (kasa −1),
+   yürüyen hesabı yoktur — o RAPOR'un konusudur. */
+/* MARJ HAKEDİŞİ CARİYE GİRMEZ — tek yönlü olurdu.
+   `personelCari` notundaki kural: satış-marjı hakedişinin TAHAKKUKU bu modelde
+   üretilmez (yaşam döngüsü hakedis_donem belgesindedir, iki yerde iki rakam
+   çıkmasın diye). Ama ÖDEMESİ gider olarak buraya düşüyor → hesaba katılırsa
+   karşılıksız bir eksi doğar: canlı veride Emir'in tabla tahakkuku ₺285 iken
+   hakediş ödemeleri ₺4.489 olduğu için bakiye "−4.204" çıkıyordu, sanki adama
+   fazla ödeme yapılmış gibi. Bu yüzden hakediş ödemesi cariEtki'de SIFIRDIR;
+   `cariler()` onu ayrı `hakedisOde` kaleminde gösterir (para kaybolmaz). */
+export function cariEtki(s) {
+  const e = etki(s);
+  if (s.tarafTip === "kullanici") {
+    if (s.tur === "ODEME" && s.altTur === "hakedis") return 0;
+    return e.perCari;
+  }
+  if (e.musteriCari) return e.musteriCari;
+  return 0;
+}
+export function cariAnahtar(s) { return (s.tarafTip || "musteri") + "|" + kaleAnahtar(s); }
+
 /* Bu tarafla ilgili TÜM hareketler — tür kısıtı YOK (kullanıcı isteği: "onunla
    alakalı bütün hareketleri görebilmeliyim"). Yürüyen bakiye yalnız gerçekten
-   cari etkisi olan satırlarda (SATIŞ + normal/peşin tahsilat) ilerler; avans ve
-   kale adına rastgele denk gelen MASRAF/ÖDEME satırı `cariDisi:true` ile
-   işaretlenip listede görünür ama bakiyeye dokunmaz (bina "süzgeç bakiyeyi
-   yeniden hesaplamaz" kuralının karşılığı). */
-export function kaleEkstre(rows, kaleAd) {
-  const L = (rows || []).filter(s => kaleAnahtar(s) === kaleAd);
+   cari etkisi olan satırlarda ilerler; avans ve tarafın adına rastgele denk
+   gelen satır `cariDisi:true` ile işaretlenip listede görünür ama bakiyeye
+   dokunmaz (bina "süzgeç bakiyeyi yeniden hesaplamaz" kuralının karşılığı).
+
+   `artis`/`azalis` tipe göre anlam değiştirir — ekran başlıkları da öyle:
+     musteri   → BORÇ (satış) / ALACAK (tahsilat)
+     kullanici → HAK EDİŞ (tabla·montaj tahakkuku) / ÖDENEN
+   Eski `borc`/`alacak` adları GERİYE DÖNÜK korunur (PNG ve testler kullanıyor). */
+export function kaleEkstre(rows, kaleAd, tip) {
+  const L = (rows || []).filter(s =>
+    kaleAnahtar(s) === kaleAd && (!tip || (s.tarafTip || "musteri") === tip));
   L.sort((a, b) => (ms(a.tarih) - ms(b.tarih)) || ((a.tur === "SATIS" ? 0 : 1) - (b.tur === "SATIS" ? 0 : 1)) || String(a.ref).localeCompare(String(b.ref)));
   let run = 0;
   const out = L.map(s => {
-    const e = etki(s);
+    const ce = cariEtki(s);
     const avansMi = s.tur === "TAHSILAT" && s.altTur === "avans";
-    const cariMi = !avansMi && e.musteriCari !== 0;
-    const borc = (s.tur === "SATIS") ? s.tutar : 0;
-    const alacak = (s.tur === "TAHSILAT" && !avansMi) ? s.tutar : (s.tur === "MASRAF" || s.tur === "ODEME" ? s.tutar : 0);
-    if (cariMi) run = r2(run + borc - alacak);
-    return { ...s, borc, alacak, bakiye: run, avansMi, cariDisi: !cariMi && !avansMi };
+    const cariMi = !avansMi && ce !== 0;
+    // artış = bakiyeyi büyüten yön (+1), azalış = küçülten (−1)
+    const artis = (cariMi && ce > 0) ? s.tutar : 0;
+    const azalis = (cariMi && ce < 0) ? s.tutar
+      : ((!cariMi && !avansMi && (s.tur === "TAHSILAT" || s.tur === "MASRAF" || s.tur === "ODEME")) ? s.tutar : 0);
+    if (cariMi) run = r2(run + artis - azalis);
+    return { ...s, artis, azalis, borc: artis, alacak: azalis,
+      bakiye: run, avansMi, cariDisi: !cariMi && !avansMi };
   });
-  return { rows: out, bakiye: run,
+  return { rows: out, bakiye: run, tip: tip || "musteri",
     avans: r2(L.filter(s => s.altTur === "avans").reduce((z, s) => z + s.tutar, 0)) };
 }
+
+/* TÜM cari taraflar (müşteri + personel), bakiyesi sıfır olanlar DÂHİL.
+   Sıfır bakiyeliyi elemek "41 müşterinin 4'ü" gibi bir ekran doğuruyordu —
+   hesabı kapanmış müşteri de bir caridir, hareketleri görünmelidir. */
+export function cariler(rows) {
+  const M = {};
+  (rows || []).forEach(s => {
+    const ad = kaleAnahtar(s); if (!ad || ad === "—") return;
+    const tip = s.tarafTip || "musteri";
+    if (tip !== "musteri" && tip !== "kullanici") return;   // tedarikçi cari değil
+    const k = tip + "|" + ad;
+    const o = M[k] || (M[k] = { tip, ad, artis: 0, azalis: 0, bakiye: 0, n: 0, sonTarih: "", hakedisOde: 0, avans: 0 });
+    o.n++;
+    if (s.tarih > o.sonTarih) o.sonTarih = s.tarih;
+    if (s.tur === "TAHSILAT" && s.altTur === "avans") { o.avans = r2(o.avans + s.tutar); return; }
+    if (s.tur === "ODEME" && s.altTur === "hakedis") { o.hakedisOde = r2(o.hakedisOde + s.tutar); return; }
+    const ce = cariEtki(s);
+    if (ce > 0) o.artis = r2(o.artis + s.tutar);
+    else if (ce < 0) o.azalis = r2(o.azalis + s.tutar);
+  });
+  return Object.values(M).map(o => ({ ...o, bakiye: r2(o.artis - o.azalis) }))
+    .sort((a, b) => Math.abs(b.bakiye) - Math.abs(a.bakiye) || a.ad.localeCompare(b.ad, "tr"));
+}
+
 export function kaleBakiyeleri(rows) {
   const M = {};
   (rows || []).forEach(s => {
@@ -396,7 +478,6 @@ export function kaleBakiyeleri(rows) {
     M[k] = r2((M[k] || 0) + e.musteriCari * s.tutar);
   });
   return Object.entries(M).map(([kale, bakiye]) => ({ kale, bakiye }))
-    .filter(x => Math.abs(x.bakiye) > 0.004 || true)
     .sort((a, b) => b.bakiye - a.bakiye);
 }
 

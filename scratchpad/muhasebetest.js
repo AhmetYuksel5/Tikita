@@ -58,6 +58,7 @@ vm.runInContext(`
   const ymdYerel=()=> "2026-08-24";
   const hmOlayUret=olayUret, hmBorcAlacak=borcAlacak, hmSatirAciklama=satirAciklama;
   const hmBakiyeler=kaleBakiyeleri, hmEkstre=kaleEkstre, hmDonemRapor=donemRapor, hmGenel=genelOzet;
+  const hmCariler=cariler;
   const hdFd=t=>{const d=new Date(t);if(isNaN(+d))return "—";const p=n=>String(n).padStart(2,"0");
     return p(d.getDate())+"."+p(d.getMonth()+1)+"."+d.getFullYear();};
   const hdFmk=n=>{const v=num(n);return v?v.toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2}):"";};
@@ -67,9 +68,14 @@ vm.runInContext(`
   ${defter}
   ${ekstre}
   ${muhasebe}
-  __out={MuhasebeTab,HareketDefteri,EkstreGorselBtn,ekstrePngCiz,ekstrePaylas,olayUret,kaleEkstre,csv:()=>__csv,genelOzet};
+  __out={MuhasebeTab,HareketDefteri,EkstreGorselBtn,ekstrePngCiz,ekstrePaylas,olayUret,kaleEkstre,cariler,csv:()=>__csv,genelOzet};
 `, ctx);
 const M = ctx.__out;
+/* MuhasebeTab'ın useState SIRASI kaynaktan türer — elle indeks yazmak, bileşene
+   yeni bir state eklenince testleri sessizce yanlış hücreye baktırıyordu. */
+const S = {};
+(muhasebe.match(/const\s*\[\s*(\w+)\s*,\s*set\w+\s*\]\s*=\s*useState/g) || [])
+  .forEach((m, i) => { S[/\[\s*(\w+)/.exec(m)[1]] = i; });
 
 /* Sahte React bileşenleri kendiliğinden çağırmaz — iç bileşenleri (HareketDefteri)
    elle çalıştırıp ağacı düzleştir. Her iç bileşen KENDİ stateSira'sını kullanır
@@ -124,7 +130,7 @@ const t = (ad, k) => { if (k) ok++; else { fail++; console.log("  ✗ " + ad); }
 const render = (altSekme, kur) => renderD(P, altSekme, kur);
 const renderD = (data, altSekme, kur) => { stateSira = []; stateIdx = 0;
   M.MuhasebeTab(data);                    // state'leri kur
-  stateSira[0] = altSekme;                // [0] = alt
+  stateSira[S.alt] = altSekme;
   if (kur) kur(stateSira);
   stateIdx = 0; return M.MuhasebeTab(data); };
 
@@ -151,13 +157,29 @@ t("BAKİYE: müşteri listesi (bina BAKİYE ekranı gibi)",
   bYazi.indexOf("DOSTLAR") >= 0 && bYazi.indexOf("AKYAP") >= 0);
 t("BAKİYE: DOSTLAR 200−120 = 80", bYazi.indexOf("80") >= 0);
 t("BAKİYE: arama kutusunda 'Ara'", tum(B, "input").some(x => x.props.placeholder === "Ara"));
-t("BAKİYE: toplam satırı", bYazi.indexOf("Toplam") >= 0 && bYazi.indexOf("müşteri") >= 0);
-// müşteri seçilince ekstre
-const B2 = render("bakiye", s => { s[1] = "DOSTLAR"; });
+t("BAKİYE: MÜŞTERİ ve PERSONEL öbekleri ayrı", bYazi.indexOf("MÜŞTERİ") >= 0 && bYazi.indexOf("PERSONEL") >= 0);
+t("BAKİYE: öbek başlıkları işaretin ANLAMINI söyler (ters işaret tuzağı)",
+  bYazi.indexOf("+ bize borçlu") >= 0 && bYazi.indexOf("+ biz borçluyuz") >= 0);
+t("BAKİYE: personel de listede (tabla tahakkuku olan Ece)", bYazi.indexOf("Ece") >= 0);
+t("BAKİYE: TÜMÜ/MÜŞTERİ/PERSONEL süzgeç çipleri + Bakiyeli",
+  bYazi.indexOf("TÜMÜ") >= 0 && bYazi.indexOf("Bakiyeli") >= 0);
+t("BAKİYE: bakiyesi SIFIR olan da listelenir (AKYAP peşin değil, borçlu; sokak peşin → 0)",
+  bYazi.indexOf("sokak") >= 0);
+// cari seçilince ekstre
+const B2 = render("bakiye", s => { s[S.kale] = "DOSTLAR"; });
 const b2 = yaz(B2);
 t("BAKİYE → ekstre: yürüyen bakiyeli tablo", tum(B2, "table").length === 1 &&
   ["TARİH","AÇIKLAMA","BORÇ","ALACAK","BAKİYE"].every(x => b2.indexOf(x) >= 0));
-t("BAKİYE → ekstre: geri dönüş düğmesi", b2.indexOf("‹ Müşteriler") >= 0);
+t("BAKİYE → ekstre: geri dönüş düğmesi", b2.indexOf("‹ Cariler") >= 0);
+t("BAKİYE → müşteri ekstresinde işaret açıklaması", b2.indexOf("+ bize borçlu") >= 0);
+// personel ekstresi: sütun başlıkları DEĞİŞİR (borç/alacak yerine hak ediş/ödenen)
+const BP = render("bakiye", s => { s[S.kale] = "Ece"; s[S.cKale] = "kullanici"; });
+const bp = yaz(BP);
+t("PERSONEL ekstresinde sütunlar HAK EDİŞ / ÖDENEN",
+  bp.indexOf("HAK EDİŞ") >= 0 && bp.indexOf("ÖDENEN") >= 0 && bp.indexOf("BORÇ") < 0);
+t("PERSONEL ekstresinde işaret açıklaması ters", bp.indexOf("+ biz borçluyuz") >= 0);
+t("marj hakedişi ödemesi AYRICA yazılır (bakiyeye girmediği söylenir)",
+  bp.indexOf("marj hakedişi ödemesi") >= 0 && bp.indexOf("bakiyeye girmez") >= 0);
 
 /* ── BAKİYE → ekstre: Görsel/WhatsApp düğmesi (bina EKSTRE'deki "görüntülü indir paylaş"
    sistemiyle aynı) — EkstreGorselBtn nested bir bileşen olduğu için derin() şart. ── */
@@ -170,26 +192,34 @@ t("BAKİYE → ekstre: menü KAPALI başlıyor (Görüntüle/İndir yok)",
   b2d.indexOf("Görüntüle") < 0 && b2d.indexOf("İndir") < 0);
 // EkstreGorselBtn kendi 'ac' state'ini __compState'te tutar — açık başlatıp menüyü sına
 __compState.set(M.EkstreGorselBtn, [true]);
-const b2dAcik = yaz(derin(render("bakiye", s => { s[1] = "DOSTLAR"; })));
+const b2dAcik = yaz(derin(render("bakiye", s => { s[S.kale] = "DOSTLAR"; })));
 t("Görsel menüsü açılınca üç seçenek çıkar: Görüntüle/İndir/Paylaş",
   ["Görüntüle", "İndir", "Paylaş"].every(x => b2dAcik.indexOf(x) >= 0));
 __compState.delete(M.EkstreGorselBtn);   // sonraki testleri etkilemesin
 
-/* ── cariDisi: kaleye rastgele denk gelen MASRAF satırı listede SOLUK görünür,
-   yürüyen bakiyeyi DEĞİŞTİRMEZ (kullanıcı: "bütün hareketleri görebilmeliyim") ── */
+/* ── AD ÇAKIŞMASI cariyi KİRLETMEZ: "DOSTLAR" adlı bir TEDARİKÇİ masrafı,
+   "DOSTLAR" adlı MÜŞTERİNİN ekstresine girmemeli (ekstre artık tipe göre süzer). ── */
 const rowsP2 = M.olayUret(P2, { simdi: Date.parse("2026-08-23T12:00:00") }).rows;
-const E_P2 = M.kaleEkstre(rowsP2, "DOSTLAR");
-const masrafSatirModel = E_P2.rows.find(r => r.tur === "MASRAF" && r.tarafAd === "DOSTLAR");
-const masrafBakiyeYazi = masrafSatirModel.bakiye.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const BC = derin(renderD(P2, "bakiye", s => { s[1] = "DOSTLAR"; }));
-const dostlarSatir = tum(BC, "tr").find(r => yaz(r).indexOf("DOSTLAR") >= 0 && yaz(r).indexOf("25,00") >= 0);
-t("cariDisi satır (DOSTLAR adına rastgele masraf) tabloda GÖRÜNÜYOR", !!dostlarSatir);
+const E_P2 = M.kaleEkstre(rowsP2, "DOSTLAR", "musteri");
+t("aynı adlı TEDARİKÇİ masrafı müşteri ekstresine SIZMAZ",
+  !E_P2.rows.some(r => r.tarafTip === "tedarikci"));
+t("müşteri bakiyesi ad çakışmasından etkilenmez (200−120=80)", E_P2.bakiye === 80);
+
+/* ── cariDisi: personel ekstresinde MARJ HAKEDİŞİ ödemesi görünür ama bakiyeye
+   girmez (tahakkuku hakedis_donem'de — canlı veride Emir'in bakiyesini
+   "−4.204" gösteren asimetri buydu). ── */
+const E_ECE = M.kaleEkstre(rowsP2, "Ece", "kullanici");
+const hkSatir = E_ECE.rows.find(r => r.tur === "ODEME" && r.altTur === "hakedis");
+t("marj hakedişi ödemesi personel ekstresinde GÖRÜNÜYOR", !!hkSatir);
+t("marj hakedişi ödemesi cariDisi işaretli", !!(hkSatir && hkSatir.cariDisi));
+t("marj hakedişi bakiyeyi BOZMUYOR (tabla 25 tahakkuk → bakiye 25, −275 değil)",
+  E_ECE.bakiye === 25);
+const BC = derin(renderD(P2, "bakiye", s => { s[S.kale] = "Ece"; s[S.cKale] = "kullanici"; }));
+const hkTr = tum(BC, "tr").find(r => yaz(r).indexOf("hakediş") >= 0 && yaz(r).indexOf("300,00") >= 0);
 t("cariDisi satır SOLUK render edilir (opacity .5)",
-  !!(dostlarSatir && dostlarSatir.props.style && dostlarSatir.props.style.opacity === .5));
-t("cariDisi satır kendi civarındaki YÜRÜYEN BAKİYEYİ taşır ama İLERLETMEZ (model ile UI birebir)",
-  !!(dostlarSatir && yaz(dostlarSatir).indexOf(masrafBakiyeYazi) >= 0));
+  !!(hkTr && hkTr.props.style && hkTr.props.style.opacity === .5));
 t("normal (cariDisi olmayan) satır soluk DEĞİL",
-  tum(BC, "tr").filter(r => yaz(r).indexOf("DOSTLAR") < 0 && yaz(r).indexOf("Tahsilat") >= 0)
+  tum(BC, "tr").filter(r => yaz(r).indexOf("Tabla") >= 0)
     .every(r => !r.props.style || r.props.style.opacity !== .5));
 
 /* ── ekstrePngCiz / ekstrePaylas — canvas + DOM mocklu, gerçek fonksiyon gövdesi ── */
