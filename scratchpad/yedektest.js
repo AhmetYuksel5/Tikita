@@ -20,7 +20,7 @@ const sandbox = {
 };
 const vm = require("vm");
 const ctx = vm.createContext(sandbox);
-vm.runInContext(body + "\n;__out={parmakIzi,ymdYerel,sonYedekIsaretle,sonYedekGun,yedekEskiMi,TK_YEDEK_COLLS,TK_YEDEK_FOTO};", ctx);
+vm.runInContext(body + "\n;__out={parmakIzi,ymdYerel,sonYedekIsaretle,sonYedekGun,yedekEskiMi,TK_YEDEK_COLLS,TK_YEDEK_FOTO,yedekOku};", ctx);
 const M = ctx.__out;
 
 let ok = 0, fail = 0;
@@ -69,6 +69,14 @@ t("yedek alınınca bugün=0 ve eski değil", M.sonYedekGun() === 0 && M.yedekEs
 
 // ── 22: aynı satırlar iki kez → parmak izi deterministik
 t("parmak izi deterministik", JSON.stringify(M.parmakIzi("pazarlama_hareket", har)) === JSON.stringify(pH));
+
+// ── 23-26: Türkçe karakter + BOM (kullanıcı 2026-08-24: "yedek indirdim ama Türkçe karakter sorunu var")
+const trPayload = { collections: { musteri: [{ id: "m1", ad: "ÇİĞDEM ŞÖFÖRLÜ ÜRÜN ığüşiöç" }] } };
+const bomlu = "﻿" + JSON.stringify(trPayload);
+t("yedekOku BOM'u ayıklar", M.yedekOku(bomlu).collections.musteri[0].ad === "ÇİĞDEM ŞÖFÖRLÜ ÜRÜN ığüşiöç");
+t("yedekOku BOM'suz eski dosyayı da okur", M.yedekOku(JSON.stringify(trPayload)).collections.musteri[0].ad.indexOf("ÇİĞDEM") === 0);
+t("çıplak JSON.parse BOM'lu metni REDDEDER (yedekOku şart)", (() => { try { JSON.parse(bomlu); return false; } catch (e) { return true; } })());
+t("yedekIndir BOM ile yazıyor (kaynak kontrolü)", src.indexOf('new Blob(["\\uFEFF"') >= 0);
 
 console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
 process.exit(fail ? 1 : 0);
