@@ -13,7 +13,7 @@ function kes(bas, son) {
   return admin.slice(i, j);
 }
 const sabitler = kes("const HD_COLS=[", "function HareketDefteri");
-const defter = kes("function HareketDefteri(", "\nfunction HareketRaporu(");
+const defter = kes("function HareketDefteri(", "\nfunction RaporA(");
 
 /* sahte React — hook'lar tek geçiş için yeterli */
 let stateSira = [], stateIdx = 0;
@@ -29,7 +29,11 @@ const useRef = v => ({ current: v });
 const useEffect = () => {};
 const localStorageStub = { getItem: () => null, setItem: () => {} };
 
+let __yazim = [];
 const ctx = vm.createContext({ console, React, useState, useMemo, useRef, useEffect,
+  save: async (c, o) => { __yazim.push(["save", c, o]); return "id1"; },
+  remove: async (c, i) => { __yazim.push(["remove", c, i]); },
+  BEN_ID: "u1", confirm: () => true, alert: () => {},
   localStorage: localStorageStub, Blob: class {}, URL: { createObjectURL: () => "", revokeObjectURL: () => {} },
   document: { createElement: () => ({ click(){}, remove(){}, style:{} }), body: { appendChild(){} } },
   setTimeout, Date, Math, JSON, String, Number, Object, Array, isFinite, parseFloat, parseInt });
@@ -46,9 +50,10 @@ vm.runInContext(`
   function hdCsvIndir(){ __csv=(__csv||0)+1; }
   ${sabitler.replace(/const hdFd=[\s\S]*?};\n/, "").replace(/const hdFmk=[\s\S]*?};\n/, "").replace(/function hdCsvIndir[\s\S]*?\n}\n/, "")}
   ${defter}
-  __out={HareketDefteri,olayUret};
+  __out={HareketDefteri,olayUret,hdDuzenlenir,hdFormDoldur};
 `, ctx);
 const M = ctx.__out;
+const hdDuzenlenirTest = M.hdDuzenlenir, hdFormDoldurTest = M.hdFormDoldur;
 
 /* ağaç gezici */
 function tum(n, ad, bulunan) { bulunan = bulunan || [];
@@ -92,8 +97,8 @@ const basliklar = thler.map(x => metin(x).join(""));
 
 t("çıktı gerçek bir TABLO (<table>)", tablolar.length === 1);
 t("başlık satırı var (<thead>/<th>)", tum(agac, "thead").length === 1 && thler.length > 0);
-t("varsayılan sütunlar: TARİH/TÜR/TARAF/AÇIKLAMA/ADET/BORÇ/ALACAK",
-  ["TARİH","TÜR","TARAF","AÇIKLAMA","ADET","BORÇ","ALACAK"].every(b => basliklar.includes(b)));
+t("varsayılan sütunlar: TARİH/DÖNEM/TÜR/TARAF/AÇIKLAMA/ADET/BORÇ/ALACAK",
+  ["TARİH","DÖNEM","TÜR","TARAF","AÇIKLAMA","ADET","BORÇ","ALACAK"].every(b => basliklar.includes(b)));
 t("KİŞİ/KAYNAK/KAYIT NO varsayılanda KAPALI", !basliklar.includes("KİŞİ") && !basliklar.includes("KAYIT NO"));
 t("her hareket kendi satırında (gruplama yok)", trler.length === rows.length + 1); // +1 başlık
 t("hücre sayısı = satır × sütun", tdler.length === rows.length * basliklar.length);
@@ -110,7 +115,9 @@ t("toplam şeridi: hareket sayısı + borç + alacak",
 t("araç çubuğu: ay seçici + tür çipleri + sütun + CSV",
   govdeMetin.indexOf("Tüm aylar") >= 0 && govdeMetin.indexOf("TÜMÜ") >= 0 &&
   govdeMetin.indexOf("⚙ Sütun") >= 0 && govdeMetin.indexOf("⤓ CSV") >= 0);
-t("arama kutusu var", tum(agac, "input").some(x => String(x.props.placeholder || "").indexOf("Ara") === 0));
+t("arama kutusunda yalnız 'Ara' yazıyor", tum(agac, "input").some(x => x.props.placeholder === "Ara"));
+t("dönem sütunu 2026 AĞUSTOS biçiminde", govdeMetin.indexOf("2026 AĞUSTOS") >= 0);
+t("manuel ekle düğmesi var", govdeMetin.indexOf("+ Ekle") >= 0);
 
 // tür süzgeci: yalnız SATIŞ
 stateSira = []; stateIdx = 0;
@@ -135,5 +142,97 @@ stateSira = []; stateIdx = 0;
 const bos = M.HareketDefteri({ rows: [], say: () => {} });
 t("boş defterde çökme yok, mesaj var", metin(bos).join(" ").indexOf("Henüz hareket yok") >= 0);
 
-console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
-process.exit(fail ? 1 : 0);
+/* ── DÜZENLEME · MANUEL EKLE — kaynak koleksiyona doğru yazım ── */
+function ac(fn){ return fn().catch(e=>{ console.log("  ! istisna:",e.message); }); }
+(async () => {
+  // gider satırı düzenle → gider koleksiyonuna yazmalı
+  stateSira = []; stateIdx = 0;
+  M.HareketDefteri({ rows, say: () => {} });
+  const gd = rows.find(r => r.ref === "gid:gd1");
+  stateSira[4] = { yeni:false, r:gd, f:{ tur:"MASRAF", tarih:"2026-08-15", taraf:"Kargo",
+    aciklama:"kargo bedeli", tutar:"55", giderTur:"Kargo" } };   // [4]=duzen
+  stateIdx = 0;
+  const a = M.HareketDefteri({ rows, say: () => {} });
+  const kaydetBtn = tum(a, "button").find(b => String(metin(b).join("")).indexOf("Kaydet") >= 0);
+  t("düzenleme penceresi açılıyor (Kaydet düğmesi var)", !!kaydetBtn);
+  __yazim = [];
+  if (kaydetBtn) await ac(async () => kaydetBtn.props.onClick());
+  t("gider satırı düzenlemesi gider koleksiyonuna yazdı", (() => {
+    const y = __yazim.find(x => x[0] === "save" && x[1] === "gider");
+    return y && y[2].id === "gd1" && y[2].tutar === 55 && y[2].aciklama === "kargo bedeli"; })());
+
+  // satış satırı düzenle → pazarlama_hareket'e adet/fiyat yazmalı
+  stateSira = []; stateIdx = 0;
+  M.HareketDefteri({ rows, say: () => {} });
+  const st = rows.find(r => r.ref === "har:s1");
+  stateSira[4] = { yeni:false, r:st, f:{ tur:"SATIS", tarih:"2026-08-16", taraf:"Kale B",
+    adet:"3", satisFiyat:"110", alisFiyat:"75", urunAd:"Kolye XL", aciklama:"" } };
+  stateIdx = 0;
+  const a2b = M.HareketDefteri({ rows, say: () => {} });
+  __yazim = [];
+  const kb2 = tum(a2b, "button").find(b => String(metin(b).join("")).indexOf("Kaydet") >= 0);
+  if (kb2) await ac(async () => kb2.props.onClick());
+  t("satış düzenlemesi pazarlama_hareket'e yazdı", (() => {
+    const y = __yazim.find(x => x[0] === "save" && x[1] === "pazarlama_hareket");
+    return y && y[2].id === "s1" && y[2].adet === 3 && y[2].satisFiyat === 110 && y[2].alisFiyat === 75 && y[2].urunAd === "Kolye XL"; })());
+
+  // silme → remove(kaynakKol, kaynakId)
+  stateSira = []; stateIdx = 0;
+  M.HareketDefteri({ rows, say: () => {} });
+  stateSira[4] = { yeni:false, r:gd, f:hdFormDoldurTest(gd) };
+  stateIdx = 0;
+  const a3 = M.HareketDefteri({ rows, say: () => {} });
+  __yazim = [];
+  const silBtn = tum(a3, "button").find(b => metin(b).join("") === "Sil");
+  if (silBtn) await ac(async () => silBtn.props.onClick());
+  t("silme kaynak kaydı siliyor", __yazim.some(x => x[0] === "remove" && x[1] === "gider" && x[2] === "gd1"));
+
+  // manuel ekle: MASRAF → gider
+  stateSira = []; stateIdx = 0;
+  M.HareketDefteri({ rows, say: () => {} });
+  stateSira[4] = { yeni:true, r:null, f:{ tur:"MASRAF", tarih:"2026-08-20", taraf:"", aciklama:"kırtasiye",
+    tutar:"250", adet:"1", satisFiyat:"", alisFiyat:"", urunAd:"", giderTur:"Diğer" } };
+  stateIdx = 0;
+  const a4 = M.HareketDefteri({ rows, say: () => {} });
+  __yazim = [];
+  const kb4 = tum(a4, "button").find(b => String(metin(b).join("")).indexOf("Kaydet") >= 0);
+  if (kb4) await ac(async () => kb4.props.onClick());
+  t("manuel MASRAF gider koleksiyonuna yeni kayıt açtı", (() => {
+    const y = __yazim.find(x => x[0] === "save" && x[1] === "gider");
+    return y && !y[2].id && y[2].tutar === 250 && y[2].aciklama === "kırtasiye" && y[2].elle === true; })());
+
+  // manuel ekle: SATIŞ → pazarlama_hareket tip:satis
+  stateSira = []; stateIdx = 0;
+  M.HareketDefteri({ rows, say: () => {} });
+  stateSira[4] = { yeni:true, r:null, f:{ tur:"SATIS", tarih:"2026-08-20", taraf:"Kale C", aciklama:"",
+    tutar:"", adet:"4", satisFiyat:"90", alisFiyat:"65", urunAd:"Anahtarlık", giderTur:"" } };
+  stateIdx = 0;
+  const a5 = M.HareketDefteri({ rows, say: () => {} });
+  __yazim = [];
+  const kb5 = tum(a5, "button").find(b => String(metin(b).join("")).indexOf("Kaydet") >= 0);
+  if (kb5) await ac(async () => kb5.props.onClick());
+  t("manuel SATIŞ pazarlama_hareket'e tip:satis yazdı", (() => {
+    const y = __yazim.find(x => x[0] === "save" && x[1] === "pazarlama_hareket");
+    return y && y[2].tip === "satis" && y[2].adet === 4 && y[2].satisFiyat === 90 && y[2].yer === "Kale C" && y[2].girildi; })());
+
+  // sentetik/sanal satır → düzenlenemez, uyarı verir
+  let uyari = "";
+  stateSira = []; stateIdx = 0;
+  const a6 = M.HareketDefteri({ rows, say: m => { uyari = m; } });
+  const sentetik = rows.find(r => r.sentetik);
+  const trs = tum(a6, "tr").filter(x => x.props && x.props.onClick);
+  const hedefTr = trs.find((x, i) => true);
+  t("sentetik satır var (test verisinde gerilla peşini)", !!sentetik);
+  stateIdx = 0;
+  const a7 = M.HareketDefteri({ rows, say: m => { uyari = m; } });
+  // doğrudan hdDuzenlenir mantığını sınayalım
+  t("sentetik satır düzenlemeye KAPALI", hdDuzenlenirTest(sentetik).olur === false);
+  t("montaj/sabit gider kaynağı düzenlemeye KAPALI",
+    hdDuzenlenirTest({ kaynakKol:"sabit_gider", kaynakId:"x" }).olur === false &&
+    hdDuzenlenirTest({ kaynakKol:"montaj_gorev", kaynakId:"y" }).olur === false);
+  t("normal gider/satış satırı düzenlemeye AÇIK",
+    hdDuzenlenirTest(gd).olur === true && hdDuzenlenirTest(st).olur === true);
+
+  console.log((fail ? "✗ " : "✓ ") + ok + "/" + (ok + fail) + " sınama geçti" + (fail ? " — " + fail + " HATA" : ""));
+  process.exit(fail ? 1 : 0);
+})();
