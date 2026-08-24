@@ -116,6 +116,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc, increment, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { kurAudit } from "./lib/tikita-audit.js";
 
 const cfg = {
   apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",
@@ -146,11 +147,14 @@ const mi=(name,sz)=>h("span",{className:"msym",style:{fontSize:(sz||20)+"px"}},n
 
 /* ---------- yardımcılar ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
-async function save(coll, obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,cn(coll),id),d,{merge:true}); return id; }
-async function remove(coll,id){ await deleteDoc(doc(db,cn(coll),id)); }
-async function restoreDoc(coll,obj){ const {id,...data}=obj; await setDoc(doc(db,cn(coll),id),data); } // merge yok → tam geri yükle
 // aktif kullanıcı (oturum) — hareketler kime ait damgalansın
 let AKTIF_KUL=null;
+/* 📜 AUDIT — yazımlar audit çekirdeğinden geçer. Demo modunda (cn öneki) audit
+   kendiliğinden ATLANIR — deneme işlemleri gerçek log defterini kirletmez. */
+const AUD=kurAudit({db,cn,kim:()=>({who:(AKTIF_KUL&&AKTIF_KUL.ad)||"",whoId:(AKTIF_KUL&&AKTIF_KUL.id)||(localStorage.getItem("tk_uid")||"")})});
+async function save(coll, obj){ return AUD.save(coll,obj); }
+async function remove(coll,id){ return AUD.remove(coll,id); }
+async function restoreDoc(coll,obj){ return AUD.restoreDoc(coll,obj); } // merge yok → tam geri yükle
 async function harKaydet(obj){ const o=AKTIF_KUL?{kullaniciId:AKTIF_KUL.id,kullaniciAd:AKTIF_KUL.ad,...obj}:obj; return save("pazarlama_hareket",o); }
 // 📦 ATÖLYE STOK HAREKETİ LOGU — stokta bakiyesini değiştiren her olayı tarihiyle kaydeder (bakiye geçmişi için)
 //  sebep: uretim | cikis(pazarlamacıya) | donus(atölyeye) | satis | konsinye | iade | elle | baslangic
@@ -178,13 +182,16 @@ function fiyatOnay(kalemler){ const s=kalemler.filter(x=>num(x.fiyat)<=0);
   return confirm("⚠ Satış fiyatı 0 ₺ olan ürün(ler):\n"+s.map(x=>"• "+x.ad).join("\n")+"\n\nBu haliyle 0 ciro yazılır. Yine de devam edeyim mi?\n(Fiyatı Cephane / Stok kısmından düzeltebilirsin.)"); }
 function useColl(name, demoFlag){
   const [rows,setRows]=useState([]);
-  useEffect(()=>onSnapshot(collection(db,cn(name)),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),e=>console.error(name,e)),[name,demoFlag]);
+  useEffect(()=>onSnapshot(collection(db,cn(name)),s=>{ const R=s.docs.map(d=>({id:d.id,...d.data()}));
+    if(cn(name)===name) AUD.snapPut(name,R);   // audit "önce"si — demo önekliyken aynaya yazılmaz
+    setRows(R); },e=>console.error(name,e)),[name,demoFlag]);
   return rows;
 }
 // kullanıcılar — yüklendi bilgisiyle (ilk-açılış ekranı için)
 function useKullanici(){
   const [st,setSt]=useState({rows:[],loaded:false});
-  useEffect(()=>onSnapshot(collection(db,"kullanici"),s=>setSt({rows:s.docs.map(d=>({id:d.id,...d.data()})),loaded:true}),e=>console.error("kullanici",e)),[]);
+  useEffect(()=>onSnapshot(collection(db,"kullanici"),s=>{ const R=s.docs.map(d=>({id:d.id,...d.data()}));
+    AUD.snapPut("kullanici",R); setSt({rows:R,loaded:true}); },e=>console.error("kullanici",e)),[]);
   return st;
 }
 const num = v => { const n=parseFloat(v); return isNaN(n)?0:n; };

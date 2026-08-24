@@ -69,6 +69,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { kurAudit } from "./lib/tikita-audit.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -85,10 +86,14 @@ const tlk=n=>(Math.round(num(n)*100)/100).toLocaleString("tr-TR",{maximumFractio
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const fmtS=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short"})+" "+d2.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});};
 const gerekenP=(u,p)=>Math.max(1,Math.round(num(((u&&u.parcaAdet)||{})[p]||1)));
-async function save(coll,obj){ const id=obj.id||uid(); const {id:_,...d}=obj; await setDoc(doc(db,coll,id),d,{merge:true}); return id; }
+/* 📜 AUDIT — montaj yazımları da değişiklik kaydına düşer. */
+const AUD=kurAudit({db,kim:()=>{ const u=AUD.snapGet("kullanici",BEN_ID);
+  return {who:(u&&u.ad)||"Montaj",whoId:BEN_ID||""}; }});
+async function save(coll,obj){ return AUD.save(coll,obj); }
 
 function useColl(name){ const [rows,setRows]=useState(null);
-  useEffect(()=>{ const un=onSnapshot(collection(db,name),s=>setRows(s.docs.map(d=>({id:d.id,...d.data()}))),
+  useEffect(()=>{ const un=onSnapshot(collection(db,name),s=>{ const R=s.docs.map(d=>({id:d.id,...d.data()}));
+      AUD.snapPut(name,R); setRows(R); },
     e=>{ console.error(name,e); setRows(r=>r===null?[]:r); });
     return ()=>un(); },[]);
   return rows; }
@@ -201,7 +206,7 @@ function App(){
   const liste=sekme==="acik"?acik:sekme==="montajda"?montajda:biten;
 
   async function teslimAl(g,n){ if(bekle) return; setBekle(true);
-    try{
+    try{ await AUD.op(async()=>{
       /* 📦 mal atölyeden montajcıya geçiyor — bu da bir stok hareketidir.
          Eskiden yalnız görev kaydı güncelleniyordu, ürünün geçmişinde hiç iz kalmıyordu;
          "kimde ne var" ile "üründe ne var" birbirini tutmuyordu. */
@@ -210,12 +215,15 @@ function App(){
         await save("stok_hareket",{id:hid,urunId:g.urunId,urunAd:g.urunAd||"",delta:-Math.abs(num(n)),
           sebep:"montajCikis",bakiye:false,yer:(ben&&ben.ad)||"Montaj",tarih:new Date().toISOString(),kullaniciAd:(ben&&ben.ad)||"Montaj"}); }
       await save("montaj_gorev",{id:g.id,durum:"alindi",alinanAdet:n,alinanTarih:new Date().toISOString(),alimHareketId:hid});
+      },"montaj_gorev","📦 Montaja teslim alındı");
       setSheet(null); say(n+" adet teslim alındı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
 
   async function teslimEt(g,p){ if(bekle) return; const sg=num(p.saglam), ks=num(p.kusur), kalan=num(p.kalan);
     const tuketilen=sg+ks; if(tuketilen<1) return; setBekle(true);
-    try{
+    /* 📜 telafi:"montajGeriAl" — bu op'un kayıtları genel geri almadan MUAF;
+       admin Rapor > Montaj ekranındaki ↩ (montajGeriAl) etki alanından birebir ters işler. */
+    try{ await AUD.op(async()=>{
       const u=(urunler||[]).find(x=>x.id===g.urunId);
       // 🔁 uygulanan etkiler kayda yazılır — admin geri alınca birebir tersi işlenir
       const etki={stokta:sg,zayiat:ks,montajBitti:0,montajElle:0,parcaTuket:{},hareketId:""};
@@ -242,6 +250,7 @@ function App(){
           kullaniciId:g.kullaniciId,kullaniciAd:g.kullaniciAd||"",not:(g.not||""),durum:"alindi",alinanAdet:kalan,
           alinanTarih:g.alinanTarih||new Date().toISOString(),devirId:g.id,odendi:false,tarih:new Date().toISOString()}); }
       await save("montaj_gorev",{id:g.id,durum:"teslim",teslimAdet:sg,kusurAdet:ks,teslimTarih:new Date().toISOString(),etki,kalanGorevId:kalanId});
+      },"montaj_gorev","🔧 Montaj teslimi",{telafi:"montajGeriAl"});
       setSheet(null);
       say(sg+" adet teslim"+(ks>0?(" · "+ks+" kusurlu zayiat"):"")+(kalan>0?(" · "+kalan+" sende kaldı"):"")+" · "+tlk(sg*num(g.birimUcret))); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setBekle(false); } }
