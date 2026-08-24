@@ -98,7 +98,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L71";   // komuta (admin) deneme sürümü
+const SURUM="L72";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1523,6 +1523,82 @@ function planUrunOzet(satirlar,urunler){
   });
   return L;
 }
+/* 👷 GÜNLÜK ATÖLYE PLANI — seçilen aralıkta gün gün atölyedeki kişinin
+   ne yapacağı. Baskı ayrıntısı (gram, süre, filament gramajı) YOKTUR;
+   yalnız elle yapılacak işler: makara tak, baskı başlat, tabla topla, montaj. */
+function planGunluk(v,urunler){
+  const U={}; (urunler||[]).forEach(u=>{ if(u&&u.id) U[u.id]=u; });
+  const b0=num(v&&v.bas), b1=num(v&&v.bit);
+  if(!(b1>b0)) return [];
+  const gunBas=t=>{ const d=new Date(t); d.setHours(0,0,0,0); return d.getTime(); };
+  const gunler=[], kut={};
+  let g=gunBas(b0), koruma=0;
+  while(g<b1&&koruma++<400){ gunler.push(g);
+    kut[g]={gun:g,tak:[],basla:[],topla:[],montaj:[]};
+    const d=new Date(g); d.setDate(d.getDate()+1); d.setHours(0,0,0,0); g=d.getTime(); }
+  const koy=(t,alan,x)=>{ const k=gunBas(t); if(kut[k]) kut[k][alan].push(x); };
+  (v.degisim||[]).forEach(d2=>{ if(d2) koy(d2.t,"tak",d2); });
+  (v.satirlar||[]).forEach(r=>{ if(!r) return; koy(r.bas,"basla",r); koy(r.bit,"topla",r); });
+  /* montaj: biten parçalar biriktikçe kaç yeni takım kurulabilir */
+  const birik={}, oncekiTakim={};
+  gunler.forEach(gk=>{
+    kut[gk].topla.forEach(r=>{ if(!r.urunId||!r.parca) return;
+      const u=U[r.urunId]; const parts=((u&&u.parcalar)||[]).filter(Boolean);
+      if(parts.length<2) return;
+      const m=birik[r.urunId]=birik[r.urunId]||{};
+      m[r.parca]=(m[r.parca]||0)+num(r.adet); });
+    Object.keys(birik).forEach(id=>{
+      const u=U[id]; const parts=((u&&u.parcalar)||[]).filter(Boolean);
+      if(parts.length<2) return;
+      const ger=pt=>Math.max(1,Math.round(num(((u&&u.parcaAdet)||{})[pt]||1)));
+      const t2=Math.min.apply(null,parts.map(pt=>Math.floor((birik[id][pt]||0)/ger(pt))));
+      const yeni=t2-(oncekiTakim[id]||0);
+      if(yeni>0){ kut[gk].montaj.push({ad:(u&&u.ad)||"?",adet:yeni}); oncekiTakim[id]=t2; } });
+  });
+  /* gün gün iş satırları — makine bazında toplanır */
+  const mkTop=(L,fn)=>{ const m={};
+    L.forEach(x=>{ const k=x.makineAd||"?"; (m[k]=m[k]||[]).push(x); });
+    return Object.keys(m).sort((a,b2)=>a.localeCompare(b2,"tr")).map(k=>fn(k,m[k])); };
+  return gunler.map(gk=>{
+    const K=kut[gk], isler=[];
+    mkTop(K.tak,(mk,L)=>{ L.forEach(d2=>{
+      isler.push(["Makara tak",mk+" · "+(d2.cikanAd?(d2.cikanAd+" çıkar, "+d2.ad+" tak")
+        :(d2.tip==="biter"?(d2.ad+" bitiyor, yenisini tak"):(d2.ad+" tak")))]); }); });
+    mkTop(K.basla,(mk,L)=>isler.push(["Baskı başlat",
+      mk+" · "+L.length+" baskı"+(L.length?(" ("+urunOzetMetin(L)+")"):"")]));
+    mkTop(K.topla,(mk,L)=>isler.push(["Tabla topla",
+      mk+" · "+L.length+" tabla"+(L.length?(" ("+urunOzetMetin(L)+")"):"")]));
+    K.montaj.forEach(m=>isler.push(["Montaj",m.adet+" "+m.ad+" takımı kurulabilir"]));
+    return {gun:gk,isler};
+  });
+}
+/* satır listesinden "Penguen 2, Sudoku 1" gibi kısa ürün dökümü */
+function urunOzetMetin(L){
+  const m={};
+  (L||[]).forEach(r=>{ const k=(r.ad||"?")+(r.parca?(" "+r.parca):"");
+    m[k]=(m[k]||0)+1; });
+  const K=Object.keys(m).sort((a,b)=>m[b]-m[a]||a.localeCompare(b,"tr"));
+  return K.slice(0,3).map(k=>k+" "+m[k]).join(", ")+(K.length>3?(" +"+(K.length-3)):"");
+}
+/* günlük atölye planını tabloCanvas bölümlerine çevirir */
+function planGunlukBolum(v,urunler){
+  const G=planGunluk(v,urunler);
+  const gs=t=>new Date(t).toLocaleDateString("tr-TR",
+    {day:"2-digit",month:"short",weekday:"short"});
+  const satir=[];
+  let toplam=0;
+  G.forEach(d=>{
+    if(!d.isler.length){ satir.push([gs(d.gun),"—","Planlı iş yok"]); return; }
+    d.isler.forEach((x,i)=>{ satir.push([i?"":gs(d.gun),x[0],x[1]]); toplam++; });
+  });
+  return [{baslik:"Günlük atölye planı",
+    kolon:[{ad:"Gün"},{ad:"İş"},{ad:"Ne yapılacak"}],
+    satir, bos:"Bu aralıkta atölye işi yok.",__toplam:toplam}];
+}
+const planGunlukAd=v=>{ const g=t=>{ const d=new Date(t);
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+  const a=g(v.bas), b=g(v.bit-1);
+  return "tikita-atolye-plani-"+(a===b?a:(a+"_"+b))+".png"; };
 /* PNG dosya adı — aralığa göre */
 const planTabloAd=v=>{ const g=t=>{ const d=new Date(t);
     return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
@@ -5013,6 +5089,7 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
   const [ekle,setEkle]=useState(false);          // ＋ ekle (makine/filament) seçici
   const [mkBilgi,setMkBilgi]=useState(null);     // makine bilgi kartı
   const [pngBek,setPngBek]=useState("");         // 🖼 PNG tablo üretiliyor
+  const [atBek,setAtBek]=useState("");           // 👷 günlük atölye planı üretiliyor
   const zoomRef=useRef(1); const zoomMaxRef=useRef(1);
   useEffect(()=>{ zoomRef.current=zoomEt; zoomMaxRef.current=zoomMax; });
   const posRef=useRef(null);                     // yatay konum bir kez ayarlansın (hafta başına)
@@ -5116,6 +5193,24 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
       setPngBek("indi");
     }catch(e){ console.error(e); setPngBek("hata"); }
     setTimeout(()=>setPngBek(""),2500);
+  }
+  /* 👷 gün gün atölye planı — baskı ayrıntısı yok, yalnız yapılacak işler */
+  async function pngAtolye(b0,b1){
+    if(atBek) return; setAtBek("hazırlanıyor");
+    const B0=(typeof b0==="number"&&b0>0)?b0:baslaMs;
+    const B1=(typeof b1==="number"&&b1>B0)?b1:bitMs;
+    try{
+      const UR=(d&&d.stok)||[];
+      const veri=planTablo(plan,makineler,filamentler,B0,B1,now,UR);
+      const bol=planGunlukBolum(veri,UR);
+      const gunSay=Math.max(1,Math.round((B1-B0)/864e5));
+      const cv=tabloCanvas(bol,"TİKİTA · Günlük atölye planı",
+        araAd(B0,B1)+"  ·  "+gunSay+" gün · "+(bol[0].__toplam||0)+" iş"
+        +"  ·  çıktı "+fmtS(Date.now()));
+      await pngIndir(cv,planGunlukAd(veri));
+      setAtBek("indi");
+    }catch(e){ console.error(e); setAtBek("hata"); }
+    setTimeout(()=>setAtBek(""),2500);
   }
   // görünüm 4 saat geriden başlar → sola hizala
   useEffect(()=>{ const el=scrollRef.current; if(!el||!containerW) return; if(posRef.current===bas) return;
@@ -5285,6 +5380,20 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
           overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
           araAd()+" · üretim planı ve makara değişimi")),
       h("span",{style:{fontSize:15,color:"var(--mut2)",fontWeight:800,flexShrink:0}},"⤓")),
+    /* 👷 atölyedeki kişinin gün gün ne yapacağı — ayrı sayfa */
+    h("button",{onClick:()=>pngAtolye(),disabled:!!atBek,
+      style:{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"12px 14px",
+        borderRadius:13,marginBottom:16,textAlign:"left",background:"var(--surf2)",
+        border:"1px solid var(--line)",opacity:atBek?.6:1}},
+      h("span",{style:{fontSize:17,flexShrink:0}},"👷"),
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800,color:"var(--txt)"}},
+          atBek==="indi"?"Atölye planı indirildi":(atBek==="hata"?"Atölye planı oluşturulamadı"
+            :(atBek?"Hazırlanıyor…":"Günlük atölye planı indir"))),
+        h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:1,
+          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+          araAd()+" · gün gün yapılacak işler")),
+      h("span",{style:{fontSize:15,color:"var(--mut2)",fontWeight:800,flexShrink:0}},"⤓")),
     h("div",{style:{...GS.card,overflow:"hidden",marginBottom:14}},
       h("div",{style:GS.hdr},"MAKİNE ÖZETİ (HAFTALIK)"),
       h("div",{style:{display:"grid",gridTemplateColumns:"1.1fr .8fr .8fr .8fr 62px",gap:6,padding:"7px 12px",borderBottom:"1px solid "+GC.line,fontSize:10.5,fontWeight:700,color:GC.mut}},
@@ -5397,6 +5506,11 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
         style:{width:"100%",padding:13,borderRadius:13,background:"#1b1e25",color:"#fff",
           fontSize:13.5,fontWeight:800,opacity:pngBek?.6:1}},
         "🖼 Bu aralığı PNG tablo indir"),
+      h("button",{onClick:()=>{ setAralikAcik(false); pngAtolye(); },disabled:!!atBek,
+        style:{width:"100%",padding:13,borderRadius:13,marginTop:9,background:"var(--surf2)",
+          color:"var(--txt)",border:"1px solid var(--line)",
+          fontSize:13.5,fontWeight:800,opacity:atBek?.6:1}},
+        "👷 Bu aralığın günlük atölye planı"),
       /* 📅 PNG'ye özel tarih aralığı — takvim görünümü değişmez */
       h("div",{style:{marginTop:18,paddingTop:16,borderTop:"1px solid var(--line)"}},
         h("div",{className:"lbl",style:{marginBottom:4}},"PNG için özel tarih aralığı"),
@@ -5437,7 +5551,16 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
             color:ozelGecerli?"#fff":"var(--mut2)",
             border:ozelGecerli?"none":"1px solid var(--line)",
             fontSize:13.5,fontWeight:800,opacity:pngBek?.6:1}},
-          "📅 Seçilen tarih aralığını PNG indir"))):null,
+          "📅 Seçilen tarih aralığını PNG indir"),
+        h("button",{onClick:()=>{ setAralikAcik(false);
+            pngAtolye(strGun(ozelBas),gunArti(strGun(ozelBit),1)); },
+          disabled:!ozelGecerli||!!atBek,
+          style:{width:"100%",padding:13,borderRadius:13,marginTop:9,
+            background:"var(--surf2)",
+            color:ozelGecerli?"var(--txt)":"var(--mut2)",
+            border:"1px solid "+(ozelGecerli?"var(--line)":"var(--line)"),
+            fontSize:13.5,fontWeight:800,opacity:atBek?.6:1}},
+          "👷 Seçilen tarihlerin günlük atölye planı"))):null,
     mkBilgi?(()=>{ const tl=timelines[mkBilgi.id]||{}; const dol=toplamMs?Math.round((tl.printMs||0)/toplamMs*100):0; const gr=Math.round(gramMak[mkBilgi.id]||0);
       const satir=(l,v,c)=>h("div",{style:{display:"flex",justifyContent:"space-between",gap:10,padding:"11px 0",borderTop:"1px solid var(--line)",fontSize:13.5}},h("span",{style:{color:"var(--mut)"}},l),h("span",{style:{fontWeight:800,color:c||"var(--txt)"}},v));
       return h(Sheet,{ik:h(Icn,{n:"printer",c:"#fff",s:22}),hex:GC.navyHdr,baslik:mkBilgi.ad,alt:"",onClose:()=>setMkBilgi(null),
