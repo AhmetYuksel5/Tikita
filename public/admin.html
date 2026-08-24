@@ -98,7 +98,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L69";   // komuta (admin) deneme sürümü
+const SURUM="L70";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -5018,16 +5018,34 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
   const donemAd=gunSayisi===1?"Günlük":gunSayisi===7?"Haftalık":(gunSayisi+" günlük");
   const gunler=Array.from({length:gunEt},(_,i)=>new Date(baslaMs+i*24*3600*1000));
   /* 🖼 seçili aralığın üretim planı + makara değişim takvimi → PNG tablo */
-  const araAd=()=>{ const g=t=>new Date(t).toLocaleDateString("tr-TR",
+  const araAd=(b0,b1)=>{ const g=t=>new Date(t).toLocaleDateString("tr-TR",
       {day:"2-digit",month:"long",year:"numeric"});
-    const a=g(baslaMs), b=g(bitMs-1);
+    const a=g(b0==null?baslaMs:b0), b=g((b1==null?bitMs:b1)-1);
     return a===b?a:(a+" – "+b); };
-  async function pngTablo(){
+  /* 📅 PNG için ÖZEL tarih aralığı — takvim görünümünü değiştirmez, yalnız
+     çıktının kapsadığı günleri belirler. Boş bırakılırsa görünen aralık kullanılır. */
+  const gunStr=t=>{ const d=new Date(t);
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+  const strGun=s2=>{ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s2||""));
+    return m?new Date(+m[1],+m[2]-1,+m[3],0,0,0,0).getTime():0; };
+  const strUTC=s2=>{ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s2||""));
+    return m?Date.UTC(+m[1],+m[2]-1,+m[3]):0; };
+  /* yaz saati kaymasın diye bitiş günü takvimden bir gün ileri alınır */
+  const gunArti=(ms,n)=>{ const d=new Date(ms); d.setHours(0,0,0,0); d.setDate(d.getDate()+n); return d.getTime(); };
+  const [ozelBas,setOzelBas]=useState(()=>gunStr(Date.now()));
+  const [ozelBit,setOzelBit]=useState(()=>gunStr(Date.now()));
+  const ozelGunSay=(()=>{ const a=strUTC(ozelBas), b=strUTC(ozelBit);
+    return (a&&b&&b>=a)?(Math.round((b-a)/864e5)+1):0; })();
+  const OZEL_EN_COK=120;                       // çok geniş aralık dev bir tuval üretir
+  const ozelGecerli=ozelGunSay>0&&ozelGunSay<=OZEL_EN_COK;
+  async function pngTablo(b0,b1){
     if(pngBek) return; setPngBek("hazırlanıyor");
+    const B0=(typeof b0==="number"&&b0>0)?b0:baslaMs;
+    const B1=(typeof b1==="number"&&b1>B0)?b1:bitMs;
     try{
-      const veri=planTablo(plan,makineler,filamentler,baslaMs,bitMs,now);
+      const veri=planTablo(plan,makineler,filamentler,B0,B1,now);
       const cv=tabloCanvas(planTabloBolum(veri),"TİKİTA · Üretim planı",
-        araAd()+"  ·  "+veri.ozet.is+" baskı · "+veri.ozet.adet+" adet · "
+        araAd(B0,B1)+"  ·  "+veri.ozet.is+" baskı · "+veri.ozet.adet+" adet · "
         +veri.ozet.gram.toLocaleString("tr")+" gr · "+dkYaz(veri.ozet.sureDk)+" baskı süresi · "
         +veri.ozet.degisim+" makara değişimi  ·  çıktı "+fmtS(Date.now()));
       await pngIndir(cv,planTabloAd(veri));
@@ -5314,7 +5332,48 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
       h("button",{onClick:()=>{ setAralikAcik(false); pngTablo(); },disabled:!!pngBek,
         style:{width:"100%",padding:13,borderRadius:13,background:"#1b1e25",color:"#fff",
           fontSize:13.5,fontWeight:800,opacity:pngBek?.6:1}},
-        "🖼 Bu aralığı PNG tablo indir")):null,
+        "🖼 Bu aralığı PNG tablo indir"),
+      /* 📅 PNG'ye özel tarih aralığı — takvim görünümü değişmez */
+      h("div",{style:{marginTop:18,paddingTop:16,borderTop:"1px solid var(--line)"}},
+        h("div",{className:"lbl",style:{marginBottom:4}},"PNG için özel tarih aralığı"),
+        h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginBottom:10,lineHeight:1.5}},
+          "İstediğin iki tarih arasını seç — takvim görünümü değişmez, yalnız çıktı bu günleri kapsar."),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
+          h("div",null,
+            h("div",{style:{fontSize:10.5,fontWeight:800,color:"var(--mut)",marginBottom:5}},"Başlangıç"),
+            h("input",{type:"date",value:ozelBas,onChange:e=>setOzelBas(e.target.value),
+              style:{...inp,width:"100%",padding:"11px 8px",fontSize:13,fontWeight:700}})),
+          h("div",null,
+            h("div",{style:{fontSize:10.5,fontWeight:800,color:"var(--mut)",marginBottom:5}},"Bitiş"),
+            h("input",{type:"date",value:ozelBit,onChange:e=>setOzelBit(e.target.value),
+              style:{...inp,width:"100%",padding:"11px 8px",fontSize:13,fontWeight:700}}))),
+        /* hızlı seçenekler — bugünden başlayarak N gün */
+        h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:10}},
+          [[7,"1 hafta"],[14,"2 hafta"],[30,"1 ay"]].map(([n,lbl])=>h("button",{key:n,
+            onClick:()=>{ const t=Date.now(); setOzelBas(gunStr(t)); setOzelBit(gunStr(gunArti(t,n-1))); },
+            style:{...GS.ibtn,fontSize:12,fontWeight:800,color:"var(--cyan)"}},lbl)),
+          h("button",{onClick:()=>{ setOzelBas(gunStr(baslaMs)); setOzelBit(gunStr(bitMs-1)); },
+            style:{...GS.ibtn,fontSize:12,fontWeight:800,color:"var(--mut)"}},"görünen aralık")),
+        ozelGunSay>OZEL_EN_COK
+          ?h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:10,fontSize:11.5,
+            fontWeight:700,lineHeight:1.5,background:"#fff7ed",border:"1px solid #fdba74",color:"#9a3412"}},
+            "⚠ "+ozelGunSay+" gün çok geniş — en çok "+OZEL_EN_COK+" gün seçilebilir.")
+          :(ozelGunSay>0
+            ?h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:10,fontSize:11.5,
+              fontWeight:800,background:"#f0fdf4",border:"1px solid #86efac",color:"#166534"}},
+              "📅 "+ozelGunSay+" gün · "+araAd(strGun(ozelBas),gunArti(strGun(ozelBit),1)))
+            :h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:10,fontSize:11.5,
+              fontWeight:700,background:"var(--surf2)",border:"1px solid var(--line)",color:"var(--mut)"}},
+              "Bitiş tarihi başlangıçtan önce olamaz.")),
+        h("button",{onClick:()=>{ setAralikAcik(false);
+            pngTablo(strGun(ozelBas),gunArti(strGun(ozelBit),1)); },
+          disabled:!ozelGecerli||!!pngBek,
+          style:{width:"100%",padding:13,borderRadius:13,
+            background:ozelGecerli?"#0e8fce":"var(--surf2)",
+            color:ozelGecerli?"#fff":"var(--mut2)",
+            border:ozelGecerli?"none":"1px solid var(--line)",
+            fontSize:13.5,fontWeight:800,opacity:pngBek?.6:1}},
+          "📅 Seçilen tarih aralığını PNG indir"))):null,
     mkBilgi?(()=>{ const tl=timelines[mkBilgi.id]||{}; const dol=toplamMs?Math.round((tl.printMs||0)/toplamMs*100):0; const gr=Math.round(gramMak[mkBilgi.id]||0);
       const satir=(l,v,c)=>h("div",{style:{display:"flex",justifyContent:"space-between",gap:10,padding:"11px 0",borderTop:"1px solid var(--line)",fontSize:13.5}},h("span",{style:{color:"var(--mut)"}},l),h("span",{style:{fontWeight:800,color:c||"var(--txt)"}},v));
       return h(Sheet,{ik:h(Icn,{n:"printer",c:"#fff",s:22}),hex:GC.navyHdr,baslik:mkBilgi.ad,alt:"",onClose:()=>setMkBilgi(null),
