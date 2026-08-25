@@ -37,9 +37,11 @@ secret'ında durur. Ayarlanacak yer:
 | `ANDROID_KEYSTORE_B64` | Anahtar deposunun base64'ü (tek satır) |
 | `ANDROID_KEYSTORE_PASSWORD` | O anahtarın şifresi |
 
-İkisi de tanımlıysa iş akışı imzalı APK üretir. Tanımlı değilse **kasten hata
-verir** — imzasız APK telefona kurulamayacağı için sessizce bozuk dosya
-üretmektense durması doğrudur.
+İkisi de tanımlıysa iş akışı imzalı APK üretir. Tanımlı değilse iş **hata
+vermez, atlanır** (uyarı + özet notu bırakır): eksik secret bir yapılandırma
+durumudur, bozuk derleme değil — main'e her dokunuşta kırmızı ✗ basmak insanı
+kırmızıyı yok saymaya alıştırır. İmzasız APK hiç üretilmez; telefona
+kurulamayacağı için sessizce bozuk dosya bırakmak yanlış olurdu.
 
 ### APK'yı derlemek
 **Actions → "APK derle ve yayınla" → Run workflow.**
