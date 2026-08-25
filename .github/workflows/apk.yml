@@ -58,18 +58,27 @@ jobs:
           echo "surum=$SURUM" >> "$GITHUB_OUTPUT"
           echo "Sürüm: $SURUM (versionCode ${{ github.run_number }})"
 
+      # Anahtar yoksa iş BAŞARISIZ OLMAZ, ATLANIR: eksik secret bir yapılandırma
+      # durumudur, bozuk derleme değil. main'e her dokunuşta kırmızı ✗ basmak
+      # insanı kırmızıyı yok saymaya alıştırır. Gerçek derleme hatası yine kırmızıdır.
       - name: İmzalama anahtarını çöz
+        id: ks
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: |
           if [ -z "$KS_B64" ]; then
-            echo "::error::ANDROID_KEYSTORE_B64 secret'ı tanımlı değil — imzasız APK telefona KURULMAZ. Kurulum için APK_KURULUM.md'ye bak."
-            exit 1
+            echo "var=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_B64 secret'ı yok — APK derlenmedi. Kurulum: APK_KURULUM.md > 2) İlk kurulum."
+            echo "### APK derlenmedi" >> "$GITHUB_STEP_SUMMARY"
+            echo "\`ANDROID_KEYSTORE_B64\` ve \`ANDROID_KEYSTORE_PASSWORD\` secret'ları eklendikten sonra bu iş akışını yeniden çalıştır." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+          echo "var=1" >> "$GITHUB_OUTPUT"
           printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/tikita.jks"
           echo "anahtar boyutu: $(wc -c < "$RUNNER_TEMP/tikita.jks") bayt"
 
       - name: APK derle
+        if: steps.ks.outputs.var == '1'
         working-directory: android
         env:
           TIKITA_KEYSTORE: ${{ runner.temp }}/tikita.jks
@@ -79,6 +88,7 @@ jobs:
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: APK'yı adlandır
+        if: steps.ks.outputs.var == '1'
         id: apk
         run: |
           SRC=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
@@ -89,17 +99,20 @@ jobs:
           ls -la "$OUT"
 
       - name: İmzayı doğrula
+        if: steps.ks.outputs.var == '1'
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs "${{ steps.apk.outputs.yol }}"
 
       - name: Actions eki olarak da sakla
+        if: steps.ks.outputs.var == '1'
         uses: actions/upload-artifact@v4
         with:
           name: tikita-apk
           path: ${{ steps.apk.outputs.yol }}
 
       - name: Releases'a yükle
+        if: steps.ks.outputs.var == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
