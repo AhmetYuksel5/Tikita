@@ -102,3 +102,9 @@ tutmuyor demektir. Sırayla kontrol et:
 | `scratchpad/ikonuret.py` | Tüm ikonları `public/tikita-logo.png`'den üretir |
 
 Logo değişirse: `python3 scratchpad/ikonuret.py` → commit → APK'yı yeniden derle.
+
+Derlemeden önce `build.gradle` denetimi (Groovy tuzakları için):
+```bash
+CP=$(ls /opt/gradle/lib/groovy-*.jar | tr "\n" ":")
+java -cp "$CP" groovy.ui.GroovyMain scratchpad/gradlecalis.groovy
+```
