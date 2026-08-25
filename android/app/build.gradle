@@ -1,0 +1,61 @@
+/* Tikita APK — TWA (Trusted Web Activity) sarmalayıcı.
+   Uygulamanın KENDİSİ web sitesidir (tikita-2026.web.app); bu APK yalnız onu
+   tam ekran, kendi ikonuyla açar. Site güncellenince APK'yı YENİDEN DERLEMEYE
+   GEREK YOKTUR — ancak ikon/ad/adres değişirse yeniden derlenir.
+
+   İmzalama: anahtar depoyu ASLA repoda tutmayız (repo herkese açık) — CI onu
+   ANDROID_KEYSTORE_B64 secret'ından çözer ve yolunu TIKITA_KEYSTORE ile verir.
+   Anahtar yoksa imzasız derlenir (yerel deneme); imzasız APK telefona kurulmaz. */
+plugins {
+    id "com.android.application"
+}
+
+def ksYol = System.getenv("TIKITA_KEYSTORE")
+def ksSifre = System.getenv("TIKITA_KEYSTORE_PASSWORD")
+def ksVar = ksYol != null && !ksYol.isEmpty() && file(ksYol).exists()
+
+android {
+    namespace "com.tikita.app"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.tikita.app"
+        minSdk 21
+        targetSdk 34
+        // Sürüm CI'dan gelir (run_number sürekli artar → güncelleme kurulabilir).
+        versionCode (System.getenv("TIKITA_VERSION_CODE") ?: "1").toInteger()
+        versionName System.getenv("TIKITA_VERSION_NAME") ?: "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            if (ksVar) {
+                storeFile file(ksYol)
+                storePassword ksSifre
+                keyAlias "tikita"
+                keyPassword ksSifre
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (ksVar) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    // TWA çekirdeği — LauncherActivity, DelegationService, WebView yedeği burada.
+    implementation "com.google.androidbrowserhelper:androidbrowserhelper:2.5.0"
+}
