@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L78";   // komuta (admin) deneme sürümü
+const SURUM="L79";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -532,17 +532,41 @@ const makTur=mk=>String((mk&&mk.tur)||"").trim()||"Diğer";   // "PS1 Combo " �
 /* 🧵 Makinede şu an takılı makaralar — plan bunu bilirse gereksiz değişim saymaz */
 const MAK_YUVA=4;                                            // AMS yuva sayısı
 const makTakili=mk=>makMakaralar(mk).map(x=>x.filamentId);
-/* 🧵 Makinedeki makaralar. Yeni biçim takiliMakara; eski takiliFilament dizisi de
-   okunur, oradan gelenler "ölçülmemiş" (kalanı bilinmeyen) sayılır. */
-function makMakaralar(mk){
+/* 🧵 YUVA DÜZENİ — her makinede MAK_YUVA tane SABİT yuva vardır ve yuva numarası
+   makaranın adresidir: "01 - Vefa'nın 2 numaralı yuvasında EN01 SİYAH var".
+   Bir yuva boşalınca ötekiler kaymaz; dizide o yerde null durur. Kayıttaki
+   yuva alanı 0 tabanlıdır (ekranda +1 gösterilir); yoksa dizideki yer esas
+   alınır — eski, sıkışık kayıtlar böyle okunur. */
+function makYuvalar(mk){
+  const Y=new Array(MAK_YUVA).fill(null);
+  const oku=(x,y)=>({filamentId:x.filamentId,yuva:y,tam:!!x.tam,
+    harcanan:Math.max(0,num(x.harcanan)),tarih:x.tarih||"",
+    olculdu:!!x.olculdu,olcum:Math.max(0,num(x.olcum)),olcumTarih:x.olcumTarih||""});
+  const bosYer=()=>Y.findIndex(z=>!z);
   const L=mk&&mk.takiliMakara;
-  if(Array.isArray(L)) return L.filter(x=>x&&typeof x.filamentId==="string"&&x.filamentId)
-    .slice(0,MAK_YUVA).map(x=>({filamentId:x.filamentId,tam:!!x.tam,
-      harcanan:Math.max(0,num(x.harcanan)),tarih:x.tarih||"",
-      olculdu:!!x.olculdu,olcum:Math.max(0,num(x.olcum)),olcumTarih:x.olcumTarih||""}));
+  if(Array.isArray(L)){
+    const adresli=[],adressiz=[];
+    L.forEach((x,i)=>{ if(!x||typeof x.filamentId!=="string"||!x.filamentId) return;
+      const y=Math.round(num(x.yuva));
+      const gecerli=x.yuva!=null&&y>=0&&y<MAK_YUVA;
+      (gecerli?adresli:adressiz).push({y:gecerli?y:i,x}); });
+    /* adresi tutanlar önce yerleşir; çakışan ya da adressiz olanlar ilk boş
+       yuvaya oturur — hiçbir makara sessizce kaybolmaz */
+    const artan=[];
+    adresli.forEach(o=>{ if(Y[o.y]) artan.push(o); else Y[o.y]=oku(o.x,o.y); });
+    adressiz.forEach(o=>{ const y=o.y;
+      if(y>=0&&y<MAK_YUVA&&!Y[y]) Y[y]=oku(o.x,y); else artan.push(o); });
+    artan.forEach(o=>{ const y=bosYer(); if(y>=0) Y[y]=oku(o.x,y); });
+    return Y;
+  }
   const E=(mk&&mk.takiliFilament)||[];
-  return (Array.isArray(E)?E:[]).filter(x=>typeof x==="string"&&x).slice(0,MAK_YUVA)
-    .map(id=>({filamentId:id,tam:false,harcanan:0,tarih:"",olculdu:false,olcum:0,olcumTarih:""}));
+  (Array.isArray(E)?E:[]).filter(x=>typeof x==="string"&&x).slice(0,MAK_YUVA)
+    .forEach((id,i)=>{ Y[i]={filamentId:id,yuva:i,tam:false,harcanan:0,tarih:"",
+      olculdu:false,olcum:0,olcumTarih:""}; });
+  return Y;
+}
+/* yalnız DOLU yuvalar — her biri kendi yuva numarasını taşır */
+function makMakaralar(mk){ return makYuvalar(mk).filter(Boolean);
 }
 const makTakiliSet=mk=>{ const o={}; makTakili(mk).forEach(id=>{ o[id]=1; }); return o; };
 /* Bir makinede planlama anında hangi makaraların takılı olacağı:
@@ -1301,16 +1325,39 @@ const makKalan=(sl,fl)=>{ if(!sl) return null;
   if(sl.olculdu) return Math.max(0,num(sl.olcum)-num(sl.harcanan));
   return sl.tam?Math.max(0,flRuloGram(fl)-num(sl.harcanan)):null; };
 const makBitmek=(sl,fl)=>{ const k=makKalan(sl,fl); return k!=null&&k<=flRuloGram(fl)*0.12; };
-/* bir makinenin makara dizisini güncelle — yuva sayısıyla sınırlı, temiz alanlar */
-const makaraYaz=L=>(L||[]).filter(x=>x&&x.filamentId).slice(0,MAK_YUVA)
-  .map(x=>({filamentId:x.filamentId,tam:!!x.tam,
-    harcanan:Math.round(Math.max(0,num(x.harcanan))),tarih:x.tarih||"",
-    olculdu:!!x.olculdu,olcum:Math.round(Math.max(0,num(x.olcum))),
-    olcumTarih:x.olcumTarih||""}));
+/* Makara dizisini kayda hazırla. Yuva adresi korunur: boş yuvalar null kalır,
+   dolu yuvalar kendi numarasında durur — kimse kaymaz. */
+const makaraYaz=L=>{ const Y=new Array(MAK_YUVA).fill(null);
+  const bosYer=()=>Y.findIndex(z=>!z);
+  (L||[]).forEach((x,i)=>{ if(!x||!x.filamentId) return;
+    let y=Math.round(num(x.yuva)); if(!(y>=0&&y<MAK_YUVA)) y=i;
+    if(!(y>=0&&y<MAK_YUVA)||Y[y]) y=bosYer();
+    if(y<0) return;
+    Y[y]={filamentId:x.filamentId,yuva:y,tam:!!x.tam,
+      harcanan:Math.round(Math.max(0,num(x.harcanan))),tarih:x.tarih||"",
+      olculdu:!!x.olculdu,olcum:Math.round(Math.max(0,num(x.olcum))),
+      olcumTarih:x.olcumTarih||""}; });
+  /* sondaki boş yuvalar kaydedilmez — okurken zaten tamamlanıyor */
+  let son=MAK_YUVA-1; while(son>=0&&!Y[son]) son--;
+  return Y.slice(0,son+1); };
+/* 🧩 Ürünün tarifindeki filamentleri makinenin YUVALARIYLA eşleştir.
+   Baskı planlarken yapılan tek iş bu: hangi yuvadan kaç gram gidecek.
+   Hiçbir yuvaya düşmeyen tarif satırları "eksik" olarak döner. */
+function filYuvaEsle(yuvalar,tarifFil){
+  const kalan=(tarifFil||[]).filter(f=>f&&f.filamentId)
+    .map(f=>({filamentId:f.filamentId,gram:f.gram,eslesti:false}));
+  const satirlar=(yuvalar||[]).map((sl,i)=>{
+    if(!sl) return {yuva:i,bos:true,filamentId:"",gram:"",slot:null};
+    const k=kalan.find(f=>!f.eslesti&&f.filamentId===sl.filamentId);
+    if(k) k.eslesti=true;
+    return {yuva:i,bos:false,filamentId:sl.filamentId,slot:sl,gram:k?k.gram:""}; });
+  return {satirlar,eksik:kalan.filter(f=>!f.eslesti)
+    .map(f=>({filamentId:f.filamentId,gram:f.gram}))};
+}
 /* ⚖️ makinede duran makarayı tart: kalan gram elle girilir, harcama sıfırlanır */
 function makaraOlc(mk,yuva,gram,zaman){
-  const L=makMakaralar(mk); const i=Math.round(num(yuva));
-  if(!(i>=0)||!L[i]) return null;
+  const L=makYuvalar(mk); const i=Math.round(num(yuva));
+  if(!(i>=0&&i<MAK_YUVA)||!L[i]) return null;
   const g=Math.max(0,Math.round(num(gram)));
   L[i]={...L[i],tam:true,olculdu:true,olcum:g,harcanan:0,
     olcumTarih:zaman||new Date().toISOString()};
@@ -1318,10 +1365,10 @@ function makaraOlc(mk,yuva,gram,zaman){
 }
 /* basılan gramı o makineye takılı makaraya yaz; makara yoksa dizi olduğu gibi döner */
 function makaraHarca(mk,pay){
-  const L=makMakaralar(mk); let dokun=false;
+  const L=makYuvalar(mk); let dokun=false;
   /* eksi gram da geçerlidir — düzenlenen/silinen bir baskının tüketimi geri alınır */
   (pay||[]).forEach(f=>{ if(!f||!f.filamentId||!num(f.gram)) return;
-    const sl=L.find(x=>x.filamentId===f.filamentId); if(!sl) return;
+    const sl=L.find(x=>x&&x.filamentId===f.filamentId); if(!sl) return;
     sl.harcanan=Math.max(0,num(sl.harcanan))+num(f.gram); dokun=true; });
   return dokun?makaraYaz(L):null;
 }
@@ -3347,14 +3394,11 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
   /* 🧵 ÇOKLU FİLAMENT — makinede takılı olan (en çok 4 yuva) kalan gramıyla gösterilir;
      planlama aşaması olduğu için takılı OLMAYAN bir filament de seçilebilir — o zaman
      satırda uyarı çıkar, tabla toplanınca hangi filamentin takılması gerektiği söylenir. */
-  const mkSlotlar=seciliMak?makMakaralar(seciliMak):[];
-  const mkTakiliOzet=(()=>{ const m={};
-    mkSlotlar.forEach(sl=>{ const fl=(filamentler||[]).find(f=>f&&f.id===sl.filamentId)||null;
-      const k=makKalan(sl,fl);
-      const o=m[sl.filamentId]=m[sl.filamentId]||{filamentId:sl.filamentId,kalan:0,bilinmiyor:false};
-      if(k==null) o.bilinmiyor=true; else o.kalan+=k; });
-    return Object.values(m); })();
-  const mkTakiliIdSet=new Set(mkTakiliOzet.map(x=>x.filamentId));
+  /* 🧵 SEÇİLİ MAKİNENİN YUVALARI — 1..4, boş olanlar da görünür. Baskı
+     planlarken yapılan tek iş: tarifteki filamentleri bu yuvalarla eşleştirmek. */
+  const mkYuva=seciliMak?makYuvalar(seciliMak):new Array(MAK_YUVA).fill(null);
+  const mkSlotlar=mkYuva.filter(Boolean);
+  const mkTakiliIdSet=new Set(mkSlotlar.map(x=>x.filamentId));
   /* 🧵 Bir filamente gram yazmak, o baskının O MAKARADAN ne kadar yiyeceğini
      söyler. Baskı bitince bu gram makaradan ve filament stoğundan kendiliğinden
      düşer. Gram silinirse o filament baskıdan çıkar. */
@@ -3365,14 +3409,8 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
         setFilamentId(N.length?N[0].filamentId:""); return N; }
       if(i<0){ const N=[...L,{filamentId:id,gram:v}]; setFilamentId(N[0].filamentId); return N; }
       const N=L.slice(); N[i]={...N[i],gram:v}; return N; }); };
-  /* satırlar: makinede takılı olanlar + baskıda geçen ama takılı olmayanlar */
-  const filSatirlar=(()=>{ const sec={};
-    (tarifFil||[]).forEach(r=>{ if(r&&r.filamentId) sec[r.filamentId]=r.gram; });
-    const rows=mkTakiliOzet.map(x=>({filamentId:x.filamentId,kalan:x.kalan,
-      bilinmiyor:x.bilinmiyor,takili:true,gram:sec[x.filamentId]}));
-    (tarifFil||[]).forEach(r=>{ if(r&&r.filamentId&&!mkTakiliIdSet.has(r.filamentId))
-      rows.push({filamentId:r.filamentId,kalan:null,bilinmiyor:true,takili:false,gram:r.gram}); });
-    return rows; })();
+  /* yuva satırları + hiçbir yuvaya düşmeyen tarif filamentleri */
+  const filEsleme=filYuvaEsle(mkYuva,tarifFil);
   /* Ürün seçilince seçili MAKİNENİN baskı bilgisi varsa alanlar kendiliğinden dolar.
      ⚠ Çok parçalı üründe parça seçilmezse baskiCoz BİR TAKIMIN ortalamasını verir —
      o bir tabla değil, bir ürünün payıdır. Baskıda işe yarayan tablanın kendisi
@@ -3692,27 +3730,49 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
         (seciliMak&&onMakaraTak)?h("button",{onClick:()=>setMakaraAc(true),
           style:{...GS.ibtn,fontSize:11.5,fontWeight:800,color:"var(--cyan)",padding:"5px 11px"}},
           "Değiştir"):null),
-      filSatirlar.length?h("div",{style:{display:"grid",gap:7}},
-        filSatirlar.map(r=>{ const fl=(filamentler||[]).find(f=>f&&f.id===r.filamentId)||null;
-          return h("div",{key:r.filamentId,style:{display:"flex",alignItems:"center",gap:9,
+      /* 1..4 sabit yuva — boş yuva da görünür ki adres şaşmasın */
+      h("div",{style:{display:"grid",gap:7}},
+        filEsleme.satirlar.map(r=>{ const fl=r.bos?null
+            :((filamentler||[]).find(f=>f&&f.id===r.filamentId)||null);
+          const k=r.bos?null:makKalan(r.slot,fl);
+          return h("div",{key:"y"+r.yuva,style:{display:"flex",alignItems:"center",gap:9,
             padding:"10px 11px",borderRadius:12,
-            background:r.takili?"var(--surf2)":"#fff7ed",
-            border:"1px solid "+(r.takili?"var(--line)":"#fdba74")}},
+            background:r.bos?"var(--surf)":"var(--surf2)",
+            border:"1px "+(r.bos?"dashed":"solid")+" var(--line)"}},
+            h("span",{style:{width:24,height:24,borderRadius:8,flexShrink:0,fontSize:11.5,
+              fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",
+              color:r.bos?"var(--mut2)":"#fff",
+              background:r.bos?"transparent":"var(--cyan)",
+              border:"1px solid "+(r.bos?"var(--line)":"var(--cyan)")}},r.yuva+1),
             h("div",{style:{flex:1,minWidth:0}},
               h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",
-                textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-                (flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?")),
-              h("div",{style:{fontSize:10.5,fontWeight:700,marginTop:1,
-                color:r.takili?"var(--mut)":"#9a3412"}},
-                r.takili?(r.bilinmiyor?"kalan ölçülmemiş":("kalan ~"+Math.round(r.kalan)+" g"))
-                  :"makinede takılı değil")),
-            h("input",{type:"number",inputMode:"numeric",placeholder:"gr",
+                textOverflow:"ellipsis",whiteSpace:"nowrap",
+                color:r.bos?"var(--mut2)":"var(--txt)"}},
+                r.bos?"boş yuva":((flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?"))),
+              r.bos?null:h("div",{style:{fontSize:10.5,fontWeight:700,marginTop:1,
+                color:"var(--mut)"}},
+                k!=null?("kalan ~"+Math.round(k)+" g"):"kalan ölçülmemiş")),
+            r.bos?null:h("input",{type:"number",inputMode:"numeric",placeholder:"gr",
               value:(r.gram||r.gram===0)?r.gram:"",
               onChange:e=>filGramSet(r.filamentId,e.target.value),
               style:{...inp,width:82,textAlign:"center",padding:"9px 4px",fontSize:14,
-                fontWeight:800}})); }))
-        :h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",
-          fontSize:12.5,fontWeight:700}},"Bu makinede takılı makara yok."),
+                fontWeight:800}})); })),
+      /* tarifte var ama hiçbir yuvada yok — takılması gerekiyor */
+      filEsleme.eksik.length?h("div",{style:{marginTop:9,padding:"10px 11px",borderRadius:12,
+        background:"#fff7ed",border:"1px solid #fdba74"}},
+        h("div",{style:{fontSize:11.5,fontWeight:800,color:"#9a3412",marginBottom:5}},
+          "⚠ Yuvalarda olmayan filament — takılması gerekiyor"),
+        filEsleme.eksik.map(r=>{ const fl=(filamentler||[]).find(f=>f&&f.id===r.filamentId)||null;
+          return h("div",{key:r.filamentId,style:{display:"flex",alignItems:"center",gap:9,
+            marginTop:5}},
+            h("div",{style:{flex:1,minWidth:0,fontSize:12.5,fontWeight:800,color:"#9a3412",
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+              (flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?")),
+            h("input",{type:"number",inputMode:"numeric",placeholder:"gr",
+              value:(r.gram||r.gram===0)?r.gram:"",
+              onChange:e=>filGramSet(r.filamentId,e.target.value),
+              style:{...inp,width:82,textAlign:"center",padding:"8px 4px",fontSize:13.5,
+                fontWeight:800}})); })):null,
       h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut2)",marginTop:8,lineHeight:1.5}},
         "Yazılan gram, baskı bitince o makaradan ve stoktan kendiliğinden düşer.")),
     /* 🖨 girilen düzen ürünün baskı planına yazılsın mı */
@@ -5894,7 +5954,8 @@ color:dr.tc,fontSize:10.5,fontWeight:700,lineHeight:1.25,padding:"0 4px",textAli
           ?makMakaralar(mkBilgi).map((sl,i2)=>{ const f=(filamentler||[]).find(x=>x.id===sl.filamentId);
               const k=makKalan(sl,f);
               return satir(i2?"":"🧵 Takılı makara",
-                (f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f))):"?")
+                (num(sl.yuva)+1)+". yuva · "
+                +(f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f))):"?")
                 +(k!=null?(" · ~"+Math.round(k)+" g"):" · ölçülmedi"),
                 makBitmek(sl,f)?GC.kirmiziB:null); })
           :satir("🧵 Takılı makara","girilmemiş"),
@@ -6027,7 +6088,7 @@ function MakineDuzenSheet({mk,filamentler,onKaydet,onSil,onMakara,bekle}){
 function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onClose}){
   const [sec,setSec]=useState(-1);            // hangi yuvaya takılıyor
   const [ara,setAra]=useState("");
-  const L=makMakaralar(mk);
+  const L=makYuvalar(mk);            // sabit 4 yuva — boş olan null
   const fById=id=>(filamentler||[]).find(x=>x&&x.id===id)||null;
   const adi=f=>(flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?");
   /* 📅 üretim hattındaki plan bu makineden hangi filamentleri istiyor */
@@ -6052,8 +6113,10 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onClose}){
       background:sl?(ger?"#f0fdf4":"var(--surf2)"):"var(--surf)",
       border:"1px solid "+(az?"#fca5a5":(ger?"#86efac":"var(--line)")),
       borderStyle:sl?"solid":"dashed"}},
-      h("span",{style:{width:22,flexShrink:0,fontSize:11,fontWeight:800,color:"var(--mut2)",
-        textAlign:"center"}},i+1),
+      h("span",{style:{width:24,height:24,borderRadius:8,flexShrink:0,fontSize:11.5,
+        fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",
+        color:sl?"#fff":"var(--mut2)",background:sl?"#7c46e6":"var(--surf2)",
+        border:"1px solid "+(sl?"#7c46e6":"var(--line)")}},i+1),
       sl?h(React.Fragment,null,
         h("div",{style:{flex:1,minWidth:0}},
           h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",
@@ -6082,7 +6145,7 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onClose}){
             color:sec===i?"#7c46e6":"var(--mut)",background:"none",border:"none",padding:0}},
           sec===i?"filament seç ↓":"＋ Makara tak")); };
   return h(Sheet,{ik:"🧵",hex:"#7c46e6",baslik:"Makaralar · "+((mk&&mk.ad)||""),
-    alt:L.length+" / "+MAK_YUVA+" yuva dolu"
+    alt:L.filter(Boolean).length+" / "+MAK_YUVA+" yuva dolu"
       +(eksik.length?(" · "+eksik.length+" makara takılmalı"):""),onClose,cta:"Kapat",onCta:onClose},
     eksik.length?h("div",{style:{padding:"10px 12px",borderRadius:12,background:"#f0fdf4",
       border:"1px solid #86efac",marginBottom:12}},
@@ -9171,14 +9234,14 @@ function App(){
     const olcum=depodan?null:makaraKgSor(f,"⚖️ ");
     if(kyn==="acik"&&olcum==null){ say("Açık makara için kilo gerekli"); return; }
     setIsBekle(true);
-    try{ const L=makMakaralar(mk).slice();
+    try{ const L=makYuvalar(mk);
       const i=Math.max(0,Math.min(MAK_YUVA-1,num(yuva)));
-      while(L.length<i) L.push(null);
-      L[i]={filamentId,tam:!!depodan||olcum!=null,harcanan:0,tarih:new Date().toISOString(),
+      L[i]={filamentId,yuva:i,tam:!!depodan||olcum!=null,harcanan:0,tarih:new Date().toISOString(),
         olculdu:olcum!=null,olcum:olcum!=null?olcum:0,
         olcumTarih:olcum!=null?new Date().toISOString():""};
-      const yeni=makaraYaz(L.filter(Boolean));
-      await save("makineler",{id:mk.id,takiliMakara:yeni,takiliFilament:yeni.map(x=>x.filamentId)});
+      const yeni=makaraYaz(L);
+      await save("makineler",{id:mk.id,takiliMakara:yeni,
+        takiliFilament:yeni.filter(Boolean).map(x=>x.filamentId)});
       if(depodan&&f){ const R=flRuloGram(f), kalan=Math.max(0,flMakara(f)-1);
         await save("filament",{id:f.id,stokMakara:kalan,stokKg:Math.round(kalan*R)/1000,
           dusenMakara:increment(1),dusenKg:increment(R/1000)}); }
@@ -9194,14 +9257,14 @@ function App(){
   /* ⚖️ makinede duran makarayı tart — girilen kilo stoğa sayılır */
   async function makaraOlcuAl(mk,yuva){
     if(!mk||!mk.id||isBekle) return;
-    const sl=makMakaralar(mk)[num(yuva)]; if(!sl) return;
+    const sl=makYuvalar(mk)[num(yuva)]; if(!sl) return;
     const f=(filamentler||[]).find(x=>x&&x.id===sl.filamentId);
     const g=makaraKgSor(f,"⚖️ ");
     if(g==null) return;
     const yeni=makaraOlc(mk,yuva,g); if(!yeni) return;
     setIsBekle(true);
     try{ await save("makineler",{id:mk.id,takiliMakara:yeni,
-        takiliFilament:yeni.map(x=>x.filamentId)});
+        takiliFilament:yeni.filter(Boolean).map(x=>x.filamentId)});
       say("⚖️ "+((f&&(flRenk(f)||flAd(f)))||"Makara")+" · "+(g/1000)+" kg stoğa yazıldı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   /* 🧵 makarayı çıkar — yarım kalan makara depoya geri sayılmaz, elde açık durur */
@@ -9209,7 +9272,7 @@ function App(){
      kalanı bilinen makara "elde açık makara" olarak stokta kalır; hiç ölçülmemiş
      makaranın kalanı bilinmediği için izlenemez. */
   async function makaraCikar(mk,yuva){ if(!mk||!mk.id||isBekle) return;
-    const L=makMakaralar(mk); const sl=L[num(yuva)]; if(!sl) return;
+    const L=makYuvalar(mk); const sl=L[num(yuva)]; if(!sl) return;
     const f=(filamentler||[]).find(x=>x&&x.id===sl.filamentId);
     const ad=(f&&(flRenk(f)||flAd(f)))||"Makara";
     const c=makaraCikisTur(sl,f)||{tur:"bilinmez",gram:0};
@@ -9222,8 +9285,10 @@ function App(){
         :"\n\n⚠ Kalanı ölçülmedi — stokta izlenemeyecek.\nÖnce ⚖️ ile kilosunu girersen kalan stokta kalır.";
     if(!confirm("🧵 "+ad+" çıkarılsın mı?"+not)) return;
     setIsBekle(true);
-    try{ const yeni=makaraYaz(L.filter((x,i)=>i!==num(yuva)));
-      await save("makineler",{id:mk.id,takiliMakara:yeni,takiliFilament:yeni.map(x=>x.filamentId)});
+    /* yuva boşalır ama ötekiler yerinde kalır — dizide null durur */
+    try{ const yeni=makaraYaz(L.map((x,i)=>i===num(yuva)?null:x));
+      await save("makineler",{id:mk.id,takiliMakara:yeni,
+        takiliFilament:yeni.filter(Boolean).map(x=>x.filamentId)});
       if(f){
         if(c.tur==="depo"){ const R=flRuloGram(f), yeniDepo=flMakara(f)+1;
           await save("filament",{id:f.id,stokMakara:yeniDepo,stokKg:Math.round(yeniDepo*R)/1000,
@@ -9500,10 +9565,16 @@ function App(){
         .map(f=>f.filamentId)))].slice(0,MAK_YUVA);
       if(x.p.makineId&&fl.length){ try{
         const mkK=(makineler||[]).find(y=>y&&y.id===x.p.makineId);
-        const onc=makMakaralar(mkK);
-        const yeni=fl.map(id=>onc.find(o=>o.filamentId===id)
-          ||{filamentId:id,tam:false,harcanan:0,tarih:new Date().toISOString()});
-        await save("makineler",{id:x.p.makineId,takiliMakara:makaraYaz(yeni),takiliFilament:fl}); }
+        const Y=makYuvalar(mkK);
+        /* zaten bir yuvada duran filamente dokunulmaz; yalnız eksik olanlar
+           ilk BOŞ yuvaya oturur — dolu yuvalar asla ezilmez */
+        fl.forEach(id=>{ if(Y.some(z=>z&&z.filamentId===id)) return;
+          const y=Y.findIndex(z=>!z); if(y<0) return;
+          Y[y]={filamentId:id,yuva:y,tam:false,harcanan:0,tarih:new Date().toISOString(),
+            olculdu:false,olcum:0,olcumTarih:""}; });
+        const yeni=makaraYaz(Y);
+        await save("makineler",{id:x.p.makineId,takiliMakara:yeni,
+          takiliFilament:yeni.filter(Boolean).map(z=>z.filamentId)}); }
         catch(e2){ console.error(e2); } }
       setModal(null);
       say((bek.length?(bek.length+" tabla toplandı · "):"")+"▶Başladı · "+(x.p.ad||"iş")); }
