@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L76";   // komuta (admin) deneme sürümü
+const SURUM="L77";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -3125,6 +3125,26 @@ function MakineTasiSheet({p,mkAd,makineler,plan,filamentler,bekle,onTasi,onClose
         fontWeight:700}},"Aynı türde başka makine yok."));
 }
 // ➕ İŞ EKLE — eski panelin IsModal kayıt şemasıyla birebir uyumlu yazar
+/* 🧱 BU TABLA — baskı sırasında işe yarayan tek ölçü plakanın kendisidir:
+   üstünden kaç adet çıkıyor, ne kadar sürüyor, kaç gram filament gidiyor.
+   Birim değerler yalnız maliyet hesabı için, ayrı alanda döner. */
+function tablaOzet(x){
+  const sureDk=Math.max(0,num(x&&x.sureDk));
+  const fil=((x&&x.filament)||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
+    .map(f=>({filamentId:f.filamentId,gram:Math.round(num(f.gram)*10)/10}));
+  const dokumGram=Math.round(fil.reduce((s2,f)=>s2+f.gram,0)*10)/10;
+  const gram=dokumGram>0?dokumGram:Math.max(0,num(x&&x.gram));
+  const adet=Math.max(0,Math.round(num(x&&x.adet)));
+  const tabla=Math.max(1,Math.round(num(x&&x.tabla)||1));
+  const basMs=num(x&&x.basMs);
+  return {adet,tabla,sureDk,gram,fil,
+    dokumGram,fark:Math.round(Math.abs(num(x&&x.gram)-dokumGram)*10)/10,
+    toplamAdet:adet*tabla, toplamSureDk:sureDk*tabla,
+    toplamGram:Math.round(gram*tabla*10)/10,
+    birimDk:adet>0?Math.round(sureDk/adet*10)/10:0,
+    birimGram:adet>0?Math.round(gram/adet*10)/10:0,
+    bitisMs:(basMs>0&&sureDk>0)?basMs+tabla*sureDk*60000:0};
+}
 /* baskı bilgisinin nereden geldiği — güvenilirlik sırası */
 const BASKI_YER_SIRA={tur:0,makine:1,tip:2,genel:3,baska:4};
 function baskiTemelYaz(t,tur){
@@ -3294,27 +3314,43 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
   const urunSonuc=useMemo(()=>{ const q=ara.trim();
     const L=q?urunListe.filter(u=>araSuz(u.ad,q)||(u.parcalar||[]).some(pt=>araSuz(pt,q))):urunListe;
     return L.slice(0,60); },[urunListe,ara]);
-  /* ürün seçilince seçili MAKİNENİN baskı bilgisi varsa alanlar kendiliğinden dolar */
+  /* Ürün seçilince seçili MAKİNENİN baskı bilgisi varsa alanlar kendiliğinden dolar.
+     ⚠ Çok parçalı üründe parça seçilmezse baskiCoz BİR TAKIMIN ortalamasını verir —
+     o bir tabla değil, bir ürünün payıdır. Baskıda işe yarayan tablanın kendisi
+     olduğu için tarifi olan ilk parça seçilip O PARÇANIN TABLASI doldurulur. */
+  /* yalnız tarif GERÇEKTEN parça parça yazılmışsa parça seçilir; tek blokluk
+     tarifte parça seçmek adedi yanlış etiketler */
+  const ilkParca=u=>{ const prc=(u&&u.parcalar)||[]; if(!prc.length) return "";
+    const bb=baskiOku(u&&(u.raw||u));
+    if(!bb||!bb.ayri) return "";
+    return prc.find(x=>bb.parca&&bb.parca[x])||""; };
   const temelUygula=(u,mkId,parca)=>{
     const mk2=makList.find(x=>x.id===mkId)||null;
-    const t=u?urunBaskiTemel(u,plan,makTur(mk2),parca||"",mkId,makList):null;
+    const pk=String(parca||"").trim()||ilkParca(u);
+    const t=u?urunBaskiTemel(u,plan,makTur(mk2),pk,mkId,makList):null;
     const varMi=!!t&&BASKI_YER_SIRA[t.yer]<=2;   // tarif · bu makine · aynı tür
     setTabla(1); setHedef("");
+    if(pk){ setParcaSec([pk]); } else { setParcaSec([]); setParcaSayi({}); }
     if(varMi){
       const L=(t.filament||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
         .map(f=>({filamentId:f.filamentId,gram:Math.round(num(f.gram)*10)/10}));
-      setAdet(Math.max(1,Math.round(num(t.tablaAdet))));
+      const kap=Math.max(1,Math.round(num(t.tablaAdet)));
+      if(pk){ /* tabladan ÇIKAN o parçadır; genel adet kaç takıma yettiğidir */
+        setParcaSayi({[pk]:kap});
+        setAdet(Math.max(1,Math.floor(kap/Math.max(1,gerekenP(u,pk)))));
+      } else setAdet(kap);
       setSure(String(Math.round(num(t.sureDk))));
       setTarifFil(L); setFilamentId(L.length?L[0].filamentId:"");
       setGram(String(Math.round(L.reduce((s2,f)=>s2+num(f.gram),0)*10)/10));
       setBilgiYok(false); setTarifeYaz(t.yer!=="tur");
     } else {
       setAdet(0); setSure(""); setGram(""); setTarifFil([]); setFilamentId("");
+      if(pk) setParcaSayi({});
       setBilgiYok(true); setTarifeYaz(true);
     }
     return t;
   };
-  const urunSec=id=>{ setSerbest(false); setUrunId(id); setParcaSec([]); setParcaSayi({});
+  const urunSec=id=>{ setSerbest(false); setUrunId(id); setParcaSayi({});
     setAra(""); setNott("");
     temelUygula(urunListe.find(u=>u.id===id)||null,makineId,""); };
   const makSec=id=>{ setMakineId(id); setBas(toLoc(kuyrukSonu(id)));
@@ -3367,12 +3403,22 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
   const seriBit=()=>{ const s2=bas?new Date(bas).getTime():NaN;
     return (isNaN(s2)||!(num(sure)>0))?0:s2+tabla*num(sure)*60000; };
   const parcalar=(seciliUrun&&seciliUrun.parcalar)||[];
-  const parcaToggle=pt=>setParcaSec(s=>s.includes(pt)?s.filter(x=>x!==pt):[...s,pt]);
+  /* parça değişince o parçanın TABLASI yeniden yüklenir; birden çok parça aynı
+     tablaya konursa dokunulmaz — tablanın toplamı aşağıdaki özette hesaplanır */
+  const parcaToggle=pt=>{
+    const yeni=parcaSec.includes(pt)?parcaSec.filter(x=>x!==pt):[...parcaSec,pt];
+    setParcaSec(yeni);
+    if(yeni.length===1&&!serbest&&seciliUrun) temelUygula(seciliUrun,makineId,yeni[0]); };
   const gerP=pt=>gerekenP(seciliUrun,pt);
   const kapsanan=(()=>{ if(serbest||!parcalar.length) return []; const arr=parcaSec.filter(x=>parcalar.includes(x)); return arr.length?arr:parcalar.slice(); })();
   const psVar=kapsanan.some(pt=>num(parcaSayi[pt])>0);   // parça başına adet girilmiş mi
   const psDeger=pt=>{ const v=num(parcaSayi[pt]); return v>0?Math.round(v):num(adet)*gerP(pt); };
   const takimEs=kapsanan.length?Math.max(1,Math.min.apply(null,kapsanan.map(pt=>Math.floor(psDeger(pt)/gerP(pt))))):num(adet);
+  /* 🧱 tabladan ÇIKAN — parça tablasıysa o parçadan kaç adet, değilse ürün adedi */
+  const tekParcaSec=kapsanan.length===1?kapsanan[0]:"";
+  const cikanAdet=tekParcaSec?psDeger(tekParcaSec)
+    :(kapsanan.length>1?kapsanan.reduce((s2,pt)=>s2+psDeger(pt),0):num(adet));
+  const cikanAd=tekParcaSec||(kapsanan.length>1?"parça":"adet");
   const isAd=serbest?ad.trim():((seciliUrun&&seciliUrun.ad)||"");
   const gecerli=!!makineId&&!!isAd&&num(sure)>0&&num(adet)>0&&bas;
   /* 🖨 alanlar eksik geldi ya da bu makinenin tarifi yok → değerleri iste, sonra
@@ -3580,32 +3626,57 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
           :h("input",{type:"number",inputMode:"numeric",value:adet||"",onChange:e=>setAdet(num(e.target.value)),style:{...inpK(adet),padding:"13px 8px"}})),
       h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Gram"),
         h("input",{type:"number",inputMode:"numeric",value:gram,onChange:e=>setGram(e.target.value),style:{...inpK(gram),padding:"13px 8px"}}))),
-    /* 🧵 stoktan gerçekte ne düşecek — toplam gram ile döküm ayrışırsa uyar */
-    (()=>{ const L=(tarifFil||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0);
-      const lg=Math.round(L.reduce((s2,f)=>s2+num(f.gram),0)*10)/10;
+    /* 🧱 BU TABLA — baskıda işe yarayan ölçü. Tablanın toplam süresi ve toplam
+       filament tüketimi; birim değerler yalnız maliyet için küçük yazıda. */
+    (()=>{ const oz=tablaOzet({adet:cikanAdet,sureDk:num(sure),gram:num(gram),
+        filament:tarifFil,tabla,basMs:bas?new Date(bas).getTime():0});
       const flAdi=id=>{ const f=(filamentler||[]).find(x=>x&&x.id===id);
         return f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?")):"?"; };
-      if(!L.length){
-        /* döküm yok: tek filament seçiliyse eski düzen çalışır, o da yoksa izlenmez */
-        if(num(gram)>0&&filamentId) return null;
-        if(!(num(sure)>0)) return null;
-        return h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:12,
-          background:"#fff7ed",border:"1px solid #fdba74",fontSize:11.5,fontWeight:700,
-          color:"#9a3412",lineHeight:1.5}},
-          "⚠ Bu baskının filamenti izlenmiyor — makaradan düşmez, maliyete girmez. "
-          +"Tarifi uygula ya da filament seç."); }
-      const fark=Math.abs(num(gram)-lg);
-      return h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:12,
-        background:fark>0.5?"#fff7ed":"var(--surf2)",
-        border:"1px solid "+(fark>0.5?"#fdba74":"var(--line)")}},
-        h("div",{style:{fontSize:11.5,fontWeight:800,
-          color:fark>0.5?"#9a3412":"var(--mut)"}},
-          "🧵 Stoktan düşecek: "+lg+" gr"+(fark>0.5?(" — Gram alanı "+num(gram)+" yazıyor"):"")),
-        h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:2,lineHeight:1.5}},
-          L.map(f=>flAdi(f.filamentId)+" "+(Math.round(num(f.gram)*10)/10)+" g").join(" + ")),
-        fark>0.5?h("button",{onClick:()=>setGram(String(lg)),
-          style:{marginTop:8,padding:"7px 12px",borderRadius:10,background:"#c2410c",
-            color:"#fff",fontSize:12,fontWeight:800}},"Gram'ı "+lg+" yap"):null); })(),
+      if(!(oz.sureDk>0)&&!(oz.gram>0)) return null;
+      const sapma=oz.fil.length>0&&oz.fark>0.5;
+      const birim=cikanAd||"adet";
+      return h("div",{style:{padding:"11px 13px",borderRadius:13,marginBottom:12,
+        background:"var(--surf2)",border:"1px solid var(--line)"}},
+        h("div",{style:{fontSize:11,fontWeight:800,color:"var(--mut2)",marginBottom:6}},
+          "🧱 BU TABLA"),
+        h("div",{style:{fontSize:15,fontWeight:800,color:"var(--txt)",lineHeight:1.4}},
+          (oz.adet>0?(oz.adet+" "+birim+" · "):"")+dkYaz(oz.sureDk)
+          +(oz.gram>0?(" · "+oz.gram.toLocaleString("tr")+" gr"):"")),
+        oz.fil.length?h("div",{style:{fontSize:12,fontWeight:700,color:"var(--mut)",
+          marginTop:3,lineHeight:1.5}},
+          "🧵 "+oz.fil.map(f=>flAdi(f.filamentId)+" "+f.gram.toLocaleString("tr")+" g").join("  +  ")):null,
+        oz.bitisMs?h("div",{style:{fontSize:11.5,fontWeight:700,color:"var(--mut)",marginTop:3}},
+          "biter "+new Date(oz.bitisMs).toLocaleString("tr-TR",
+            {day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})):null,
+        /* 🧱 birden çok tabla peş peşe dizildiyse hepsinin toplamı */
+        oz.tabla>1?h("div",{style:{marginTop:8,paddingTop:8,borderTop:"1px solid var(--line)",
+          fontSize:13,fontWeight:800,color:"#166534"}},
+          "🧱 "+oz.tabla+" tabla toplamı · "+(oz.toplamAdet>0?(oz.toplamAdet+" "+birim+" · "):"")
+          +dkYaz(oz.toplamSureDk)
+          +(oz.toplamGram>0?(" · "+oz.toplamGram.toLocaleString("tr")+" gr"):"")):null,
+        /* birim değerler maliyet içindir — baskıda kullanılmaz */
+        (oz.adet>0&&(oz.birimDk>0||oz.birimGram>0))
+          ?h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut2)",marginTop:6}},
+            "birim (maliyet için): "+(oz.birimDk>0?(oz.birimDk.toLocaleString("tr")+" dk"):"")
+            +(oz.birimDk>0&&oz.birimGram>0?" · ":"")
+            +(oz.birimGram>0?(oz.birimGram.toLocaleString("tr")+" gr"):"")):null,
+        /* filament izlenmiyorsa ya da gram alanı dökümle tutmuyorsa uyar */
+        (!oz.fil.length&&!(num(gram)>0&&filamentId))
+          ?h("div",{style:{marginTop:8,padding:"8px 10px",borderRadius:10,
+            background:"#fff7ed",border:"1px solid #fdba74",fontSize:11.5,fontWeight:700,
+            color:"#9a3412",lineHeight:1.5}},
+            "⚠ Bu baskının filamenti izlenmiyor — makaradan düşmez, maliyete girmez.")
+          :null,
+        sapma?h("div",{style:{marginTop:8,padding:"8px 10px",borderRadius:10,
+          background:"#fff7ed",border:"1px solid #fdba74"}},
+          h("div",{style:{fontSize:11.5,fontWeight:800,color:"#9a3412",lineHeight:1.5}},
+            "⚠ Gram alanı "+num(gram).toLocaleString("tr")+" yazıyor, döküm "
+            +oz.dokumGram.toLocaleString("tr")+" gr — "
+            +"stoktan dökümdeki kadar düşer."),
+          h("button",{onClick:()=>setGram(String(oz.dokumGram)),
+            style:{marginTop:7,padding:"7px 12px",borderRadius:10,background:"#c2410c",
+              color:"#fff",fontSize:12,fontWeight:800}},
+            "Gram'ı "+oz.dokumGram.toLocaleString("tr")+" yap")):null); })(),
     h("button",{onClick:()=>setBas(toLoc(kuyrukSonuTam(makineId))),style:{width:"100%",padding:11,borderRadius:12,background:"var(--surf2)",border:"1px dashed var(--cyan)",color:"var(--cyan)",fontSize:12.5,fontWeight:800,marginBottom:otelenen.length?10:14}},"⏱ Kuyruk sonuna yerleştir"),
     /* 📥 araya giriyorsa sonraki planların ne kadar öteleneceği */
     otelenen.length?h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:14,
