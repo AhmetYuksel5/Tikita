@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L79";   // komuta (admin) deneme sürümü
+const SURUM="L80";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1353,6 +1353,19 @@ function filYuvaEsle(yuvalar,tarifFil){
     return {yuva:i,bos:false,filamentId:sl.filamentId,slot:sl,gram:k?k.gram:""}; });
   return {satirlar,eksik:kalan.filter(f=>!f.eslesti)
     .map(f=>({filamentId:f.filamentId,gram:f.gram}))};
+}
+/* 🔀 Makarayı yuvadan yuvaya taşı — sürükle-bırak bunu çağırır. Hedef doluysa
+   iki makara YER DEĞİŞTİRİR; boşsa taşınan oraya geçer, eski yuva boşalır. */
+function makaraTasi(yuvalar,kaynak,hedef){
+  const Y=(yuvalar||[]).slice(0,MAK_YUVA);
+  while(Y.length<MAK_YUVA) Y.push(null);
+  const a=Math.round(num(kaynak)), b=Math.round(num(hedef));
+  if(!(a>=0&&a<MAK_YUVA)||!(b>=0&&b<MAK_YUVA)||a===b) return null;
+  if(!Y[a]) return null;                       // boş yuva taşınmaz
+  const N=Y.slice();
+  N[b]={...Y[a],yuva:b};
+  N[a]=Y[b]?{...Y[b],yuva:a}:null;
+  return makaraYaz(N);
 }
 /* ⚖️ makinede duran makarayı tart: kalan gram elle girilir, harcama sıfırlanır */
 function makaraOlc(mk,yuva,gram,zaman){
@@ -3327,7 +3340,7 @@ function GecmisSheet({liste,makineler,filamentler,makineId,onSec,onClose}){
     L.length?null:h("div",{style:{padding:"22px 0",textAlign:"center",color:"var(--mut)",
       fontSize:13,fontWeight:700}},"Kayıt yok"));
 }
-function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,onMakaraTak,onMakaraCikar,onMakaraOlc,bekle,kayit,pre}){
+function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,onMakaraTak,onMakaraCikar,onMakaraOlc,onMakaraTasi,bekle,kayit,pre}){
   const duzen=!!(kayit&&kayit.id);
   const makList=(makineler||[]).filter(mk=>(mk.ad||"").trim());
   const [makineId,setMakineId]=useState(duzen?(kayit.makineId||""):((pre&&pre.makineId)||(makList[0]&&makList[0].id)||""));
@@ -3804,7 +3817,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
     gecmisAc?h(GecmisSheet,{liste:gecmisListe,makineler:makList,filamentler,makineId,
       onSec:gecmisUygula,onClose:()=>setGecmisAc(false)}):null,
     makaraAc&&seciliMak?h(MakaraSheet,{mk:seciliMak,plan,filamentler,bekle,
-      onTak:onMakaraTak,onCikar:onMakaraCikar,onOlc:onMakaraOlc,
+      onTak:onMakaraTak,onCikar:onMakaraCikar,onOlc:onMakaraOlc,onTasi:onMakaraTasi,
       onClose:()=>setMakaraAc(false)}):null);
 }
 
@@ -6085,10 +6098,28 @@ function MakineDuzenSheet({mk,filamentler,onKaydet,onSil,onMakara,bekle}){
 }
 /* 🧵 MAKARA — bir makinenin yuvaları. Depodan takılan makara depodan düşer;
    makinede zaten duran açık makara depoya hiç girmemiştir, kalanı da bilinmez. */
-function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onClose}){
+function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onTasi,onClose}){
   const [sec,setSec]=useState(-1);            // hangi yuvaya takılıyor
   const [ara,setAra]=useState("");
   const L=makYuvalar(mk);            // sabit 4 yuva — boş olan null
+  /* 🔀 SÜRÜKLE-BIRAK — ⠿ tutamağından tutup başka yuvaya bırak. Dokunmatikte
+     de çalışsın diye pointer olayları kullanılıyor; tutamakta touch-action
+     kapalı, yoksa parmak sayfayı kaydırırdı. */
+  const [surukle,setSurukle]=useState(null);   // {kaynak,hedef,y}
+  const satirRef=useRef([]);
+  const hedefBul=cy=>{ let h=-1;
+    satirRef.current.forEach((el,i)=>{ if(!el) return;
+      const r=el.getBoundingClientRect();
+      if(cy>=r.top&&cy<=r.bottom) h=i; });
+    return h; };
+  const tutBasla=(i,e)=>{ if(bekle||!onTasi||!L[i]) return;
+    try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(x){}
+    setSurukle({kaynak:i,hedef:i,y:e.clientY}); };
+  const tutHareket=e=>{ if(!surukle) return;
+    const y=e.clientY; setSurukle(s=>s?{...s,y,hedef:hedefBul(y)}:s); };
+  const tutBirak=e=>{ const s2=surukle; setSurukle(null); if(!s2) return;
+    const hd=hedefBul(e.clientY);
+    if(hd>=0&&hd!==s2.kaynak&&onTasi) onTasi(mk,s2.kaynak,hd); };
   const fById=id=>(filamentler||[]).find(x=>x&&x.id===id)||null;
   const adi=f=>(flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?");
   /* 📅 üretim hattındaki plan bu makineden hangi filamentleri istiyor */
@@ -6108,11 +6139,24 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onClose}){
     const kalan=sl?makKalan(sl,f):null;
     const az=sl?makBitmek(sl,f):false;
     const ger=sl&&gerekli(sl.filamentId);
-    return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 11px",
+    const tasiniyor=!!surukle&&surukle.kaynak===i;
+    const hedefte=!!surukle&&surukle.hedef===i&&surukle.kaynak!==i;
+    return h("div",{key:i,ref:el=>{ satirRef.current[i]=el; },
+      "data-yuva":i,
+      style:{display:"flex",alignItems:"center",gap:9,padding:"10px 11px",
       borderRadius:12,marginBottom:7,
-      background:sl?(ger?"#f0fdf4":"var(--surf2)"):"var(--surf)",
-      border:"1px solid "+(az?"#fca5a5":(ger?"#86efac":"var(--line)")),
-      borderStyle:sl?"solid":"dashed"}},
+      background:hedefte?"#f3ecff":(sl?(ger?"#f0fdf4":"var(--surf2)"):"var(--surf)"),
+      border:"1px solid "+(hedefte?"#7c46e6":(az?"#fca5a5":(ger?"#86efac":"var(--line)"))),
+      borderStyle:(sl&&!hedefte)?"solid":(hedefte?"solid":"dashed"),
+      opacity:tasiniyor?.45:1,
+      transition:"background .12s,border-color .12s"}},
+      /* ⠿ tutamak — yalnız dolu yuvada; buradan tutulup taşınır */
+      (sl&&onTasi)?h("span",{onPointerDown:e=>tutBasla(i,e),
+        onPointerMove:tutHareket,onPointerUp:tutBirak,onPointerCancel:tutBirak,
+        title:"Tut ve başka yuvaya sürükle",
+        style:{width:22,flexShrink:0,textAlign:"center",fontSize:15,lineHeight:1,
+          fontWeight:800,color:tasiniyor?"#7c46e6":"var(--mut2)",cursor:"grab",
+          touchAction:"none",userSelect:"none"}},"⠿"):null,
       h("span",{style:{width:24,height:24,borderRadius:8,flexShrink:0,fontSize:11.5,
         fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",
         color:sl?"#fff":"var(--mut2)",background:sl?"#7c46e6":"var(--surf2)",
@@ -6154,6 +6198,8 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onClose}){
       eksik.map(x=>{ const f=fById(x.filamentId);
         return h("div",{key:x.filamentId,style:{fontSize:12,fontWeight:800,color:"#15803d",
           marginTop:2}},"🧵 "+(f?adi(f):"?")+" · "+Math.round(x.gram)+" g · "+x.is+" iş"); })):null,
+    onTasi?h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut2)",marginBottom:8}},
+      "⠿ tutamağından tutup makarayı başka yuvaya sürükleyebilirsin."):null,
     [0,1,2,3].slice(0,MAK_YUVA).map(yuva),
     sec>=0?h("div",{style:{marginTop:12,paddingTop:12,borderTop:"1.5px solid var(--line)"}},
       h("input",{value:ara,onChange:e=>setAra(e.target.value),placeholder:"filament ara",
@@ -9267,6 +9313,15 @@ function App(){
         takiliFilament:yeni.filter(Boolean).map(x=>x.filamentId)});
       say("⚖️ "+((f&&(flRenk(f)||flAd(f)))||"Makara")+" · "+(g/1000)+" kg stoğa yazıldı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  /* 🔀 makarayı yuvadan yuvaya taşı — hedef doluysa yer değiştirirler */
+  async function makaraTasiUygula(mk,kaynak,hedef){
+    if(!mk||!mk.id||isBekle) return;
+    const yeni=makaraTasi(makYuvalar(mk),kaynak,hedef); if(!yeni) return;
+    setIsBekle(true);
+    try{ await save("makineler",{id:mk.id,takiliMakara:yeni,
+        takiliFilament:yeni.filter(Boolean).map(x=>x.filamentId)});
+      say("🧵 "+(num(kaynak)+1)+". yuva → "+(num(hedef)+1)+". yuva"); }
+    catch(e){ console.error(e); say("Taşınamadı"); } finally{ setIsBekle(false); } }
   /* 🧵 makarayı çıkar — yarım kalan makara depoya geri sayılmaz, elde açık durur */
   /* 🧵 Makarayı çıkar. Hiç kullanılmamış kapalı makara DEPOYA geri sayılır;
      kalanı bilinen makara "elde açık makara" olarak stokta kalır; hiç ölçülmemiş
@@ -9707,6 +9762,7 @@ function App(){
     modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,filamentler,bekle:isBekle,
       onKaydet:isKaydet,onTarifKaydet:tarifHizliKaydet,
       onMakaraTak:makaraTak,onMakaraCikar:makaraCikar,onMakaraOlc:makaraOlcuAl,
+      onMakaraTasi:makaraTasiUygula,
       kayit:modal.kayit||null,pre:modal.pre||null}),
     modal&&modal.tip==="makineYonet"&&h(MakineYonetimSheet,{makineler,onClose:()=>setModal(null),onAc:setModal}),
     modal&&modal.tip==="makineDuzen"&&h(MakineDuzenSheet,{mk:(makineler||[]).find(x=>x&&modal.mk&&x.id===modal.mk.id)||modal.mk,filamentler,bekle:isBekle,onKaydet:makineKaydet,onSil:makineSil,
@@ -9714,7 +9770,7 @@ function App(){
     modal&&modal.tip==="filamentYonet"&&h(FilamentYonetimSheet,{filamentler,makineler,bekle:isBekle,onClose:()=>setModal(null),onAc:setModal,onKodla:filamentKodla,onStok:filamentStok}),
     modal&&modal.tip==="makara"&&h(MakaraSheet,{mk:(makineler||[]).find(x=>x&&x.id===modal.mkId)||modal.mk,
       plan,filamentler,bekle:isBekle,onTak:makaraTak,onCikar:makaraCikar,onOlc:makaraOlcuAl,
-      onClose:()=>setModal(null)}),
+      onTasi:makaraTasiUygula,onClose:()=>setModal(null)}),
     modal&&modal.tip==="filamentMarka"&&h(FilamentMarkaSheet,{marka:modal.marka,kod:modal.kod,
       filamentler,bekle:isBekle,onClose:()=>setModal(null),onKaydet:filamentMarkaKod}),
     modal&&modal.tip==="filamentDuzen"&&h(FilamentDuzenSheet,{fl:modal.fl,filamentler,bekle:isBekle,onKaydet:filamentKaydet,onSil:filamentSil,onAlim:f2=>setModal({tip:"filamentAlim",fl:f2})}),
