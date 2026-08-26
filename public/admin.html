@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L80";   // komuta (admin) deneme sürümü
+const SURUM="L81";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1344,15 +1344,67 @@ const makaraYaz=L=>{ const Y=new Array(MAK_YUVA).fill(null);
    Baskı planlarken yapılan tek iş bu: hangi yuvadan kaç gram gidecek.
    Hiçbir yuvaya düşmeyen tarif satırları "eksik" olarak döner. */
 function filYuvaEsle(yuvalar,tarifFil){
-  const kalan=(tarifFil||[]).filter(f=>f&&f.filamentId)
-    .map(f=>({filamentId:f.filamentId,gram:f.gram,eslesti:false}));
+  const L=(tarifFil||[]).map((f,ix)=>({...f,ix,eslesti:false}))
+    .filter(f=>f.filamentId||f.degisken);
+  const tutulan={};                                   // yuva → satır
+  /* 1) SABİT filamentler kendi yuvasına oturur */
+  L.filter(f=>!f.degisken&&f.filamentId).forEach(f=>{
+    const i=(yuvalar||[]).findIndex((sl,ix)=>sl&&!tutulan[ix]&&sl.filamentId===f.filamentId);
+    if(i>=0){ tutulan[i]=f; f.eslesti=true; } });
+  /* 2) DEĞİŞKEN roller: kendi seçtiği yuvaya, yoksa boşta kalan ilk dolu yuvaya */
+  const roller=L.filter(f=>f.degisken);
+  roller.forEach(f=>{ const y=Math.round(num(f.yuva));
+    if(f.yuva==null||!(y>=0)) return;
+    const sl=(yuvalar||[])[y];
+    if(sl&&!tutulan[y]){ tutulan[y]=f; f.eslesti=true; } });
+  /* yuva alanı YAZILMIŞSA (−1 dahil) kullanıcının seçimidir, kendiliğinden
+     başka yuvaya atlanmaz; yalnız hiç seçilmemiş roller yerleştirilir */
+  roller.forEach(f=>{ if(f.eslesti||f.yuva!=null) return;
+    const i=(yuvalar||[]).findIndex((sl,ix)=>sl&&!tutulan[ix]);
+    if(i>=0){ tutulan[i]=f; f.eslesti=true; } });
   const satirlar=(yuvalar||[]).map((sl,i)=>{
-    if(!sl) return {yuva:i,bos:true,filamentId:"",gram:"",slot:null};
-    const k=kalan.find(f=>!f.eslesti&&f.filamentId===sl.filamentId);
-    if(k) k.eslesti=true;
-    return {yuva:i,bos:false,filamentId:sl.filamentId,slot:sl,gram:k?k.gram:""}; });
-  return {satirlar,eksik:kalan.filter(f=>!f.eslesti)
-    .map(f=>({filamentId:f.filamentId,gram:f.gram}))};
+    const f=tutulan[i]||null;
+    if(!sl) return {yuva:i,bos:true,filamentId:"",gram:"",slot:null,ix:-1,rol:"",degisken:false};
+    return {yuva:i,bos:false,filamentId:sl.filamentId,slot:sl,
+      gram:f?f.gram:"",ix:f?f.ix:-1,rol:(f&&f.degisken)?(f.rol||"renk"):"",
+      degisken:!!(f&&f.degisken)}; });
+  return {satirlar,
+    roller:roller.map(f=>({ix:f.ix,rol:f.rol||"renk",gram:f.gram,eslesti:f.eslesti})),
+    eksik:L.filter(f=>!f.eslesti).map(f=>({ix:f.ix,filamentId:f.filamentId||"",
+      gram:f.gram,rol:f.degisken?(f.rol||"renk"):"",degisken:!!f.degisken}))};
+}
+/* tarifte bir renk yazılıysa ve o filament makinede duruyorsa rol o yuvaya oturur */
+function rolVarsayilan(mk,filamentId){
+  if(!filamentId) return null;
+  const i=makYuvalar(mk).findIndex(sl=>sl&&sl.filamentId===filamentId);
+  return i>=0?i:null;
+}
+/* yuvası belli olmayan rolleri, sabit filamentlerin tutmadığı ilk yuvalara diz */
+function rolYerlestir(mk,list){
+  const Y=makYuvalar(mk); const dolu={};
+  (list||[]).forEach(f=>{ if(f.degisken||!f.filamentId) return;
+    const i=Y.findIndex((sl,ix)=>sl&&!dolu[ix]&&sl.filamentId===f.filamentId);
+    if(i>=0) dolu[i]=1; });
+  (list||[]).forEach(f=>{ if(!f.degisken) return;
+    const y=Math.round(num(f.yuva));
+    if(f.yuva!=null&&y>=0&&Y[y]&&!dolu[y]){ dolu[y]=1; return; }
+    const i=Y.findIndex((sl,ix)=>sl&&!dolu[ix]);
+    f.yuva=i>=0?i:-1; if(i>=0) dolu[i]=1; });
+  return list||[];
+}
+/* 🎨 Kayda yazılırken değişken satır oturduğu YUVANIN filamentine bağlanır;
+   aynı filamente düşen satırlar tek kalemde toplanır. */
+function filListCoz(tarifFil,yuvalar){
+  const m={},sira=[];
+  (tarifFil||[]).forEach(f=>{ if(!f||!(num(f.gram)>0)) return;
+    let id=f.filamentId||"";
+    if(f.degisken){ const y=Math.round(num(f.yuva));
+      const sl=(f.yuva!=null&&y>=0)?((yuvalar||[])[y]||null):null;
+      id=sl?sl.filamentId:""; }
+    if(!id) return;
+    if(m[id]==null){ m[id]=num(f.gram); sira.push(id); }
+    else m[id]+=num(f.gram); });
+  return sira.map(id=>({filamentId:id,gram:Math.round(m[id]*10)/10}));
 }
 /* 🔀 Makarayı yuvadan yuvaya taşı — sürükle-bırak bunu çağırır. Hedef doluysa
    iki makara YER DEĞİŞTİRİR; boşsa taşınan oraya geçer, eski yuva boşalır. */
@@ -3237,8 +3289,11 @@ function urunBaskiTemel(u,plan,tur,parca,makineId,makineler){
     ?{kaynak:"tarif",yer:(T&&cz.kaynak===T)?"tur":"genel",tur:cz.kaynak,turAd:cz.kaynak,
       makineId:"",makineAd:"",tablaAdet:Math.max(1,num(cz.tablaAdet)||1),
       sureDk:Math.round(num(cz.sureDk)),
+      /* 🎨 değişken (opsiyonel renk) satırların rolü korunur — rengi baskı
+         planlanırken seçilir, tarifte sabit değildir */
       filament:(cz.filament||[]).filter(f=>f&&num(f.gram)>0)
-        .map(f=>({filamentId:f.filamentId||"",gram:Math.round(num(f.gram)*10)/10}))}
+        .map(f=>({filamentId:f.filamentId||"",gram:Math.round(num(f.gram)*10)/10,
+          degisken:!!f.degisken,rol:String(f.rol||"").trim()}))}
     :null;
   if(tarifSonuc&&tarifSonuc.yer==="tur") return tarifSonuc;
   const mkTur={},mkAd={};
@@ -3252,7 +3307,8 @@ function urunBaskiTemel(u,plan,tur,parca,makineId,makineler){
   const son=L[0];
   const sonSonuc=son?(()=>{
     const fl=(son.filList||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
-      .map(f=>({filamentId:f.filamentId,gram:Math.round(num(f.gram)*10)/10}));
+      .map(f=>({filamentId:f.filamentId,gram:Math.round(num(f.gram)*10)/10,
+        degisken:!!f.degisken,rol:String(f.rol||"").trim()}));
     const o=oncelik(son);
     return {kaynak:"sonBaski",yer:o===0?"makine":(o===1?"tip":"baska"),tur:"",
       turAd:mkTur[son.makineId]||"",makineId:son.makineId||"",makineAd:mkAd[son.makineId]||"",
@@ -3415,15 +3471,32 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
   /* 🧵 Bir filamente gram yazmak, o baskının O MAKARADAN ne kadar yiyeceğini
      söyler. Baskı bitince bu gram makaradan ve filament stoğundan kendiliğinden
      düşer. Gram silinirse o filament baskıdan çıkar. */
-  const filGramSet=(id,v)=>{ if(!id) return;
+  /* gram yazmak = "bu baskı O YUVADAN şu kadar yer". ix<0 ise yuvaya yeni bir
+     sabit satır açılır; boşaltmak satırı baskıdan çıkarır. */
+  const filGramSet=(ix,id,v)=>{
     setTarifFil(L=>{ const bos=String(v==null?"":v).trim()==="";
-      const i=L.findIndex(x=>x.filamentId===id);
-      if(bos){ const N=L.filter(x=>x.filamentId!==id);
-        setFilamentId(N.length?N[0].filamentId:""); return N; }
-      if(i<0){ const N=[...L,{filamentId:id,gram:v}]; setFilamentId(N[0].filamentId); return N; }
-      const N=L.slice(); N[i]={...N[i],gram:v}; return N; }); };
+      if(ix>=0&&ix<L.length){
+        if(bos&&!L[ix].degisken){ const N=L.filter((x,i)=>i!==ix);
+          setFilamentId((N.find(x=>x.filamentId)||{}).filamentId||""); return N; }
+        const N=L.slice(); N[ix]={...N[ix],gram:bos?"":v}; return N; }
+      if(bos||!id) return L;
+      const N=[...L,{filamentId:id,gram:v,degisken:false,rol:""}];
+      setFilamentId((N.find(x=>x.filamentId)||{}).filamentId||""); return N; }); };
+  /* 🎨 yuvaya dokun: o yuvadaki değişken rol sıradakine geçer (yok → 1 → 2 → yok).
+     Sabit filamentin oturduğu yuva değişmez — orası tarifçe belli. */
+  const rolCevir=yuvaNo=>setTarifFil(L=>{
+    const roller=L.map((f,i)=>({f,i})).filter(x=>x.f.degisken);
+    if(!roller.length) return L;
+    const suAn=roller.findIndex(x=>x.f.yuva!=null&&Math.round(num(x.f.yuva))===yuvaNo);
+    const sonraki=suAn<0?0:(suAn+1>=roller.length?-1:suAn+1);
+    const N=L.slice();
+    roller.forEach(x=>{ if(N[x.i].yuva!=null&&Math.round(num(N[x.i].yuva))===yuvaNo)
+      N[x.i]={...N[x.i],yuva:-1}; });   // −1 = bilerek yuvasız
+    if(sonraki>=0){ const x=roller[sonraki]; N[x.i]={...N[x.i],yuva:yuvaNo}; }
+    return N; });
   /* yuva satırları + hiçbir yuvaya düşmeyen tarif filamentleri */
   const filEsleme=filYuvaEsle(mkYuva,tarifFil);
+  const rolVar=(tarifFil||[]).some(f=>f&&f.degisken);
   /* Ürün seçilince seçili MAKİNENİN baskı bilgisi varsa alanlar kendiliğinden dolar.
      ⚠ Çok parçalı üründe parça seçilmezse baskiCoz BİR TAKIMIN ortalamasını verir —
      o bir tabla değil, bir ürünün payıdır. Baskıda işe yarayan tablanın kendisi
@@ -3442,15 +3515,21 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
     setTabla(1); setHedef("");
     if(pk){ setParcaSec([pk]); } else { setParcaSec([]); setParcaSayi({}); }
     if(varMi){
-      const L=(t.filament||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
-        .map(f=>({filamentId:f.filamentId,gram:Math.round(num(f.gram)*10)/10}));
+      /* 🎨 değişken satırlar filamentsiz de gelebilir — rengi burada seçilecek */
+      const ham=(t.filament||[]).filter(f=>f&&num(f.gram)>0&&(f.filamentId||f.degisken))
+        .map(f=>({filamentId:f.degisken?"":(f.filamentId||""),
+          gram:Math.round(num(f.gram)*10)/10,
+          degisken:!!f.degisken,rol:f.rol||"",
+          /* tarifte bir renk yazılıysa o filament makinede duruyorsa oraya otur */
+          yuva:f.degisken?rolVarsayilan(mk2,f.filamentId):null}));
+      const L=rolYerlestir(mk2,ham);
       const kap=Math.max(1,Math.round(num(t.tablaAdet)));
       if(pk){ /* tabladan ÇIKAN o parçadır; genel adet kaç takıma yettiğidir */
         setParcaSayi({[pk]:kap});
         setAdet(Math.max(1,Math.floor(kap/Math.max(1,gerekenP(u,pk)))));
       } else setAdet(kap);
       setSure(String(Math.round(num(t.sureDk))));
-      setTarifFil(L); setFilamentId(L.length?L[0].filamentId:"");
+      setTarifFil(L); setFilamentId((L.find(f=>f.filamentId)||{}).filamentId||"");
       setGram(String(Math.round(L.reduce((s2,f)=>s2+num(f.gram),0)*10)/10));
       setBilgiYok(false); setTarifeYaz(t.yer!=="tur");
     } else {
@@ -3557,8 +3636,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
     const temel={ makineId, ad:isAd, adet:adetOut, urunId:serbest?"":(urunId||""),
       parcaAd:pAd, parcaAdlar:pAdlar, parcaSayi:psOut,
       sureDk:num(sure), planSureDk:num(sure), gram:num(gram),
-      filamentId, filList:(tarifFil||[]).filter(f=>f&&f.filamentId&&num(f.gram)>0)
-        .map(f=>({filamentId:f.filamentId,gram:num(f.gram)})), ams, not:nott };
+      filamentId, filList:filListCoz(tarifFil,mkYuva), ams, not:nott };
     /* 🧱 ikinci ve sonraki tablalar — her biri bir öncekinin bittiği dakikada başlar */
     const N=Math.max(1,Math.round(num(tabla)||1)), seri=[];
     if(N>1&&num(sure)>0){ const parti="ps"+uid();
@@ -3675,8 +3753,10 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
         h("input",{type:"number",inputMode:"numeric",value:gram,onChange:e=>setGram(e.target.value),style:{...inpK(gram),padding:"13px 8px"}}))),
     /* 🧱 BU TABLA — baskıda işe yarayan ölçü. Tablanın toplam süresi ve toplam
        filament tüketimi; birim değerler yalnız maliyet için küçük yazıda. */
+    /* 🎨 özet, gerçekte stoktan düşecek liste üzerinden: değişken satırlar
+       oturdukları yuvanın filamentine çözülür */
     (()=>{ const oz=tablaOzet({adet:cikanAdet,sureDk:num(sure),gram:num(gram),
-        filament:tarifFil,tabla,basMs:bas?new Date(bas).getTime():0});
+        filament:filListCoz(tarifFil,mkYuva),tabla,basMs:bas?new Date(bas).getTime():0});
       const flAdi=id=>{ const f=(filamentler||[]).find(x=>x&&x.id===id);
         return f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?")):"?"; };
       if(!(oz.sureDk>0)&&!(oz.gram>0)) return null;
@@ -3743,47 +3823,59 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
         (seciliMak&&onMakaraTak)?h("button",{onClick:()=>setMakaraAc(true),
           style:{...GS.ibtn,fontSize:11.5,fontWeight:800,color:"var(--cyan)",padding:"5px 11px"}},
           "Değiştir"):null),
-      /* 1..4 sabit yuva — boş yuva da görünür ki adres şaşmasın */
+      /* 1..4 sabit yuva — boş yuva da görünür ki adres şaşmasın.
+         🎨 Değişken renk rolleri AYRI SATIR AÇMAZ: oturdukları yuvanın kendi
+         satırında rozet olarak durur, yuvaya dokununca sıradaki role geçer. */
       h("div",{style:{display:"grid",gap:7}},
         filEsleme.satirlar.map(r=>{ const fl=r.bos?null
             :((filamentler||[]).find(f=>f&&f.id===r.filamentId)||null);
           const k=r.bos?null:makKalan(r.slot,fl);
-          return h("div",{key:"y"+r.yuva,style:{display:"flex",alignItems:"center",gap:9,
+          const secilir=!r.bos&&rolVar&&!(r.ix>=0&&!r.degisken);
+          return h("div",{key:"y"+r.yuva,"data-yuva":r.yuva,
+            onClick:secilir?()=>rolCevir(r.yuva):undefined,
+            style:{display:"flex",alignItems:"center",gap:9,
             padding:"10px 11px",borderRadius:12,
-            background:r.bos?"var(--surf)":"var(--surf2)",
-            border:"1px "+(r.bos?"dashed":"solid")+" var(--line)"}},
+            background:r.bos?"var(--surf)":(r.degisken?"#fdf2fb":"var(--surf2)"),
+            border:"1px "+(r.bos?"dashed":"solid")+" "+(r.degisken?"#f0abd0":"var(--line)"),
+            cursor:secilir?"pointer":"default"}},
             h("span",{style:{width:24,height:24,borderRadius:8,flexShrink:0,fontSize:11.5,
               fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",
               color:r.bos?"var(--mut2)":"#fff",
-              background:r.bos?"transparent":"var(--cyan)",
-              border:"1px solid "+(r.bos?"var(--line)":"var(--cyan)")}},r.yuva+1),
+              background:r.bos?"transparent":(r.degisken?"#d1409a":"var(--cyan)"),
+              border:"1px solid "+(r.bos?"var(--line)":(r.degisken?"#d1409a":"var(--cyan)"))}},
+              r.yuva+1),
             h("div",{style:{flex:1,minWidth:0}},
               h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",
                 textOverflow:"ellipsis",whiteSpace:"nowrap",
                 color:r.bos?"var(--mut2)":"var(--txt)"}},
                 r.bos?"boş yuva":((flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?"))),
               r.bos?null:h("div",{style:{fontSize:10.5,fontWeight:700,marginTop:1,
-                color:"var(--mut)"}},
-                k!=null?("kalan ~"+Math.round(k)+" g"):"kalan ölçülmemiş")),
+                color:r.degisken?"#a21b73":"var(--mut)"}},
+                (r.degisken?("🎨 "+r.rol+" · "):(secilir?"dokun · renk ata · ":""))
+                +(k!=null?("kalan ~"+Math.round(k)+" g"):"kalan ölçülmemiş"))),
             r.bos?null:h("input",{type:"number",inputMode:"numeric",placeholder:"gr",
               value:(r.gram||r.gram===0)?r.gram:"",
-              onChange:e=>filGramSet(r.filamentId,e.target.value),
+              onClick:e=>e.stopPropagation(),
+              onChange:e=>filGramSet(r.ix,r.filamentId,e.target.value),
               style:{...inp,width:82,textAlign:"center",padding:"9px 4px",fontSize:14,
                 fontWeight:800}})); })),
-      /* tarifte var ama hiçbir yuvada yok — takılması gerekiyor */
+      /* tarifte var ama yuvaya oturmamış — sabit filament ya da renk atanmamış rol */
       filEsleme.eksik.length?h("div",{style:{marginTop:9,padding:"10px 11px",borderRadius:12,
         background:"#fff7ed",border:"1px solid #fdba74"}},
         h("div",{style:{fontSize:11.5,fontWeight:800,color:"#9a3412",marginBottom:5}},
-          "⚠ Yuvalarda olmayan filament — takılması gerekiyor"),
+          filEsleme.eksik.every(x=>x.degisken)
+            ?"🎨 Rengi seçilmedi — yuvaya dokunup ata"
+            :"⚠ Yuvalarda olmayan filament — takılması gerekiyor"),
         filEsleme.eksik.map(r=>{ const fl=(filamentler||[]).find(f=>f&&f.id===r.filamentId)||null;
-          return h("div",{key:r.filamentId,style:{display:"flex",alignItems:"center",gap:9,
+          return h("div",{key:"e"+r.ix,style:{display:"flex",alignItems:"center",gap:9,
             marginTop:5}},
             h("div",{style:{flex:1,minWidth:0,fontSize:12.5,fontWeight:800,color:"#9a3412",
               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-              (flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?")),
+              r.degisken?("🎨 "+r.rol)
+                :((flKod(fl)?flKod(fl)+" · ":"")+(fl?(flRenk(fl)||flAd(fl)):"?"))),
             h("input",{type:"number",inputMode:"numeric",placeholder:"gr",
               value:(r.gram||r.gram===0)?r.gram:"",
-              onChange:e=>filGramSet(r.filamentId,e.target.value),
+              onChange:e=>filGramSet(r.ix,r.filamentId,e.target.value),
               style:{...inp,width:82,textAlign:"center",padding:"8px 4px",fontSize:13.5,
                 fontWeight:800}})); })):null,
       h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut2)",marginTop:8,lineHeight:1.5}},
