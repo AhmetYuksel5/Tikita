@@ -5,9 +5,16 @@
    .env dosyasına koy; şifre hiçbir yere yazılmaz. */
 import readline from "node:readline/promises";
 import { girisDene, kodGonder, kodlaGir, tokenTazele, tokenCoz, cihazlar } from "./bulut.mjs";
+import { oturumYaz, kasaSifre } from "./oturum.mjs";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const sor = (s) => rl.question(s);
+
+async function sakla(d) {
+  if (!kasaSifre()) return;
+  await oturumYaz({ token: d.accessToken, refresh: d.refreshToken || "" });
+  console.log("# oturum şifreli olarak ayar/bambu içine yazıldı");
+}
 
 function yaz(d) {
   const t = d.accessToken || "";
@@ -23,7 +30,8 @@ try {
   if (process.argv.includes("--tazele")) {
     const r = process.env.BAMBU_REFRESH;
     if (!r) throw new Error("BAMBU_REFRESH tanımlı değil");
-    yaz(await tokenTazele(r));
+    const d = await tokenTazele(r);
+    yaz(d); await sakla(d);
     rl.close(); process.exit(0);
   }
 
@@ -51,7 +59,7 @@ try {
   }
   if (!d.accessToken) throw new Error("Token alınamadı — yanıt: " + JSON.stringify(d).slice(0, 200));
 
-  yaz(d);
+  yaz(d); await sakla(d);
   const L = await cihazlar(d.accessToken);
   console.log("\n── Hesaptaki yazıcılar ──");
   L.forEach((x) => console.log("  " + x.seri + "  " + x.ad + "  " + x.model

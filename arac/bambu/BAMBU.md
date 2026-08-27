@@ -2,48 +2,66 @@
 
 Yazıcılardaki AMS yuvalarında hangi filamentin durduğunu Bambu bulut hesabından
 okur, Tikita'daki makine kayıtlarına yazar. Atölyede hiçbir şey çalışmaz —
-internet olan her yerden koşar.
+internet olan her yerden koşar. **Telefondan, GitHub uygulaması üzerinden
+yönetilir; bilgisayar gerekmez.**
 
 ## Neden ayrı bir araç?
 
 Panel (admin.html) tarayıcıda çalışıyor. Bambu'nun makara bilgisi yalnız
 **MQTT over TLS** ile geliyor; tarayıcı bu bağlantıyı kuramaz, Bambu'nun REST
-ucu da CORS'a kapalı. Bu yüzden okuma işini Node.js yapıyor, sonucu Firestore'a
-yazıyor, panel her zamanki gibi Firestore'dan okuyor.
+ucu da CORS'a kapalı. Bu yüzden okuma işini GitHub Actions üzerinde Node.js
+yapıyor, sonucu Firestore'a yazıyor, panel her zamanki gibi Firestore'dan
+okuyor.
 
-## Bir kerelik kurulum
+## Bir kerelik kurulum — iki gizli anahtar
 
-```bash
-cd arac/bambu
-npm install
-node giris.mjs
-```
+Depo **herkese açık**. Bu yüzden e-posta, şifre ve token hiçbir zaman konuya,
+yoruma ya da günlüğe yazılmaz; ikisi de GitHub'ın gizli anahtarlarında durur.
 
-E-posta + şifre sorar. Bambu çoğu hesapta e-posta doğrulama kodu ister; şifreyi
-boş bırakırsan doğrudan kod yollar. Çıkan `BAMBU_TOKEN` (ve varsa
-`BAMBU_REFRESH`) satırlarını sakla. Şifre hiçbir yere yazılmaz.
+GitHub → depo → **Settings → Secrets and variables → Actions → New repository
+secret**, iki tane:
 
-`giris.mjs` sonunda hesaptaki yazıcıları seri numaralarıyla listeler.
+| ad | değer |
+| --- | --- |
+| `BAMBU_EPOSTA` | Bambu hesabının e-postası |
+| `BAMBU_SIFRE` | Bambu hesabının şifresi (aynı zamanda token kasasının anahtarı) |
+
+`BAMBU_SIFRE` iki iş görür: girişi dener ve saklanan token'ı şifreler. Sonradan
+değiştirirsen kasa açılmaz — yeniden `giriş` yazman gerekir.
+
+## Kullanım — GitHub konusu
+
+Başlığında **bambu** geçen bir konu (issue) aç. Bot yorumla cevap verir.
+
+| komut | ne yapar |
+| --- | --- |
+| `giriş` | Bambu hesabına bağlanır, gerekirse e-postana kod yollar |
+| `kod 123456` | Gelen kodu girer, bağlantıyı tamamlar (yorum hemen karartılır) |
+| `eşle` | Yazıcıları Tikita makineleriyle eşleştirir, `bambuSeri` yazar |
+| `çek` | Makaraları okur, **yalnız gösterir** — hiçbir şey yazmaz |
+| `yaz` | Okuduğunu Tikita'ya kaydeder |
+| `durum` | Bağlantı durumu ve komut listesi |
+
+Yalnız depo sahibinin yorumları işlenir; başkasının yorumu sessizce yok sayılır.
+
+Sıra: `giriş` → `kod ...` → `eşle` → `çek` (kontrol et) → `yaz`.
+
+## Token ne kadar dayanır
+
+Giriş bir kez yapılır. Token şifreli olarak Firestore'da `ayar/bambu` içinde
+durur (panel yalnız `ayar/genel` okuduğu için arayüzü etkilemez). Süresi
+yaklaşınca `refreshToken` ile kendiliğinden yenilenir. Büsbütün dolarsa bot
+"`giriş` ile yenile" der.
 
 ## Makineleri eşleştirme
 
-Araç, Bambu yazıcısını Tikita makinesiyle şu sırayla eşler:
+`eşle` şu sırayla bakar:
 
 1. makine kaydındaki `bambuSeri` alanı
 2. seri numarası makine adının içinde geçiyorsa
 3. makine adı ile yazıcı adı tutuyorsa
 
 Hiçbiri tutmazsa o yazıcı **atlanır** — yanlış makineye yazmaktansa hiç yazmaz.
-En sağlamı `bambuSeri` alanını bir kez doldurmak.
-
-## Çekme
-
-```bash
-BAMBU_TOKEN=... node cek.mjs --kuru    # yalnız göster, hiçbir şey yazma
-BAMBU_TOKEN=... node cek.mjs           # Firestore'a yaz
-```
-
-İlk seferde mutlaka `--kuru` ile çalıştır ve çıktıyı oku.
 
 ## Ne yazar, ne yazmaz
 
@@ -75,18 +93,22 @@ tanınır.
 
 `.github/workflows/bambu.yml` elle tetiklenir (Actions → Bambu makara çekimi →
 Run workflow). Düzenli çalışmasını istersen dosyadaki `schedule` satırlarının
-başındaki `#` işaretlerini kaldır. Gerekli secret: `BAMBU_TOKEN`.
+başındaki `#` işaretlerini kaldır. Kayıtlı oturumu kullanır; ek gizli anahtar
+istemez.
 
-## Token süresi
-
-Token'ın ömrü var; dolunca `cek.mjs` uyarır.
+## Bilgisayardan çalıştırmak (isteğe bağlı)
 
 ```bash
-BAMBU_REFRESH=... node giris.mjs --tazele
+cd arac/bambu && npm install
+BAMBU_SIFRE=... node cek.mjs --kuru    # yalnız göster
+BAMBU_SIFRE=... node cek.mjs           # Firestore'a yaz
+BAMBU_TOKEN=... node cek.mjs           # kasayı hiç kullanmadan
 ```
 
 ## Durum
 
-Ayrıştırma, eşleştirme ve tüketim izi mantığı testlerle doğrulandı. Bambu
-buluta bağlanan kısım (giriş, cihaz listesi, MQTT) **gerçek bir hesapla
-denenmedi** — ilk çalıştırmada `--kuru` ile başla.
+Ayrıştırma, eşleştirme, tüketim izi, kasa ve konu akışının tamamı testlerle
+doğrulandı (bulut ve Firestore sahnelenerek uçtan uca). Bambu'ya **gerçekten
+bağlanan** kısım (giriş, cihaz listesi, MQTT) hiçbir gerçek hesapla denenmedi —
+geliştirme ortamı `api.bambulab.com`'a çıkamıyor. İlk gerçek deneme GitHub
+Actions üzerinde olacak; bu yüzden `yaz` demeden önce mutlaka `çek` ile bak.

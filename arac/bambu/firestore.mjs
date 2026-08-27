@@ -53,6 +53,14 @@ export async function koleksiyon(ad) {
   return out;
 }
 
+/* tek belge — yoksa null */
+export async function belge(ad, id) {
+  const r = await fetch(KOK + "/" + ad + "/" + id + "?key=" + ANAHTAR);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error("Firestore okuma " + r.status + " — " + (await r.text()).slice(0, 200));
+  return fsBelge(await r.json());
+}
+
 /* yalnız verilen alanları günceller — belgenin öteki alanlarına dokunmaz */
 export async function guncelle(ad, id, alanlar) {
   const yollar = Object.keys(alanlar);
