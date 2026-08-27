@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L81";   // komuta (admin) deneme sürümü
+const SURUM="L82";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -3396,7 +3396,7 @@ function GecmisSheet({liste,makineler,filamentler,makineId,onSec,onClose}){
     L.length?null:h("div",{style:{padding:"22px 0",textAlign:"center",color:"var(--mut)",
       fontSize:13,fontWeight:700}},"Kayıt yok"));
 }
-function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,onMakaraTak,onMakaraCikar,onMakaraOlc,onMakaraTasi,bekle,kayit,pre}){
+function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,onMakaraTak,onMakaraCikar,onMakaraOlc,onMakaraTasi,onBambuBagla,bekle,kayit,pre}){
   const duzen=!!(kayit&&kayit.id);
   const makList=(makineler||[]).filter(mk=>(mk.ad||"").trim());
   const [makineId,setMakineId]=useState(duzen?(kayit.makineId||""):((pre&&pre.makineId)||(makList[0]&&makList[0].id)||""));
@@ -3910,7 +3910,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
       onSec:gecmisUygula,onClose:()=>setGecmisAc(false)}):null,
     makaraAc&&seciliMak?h(MakaraSheet,{mk:seciliMak,plan,filamentler,bekle,
       onTak:onMakaraTak,onCikar:onMakaraCikar,onOlc:onMakaraOlc,onTasi:onMakaraTasi,
-      onClose:()=>setMakaraAc(false)}):null);
+      onBambuBagla:onBambuBagla,onClose:()=>setMakaraAc(false)}):null);
 }
 
 // 💸 GİDER KALEMLERİ — kira, elektrik, maaş, montaj işçiliği… Tikita hesabında net kârdan düşülür
@@ -6190,9 +6190,14 @@ function MakineDuzenSheet({mk,filamentler,onKaydet,onSil,onMakara,bekle}){
 }
 /* 🧵 MAKARA — bir makinenin yuvaları. Depodan takılan makara depodan düşer;
    makinede zaten duran açık makara depoya hiç girmemiştir, kalanı da bilinmez. */
-function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onTasi,onClose}){
+function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onTasi,onBambuBagla,onClose}){
   const [sec,setSec]=useState(-1);            // hangi yuvaya takılıyor
   const [ara,setAra]=useState("");
+  /* 🔗 Bambu'dan gelen ama Tikita'da tanınmayan makaralar. Bir kez bağlanınca
+     filamente bambuKod yazılır; sonraki çekimlerde kendiliğinden tanınır. */
+  const [bagla,setBagla]=useState(null);      // {yuva,tur,renkHex,marka,uuid}
+  const bambuEks=(mk&&Array.isArray(mk.bambuEslesmeyen))?mk.bambuEslesmeyen.filter(Boolean):[];
+  const bambuTarih=(mk&&mk.bambuTarih)?new Date(mk.bambuTarih):null;
   const L=makYuvalar(mk);            // sabit 4 yuva — boş olan null
   /* 🔀 SÜRÜKLE-BIRAK — ⠿ tutamağından tutup başka yuvaya bırak. Dokunmatikte
      de çalışsın diye pointer olayları kullanılıyor; tutamakta touch-action
@@ -6282,7 +6287,29 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onTasi,onClo
           sec===i?"filament seç ↓":"＋ Makara tak")); };
   return h(Sheet,{ik:"🧵",hex:"#7c46e6",baslik:"Makaralar · "+((mk&&mk.ad)||""),
     alt:L.filter(Boolean).length+" / "+MAK_YUVA+" yuva dolu"
-      +(eksik.length?(" · "+eksik.length+" makara takılmalı"):""),onClose,cta:"Kapat",onCta:onClose},
+      +(eksik.length?(" · "+eksik.length+" makara takılmalı"):"")
+      +(bambuTarih?(" · 🔗 "+bambuTarih.toLocaleString("tr-TR",
+        {day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})):""),
+    onClose,cta:"Kapat",onCta:onClose},
+    /* 🔗 tanınmayan makaralar — dokun, hangi filament olduğunu bir kez söyle */
+    bambuEks.length?h("div",{style:{padding:"10px 12px",borderRadius:12,marginBottom:12,
+      background:"#fff7ed",border:"1px solid #fdba74"}},
+      h("div",{style:{fontSize:12,fontWeight:800,color:"#9a3412",marginBottom:6}},
+        "🔗 Bambu'dan gelen "+bambuEks.length+" makara tanınmadı"),
+      bambuEks.map((x,i)=>h("button",{key:"b"+i,onClick:()=>{ setBagla(x); setSec(-1); setAra(""); },
+        disabled:bekle,
+        style:{display:"flex",alignItems:"center",gap:9,width:"100%",textAlign:"left",
+          padding:"9px 10px",borderRadius:11,marginTop:5,background:"#fff",
+          border:"1px solid "+((bagla&&bagla===x)?"#c2410c":"#fed7aa")}},
+        h("span",{style:{width:20,height:20,borderRadius:6,flexShrink:0,
+          background:x.renkHex?("#"+x.renkHex):"var(--surf2)",
+          border:"1px solid var(--line)"}}),
+        h("span",{style:{flex:1,minWidth:0,fontSize:12.5,fontWeight:800,color:"#9a3412",
+          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+          (num(x.yuva)+1)+". yuva · "+(x.marka||x.tur||"?")
+          +(x.renkHex?(" #"+x.renkHex):"")),
+        h("span",{style:{fontSize:12,color:"#c2410c",fontWeight:800,flexShrink:0}},
+          (bagla&&bagla===x)?"seç ↓":"bağla")))):null,
     eksik.length?h("div",{style:{padding:"10px 12px",borderRadius:12,background:"#f0fdf4",
       border:"1px solid #86efac",marginBottom:12}},
       h("div",{style:{fontSize:12,fontWeight:800,color:"#166534",marginBottom:5}},
@@ -6293,7 +6320,10 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onTasi,onClo
     onTasi?h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut2)",marginBottom:8}},
       "⠿ tutamağından tutup makarayı başka yuvaya sürükleyebilirsin."):null,
     [0,1,2,3].slice(0,MAK_YUVA).map(yuva),
-    sec>=0?h("div",{style:{marginTop:12,paddingTop:12,borderTop:"1.5px solid var(--line)"}},
+    (sec>=0||bagla)?h("div",{style:{marginTop:12,paddingTop:12,borderTop:"1.5px solid var(--line)"}},
+      bagla?h("div",{style:{fontSize:12,fontWeight:800,color:"#9a3412",marginBottom:8}},
+        "🔗 "+(bagla.marka||bagla.tur||"Makara")+(bagla.renkHex?(" #"+bagla.renkHex):"")
+        +" hangi filament?"):null,
       h("input",{value:ara,onChange:e=>setAra(e.target.value),placeholder:"filament ara",
         style:{...inp,marginBottom:10}}),
       flList.length?flList.slice(0,40).map(f=>{ const dp=flMakara(f); const ger=gerekli(f.id);
@@ -6310,20 +6340,26 @@ function MakaraSheet({mk,plan,filamentler,bekle,onTak,onCikar,onOlc,onTasi,onClo
               +"depoda "+dp+" makara · "+Math.round(flRuloGram(f))+" g"
               +(flAcikGram(f)>0?(" · açık "+flAcikMakara(f)+" makara "
                 +(Math.round(flAcikGram(f))/1000).toLocaleString("tr")+" kg"):""))),
-          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"depo"); },
-            disabled:bekle||dp<=0,
-            style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,opacity:dp>0?1:.35,
-              background:dp>0?"#7c46e6":"#fff",color:dp>0?"#fff":"var(--mut)",
-              borderColor:dp>0?"#7c46e6":"var(--line)"}},"📦 Depodan"),
-          flAcikGram(f)>0?h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"acik"); },
-            disabled:bekle,
+          /* bağlama kipinde tek düğme: bu makara BU filament */
+          bagla?h("button",{onClick:()=>{ const b2=bagla; setBagla(null); setAra("");
+              onBambuBagla&&onBambuBagla(mk,b2,f.id); },disabled:bekle,
             style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,
-              color:"#166534",borderColor:"#86efac",background:"#f0fdf4"}},
-            "🧵 Açıktan"):null,
-          h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"elde"); },
-            disabled:bekle,
-            style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,
-              color:"#9a3412",borderColor:"#fed7aa"}},"🧵 Zaten takılı")); })
+              background:"#c2410c",color:"#fff",borderColor:"#c2410c"}},"🔗 Bu")
+          :h(React.Fragment,null,
+            h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"depo"); },
+              disabled:bekle||dp<=0,
+              style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,opacity:dp>0?1:.35,
+                background:dp>0?"#7c46e6":"#fff",color:dp>0?"#fff":"var(--mut)",
+                borderColor:dp>0?"#7c46e6":"var(--line)"}},"📦 Depodan"),
+            flAcikGram(f)>0?h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"acik"); },
+              disabled:bekle,
+              style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,
+                color:"#166534",borderColor:"#86efac",background:"#f0fdf4"}},
+              "🧵 Açıktan"):null,
+            h("button",{onClick:()=>{ setSec(-1); setAra(""); onTak(mk,sec,f.id,"elde"); },
+              disabled:bekle,
+              style:{...GS.ibtn,flexShrink:0,fontSize:11.5,fontWeight:800,
+                color:"#9a3412",borderColor:"#fed7aa"}},"🧵 Zaten takılı"))); })
         :h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",
           fontSize:12.5,fontWeight:700}},"Filament yok")):null);
 }
@@ -9405,6 +9441,25 @@ function App(){
         takiliFilament:yeni.filter(Boolean).map(x=>x.filamentId)});
       say("⚖️ "+((f&&(flRenk(f)||flAd(f)))||"Makara")+" · "+(g/1000)+" kg stoğa yazıldı"); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  /* 🔗 Bambu'dan tanınmayan makarayı bir filamente bağla. Filamente bambuKod
+     (tür|renk) yazılır — bir daha sorulmaz. RFID okunduysa makaranın kendi
+     kimliği de eklenir, o zaman renk değişse bile tanınır. */
+  async function bambuBagla(mk,eks,filamentId){
+    if(!mk||!mk.id||!eks||!filamentId||isBekle) return; setIsBekle(true);
+    try{
+      const kod=String(eks.tur||"").toUpperCase()+"|"+String(eks.renkHex||"").toUpperCase();
+      const fl=(filamentler||[]).find(x=>x&&x.id===filamentId)||null;
+      const yz={bambuKod:kod};
+      if(eks.uuid){ const eskiU=String((fl&&fl.bambuUuid)||"").toUpperCase()
+          .split(/[,\s]+/).filter(Boolean);
+        if(eskiU.indexOf(String(eks.uuid).toUpperCase())<0)
+          yz.bambuUuid=eskiU.concat([String(eks.uuid).toUpperCase()]).join(","); }
+      await save("filament",{id:filamentId,...yz});
+      const kalan=(Array.isArray(mk.bambuEslesmeyen)?mk.bambuEslesmeyen:[])
+        .filter(x=>x&&num(x.yuva)!==num(eks.yuva));
+      await save("makineler",{id:mk.id,bambuEslesmeyen:kalan});
+      say("🔗 "+((fl&&(flRenk(fl)||flAd(fl)))||"Filament")+" bağlandı · sonraki çekimde tanınır"); }
+    catch(e){ console.error(e); say("Bağlanamadı"); } finally{ setIsBekle(false); } }
   /* 🔀 makarayı yuvadan yuvaya taşı — hedef doluysa yer değiştirirler */
   async function makaraTasiUygula(mk,kaynak,hedef){
     if(!mk||!mk.id||isBekle) return;
@@ -9854,7 +9909,7 @@ function App(){
     modal&&modal.tip==="isEkle"&&h(IsEkleSheet,{makineler,urunler,plan,filamentler,bekle:isBekle,
       onKaydet:isKaydet,onTarifKaydet:tarifHizliKaydet,
       onMakaraTak:makaraTak,onMakaraCikar:makaraCikar,onMakaraOlc:makaraOlcuAl,
-      onMakaraTasi:makaraTasiUygula,
+      onMakaraTasi:makaraTasiUygula,onBambuBagla:bambuBagla,
       kayit:modal.kayit||null,pre:modal.pre||null}),
     modal&&modal.tip==="makineYonet"&&h(MakineYonetimSheet,{makineler,onClose:()=>setModal(null),onAc:setModal}),
     modal&&modal.tip==="makineDuzen"&&h(MakineDuzenSheet,{mk:(makineler||[]).find(x=>x&&modal.mk&&x.id===modal.mk.id)||modal.mk,filamentler,bekle:isBekle,onKaydet:makineKaydet,onSil:makineSil,
@@ -9862,7 +9917,7 @@ function App(){
     modal&&modal.tip==="filamentYonet"&&h(FilamentYonetimSheet,{filamentler,makineler,bekle:isBekle,onClose:()=>setModal(null),onAc:setModal,onKodla:filamentKodla,onStok:filamentStok}),
     modal&&modal.tip==="makara"&&h(MakaraSheet,{mk:(makineler||[]).find(x=>x&&x.id===modal.mkId)||modal.mk,
       plan,filamentler,bekle:isBekle,onTak:makaraTak,onCikar:makaraCikar,onOlc:makaraOlcuAl,
-      onTasi:makaraTasiUygula,onClose:()=>setModal(null)}),
+      onTasi:makaraTasiUygula,onBambuBagla:bambuBagla,onClose:()=>setModal(null)}),
     modal&&modal.tip==="filamentMarka"&&h(FilamentMarkaSheet,{marka:modal.marka,kod:modal.kod,
       filamentler,bekle:isBekle,onClose:()=>setModal(null),onKaydet:filamentMarkaKod}),
     modal&&modal.tip==="filamentDuzen"&&h(FilamentDuzenSheet,{fl:modal.fl,filamentler,bekle:isBekle,onKaydet:filamentKaydet,onSil:filamentSil,onAlim:f2=>setModal({tip:"filamentAlim",fl:f2})}),
