@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L82";   // komuta (admin) deneme sürümü
+const SURUM="L84";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -3262,13 +3262,18 @@ const BASKI_YER_SIRA={tur:0,makine:1,tip:2,genel:3,baska:4};
 function baskiTemelYaz(t,tur){
   if(!t) return "";
   const y=t.yer||(t.kaynak==="tarif"?"tur":"baska");
+  const ek=t.filYer==="tarif"?" · gram tariften":"";
   if(y==="tur") return "kayıtlı tarif · "+(t.turAd||tur||"");
   if(y==="genel") return t.turAd==="ortalama"?"tarif tahmini — bu türe yazılmamış"
     :(t.turAd==="varsayılan"?"varsayılan tarif":("tarif · "+(t.turAd||"")));
-  if(y==="makine") return "bu makinenin son baskısı";
-  if(y==="tip") return "aynı tür makinenin son baskısı"+(t.makineAd?(" · "+t.makineAd):"");
-  return "başka makinenin son baskısı"+(t.makineAd?(" · "+t.makineAd):"");
+  if(y==="makine") return "bu makinenin son baskısı"+ek;
+  if(y==="tip") return "aynı tür makinenin son baskısı"+(t.makineAd?(" · "+t.makineAd):"")+ek;
+  return "başka makinenin son baskısı"+(t.makineAd?(" · "+t.makineAd):"")+ek;
 }
+/* İş planla formu kendiliğinden dolar mı? Tarif — bu türe yazılmış ya da değil —
+   kullanıcının kendi girdisidir, her hâlükârda doldurur. Yalnız "başka makinenin
+   son baskısı" dışarıda kalır; o ne tarif ne de bu makinenin ölçümüdür. */
+const baskiTemelDolu=t=>!!t&&BASKI_YER_SIRA[t.yer]<=3;
 /* Baskı bilgisi SEÇİLİ MAKİNEYE göre çekilir. Sıra:
      1) tarifin bu makine türüne yazılmış bloğu
      2) tam bu makinede yapılmış son baskı
@@ -3317,10 +3322,22 @@ function urunBaskiTemel(u,plan,tur,parca,makineId,makineler){
       filament:fl.length?fl:((son.filamentId&&num(son.gram)>0)
         ?[{filamentId:son.filamentId,gram:Math.round(num(son.gram)*10)/10}]:[]),
       tarih:son.gercekBaslangic||son.baslangic}; })():null;
-  /* bu makinede ya da aynı türde GERÇEK baskı varsa, tür dışı tarif tahmininden
+  /* 🧵 Gram makineye bağlı değildir — aynı model, aynı dilimleme, aynı tüketim.
+     Değişen süredir. Bu yüzden tarifte filament yazılıysa gram HER ZAMAN
+     tariften gelir; süre ve tabla adedi makineye göre seçilen kaynakta kalır.
+     Tarifin tablası farklıysa gram o tablaya oranlanır. Böylece geçmiş baskının
+     tek kaleme toplanmış gramı, tarifteki renk renk dökümün yerini almaz. */
+  const gramTariften=k=>{
+    if(!k||!tarifSonuc||!tarifSonuc.filament.length) return k;
+    const o=Math.max(1,num(k.tablaAdet))/Math.max(1,num(tarifSonuc.tablaAdet));
+    const fl=tarifSonuc.filament.map(f=>({...f,gram:Math.round(f.gram*o*10)/10}))
+      .filter(f=>f.gram>0);
+    return fl.length?{...k,filament:fl,filYer:"tarif"}:k;
+  };
+  /* bu makinede ya da aynı türde GERÇEK baskı varsa süresi tarif tahmininden
      daha güvenilirdir — o yüzden tarifin önüne geçer */
-  if(sonSonuc&&(sonSonuc.yer==="makine"||sonSonuc.yer==="tip")) return sonSonuc;
-  return tarifSonuc||sonSonuc;
+  if(sonSonuc&&(sonSonuc.yer==="makine"||sonSonuc.yer==="tip")) return gramTariften(sonSonuc);
+  return tarifSonuc||gramTariften(sonSonuc);
 }
 /* seçilen düzeni ürünün baskiBilgi'sine yazacak nesneyi kurar — var olan
    tarifi EZMEZ, yalnız o makine türünün (ve varsa o parçanın) bloğunu tazeler */
@@ -3351,7 +3368,7 @@ function UrunSecSheet({urunler,plan,makine,makineler,onSec,onSerbest,onClose}){
     h("input",{value:q,onChange:e=>setQ(e.target.value),autoFocus:true,placeholder:"ara",
       style:{...inp,fontSize:15,fontWeight:600,marginBottom:10}}),
     L.map(u=>{ const t=urunBaskiTemel(u,plan,tur,"",mkId,makineler);
-      const hazir=!!t&&BASKI_YER_SIRA[t.yer]<=2;
+      const hazir=baskiTemelDolu(t);
       return h("button",{key:u.id,onClick:()=>onSec(u.id),
         style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",
           padding:"13px 12px",borderRadius:11,marginBottom:6,background:"var(--surf2)",
@@ -3511,7 +3528,7 @@ function IsEkleSheet({makineler,urunler,plan,filamentler,onKaydet,onTarifKaydet,
     const mk2=makList.find(x=>x.id===mkId)||null;
     const pk=String(parca||"").trim()||ilkParca(u);
     const t=u?urunBaskiTemel(u,plan,makTur(mk2),pk,mkId,makList):null;
-    const varMi=!!t&&BASKI_YER_SIRA[t.yer]<=2;   // tarif · bu makine · aynı tür
+    const varMi=baskiTemelDolu(t);   // tarif (tür içi ya da dışı) · bu makine · aynı tür
     setTabla(1); setHedef("");
     if(pk){ setParcaSec([pk]); } else { setParcaSec([]); setParcaSayi({}); }
     if(varMi){
