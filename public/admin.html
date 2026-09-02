@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L84";   // komuta (admin) deneme sürümü
+const SURUM="L85";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -518,6 +518,81 @@ function verisOf(u,uid){ const m=(u&&u.pazFiyatK)||{}; const v=num(uid?m[uid]:0)
 function plParcaKatki(p,u){ const parcalar=(u&&u.parcalar)||[]; const cov=plParcalari(p,parcalar); const ad=Math.max(0,num(p.adet||1));
   const ps=p.parcaSayi||null; const m={};
   cov.forEach(pt=>{ const v=ps?num(ps[pt]):0; m[pt]=(ps&&v>0)?v:ad*gerekenP(u,pt); }); return m; }
+/* ————— 📦 KASA — tabladan çıkanın durduğu fiziksel kap —————
+   Tabla toplanınca çıkan parçalar bir kasaya girer, kasa montajcıya verilir.
+   Kasa parça stoğunu ÇOĞALTMAZ; yalnız "hangi parça nerede" der. Toplam parça
+   sayımı eskisi gibi baskılardan türer.
+   İçerik kasa_hareket satırlarından toplanır: adet + ise kasaya girdi, − ise çıktı. */
+const kasaAnahtar=(urunId,parca)=>String(urunId||"")+"|"+String(parca||"").trim();
+/* bir kasanın içindekiler — [{urunId,urunAd,parca,adet}] , adet>0 */
+function kasaIcerik(hareketler,kasaId){
+  const m={};
+  (hareketler||[]).forEach(x=>{ if(!x||x.kasaId!==kasaId||!x.urunId) return;
+    const k=kasaAnahtar(x.urunId,x.parca);
+    const o=m[k]||(m[k]={urunId:x.urunId,urunAd:x.urunAd||"",parca:String(x.parca||"").trim(),adet:0});
+    if(x.urunAd) o.urunAd=x.urunAd;
+    o.adet+=num(x.adet); });
+  return Object.values(m).filter(x=>Math.round(x.adet)>0)
+    .map(x=>({...x,adet:Math.round(x.adet)}))
+    .sort((a,b)=>(a.urunAd||"").localeCompare(b.urunAd||"","tr")||(a.parca||"").localeCompare(b.parca||"","tr"));
+}
+/* içeriği ürün ürün topla — kaç tam takım çıkar, hangi parça eksik */
+function kasaUrunler(icerik,urunler){
+  const uById={}; (urunler||[]).forEach(u=>{ if(u&&u.id) uById[u.id]=u; });
+  const m={};
+  (icerik||[]).forEach(x=>{ const o=m[x.urunId]||(m[x.urunId]={urunId:x.urunId,
+    urunAd:x.urunAd||(uById[x.urunId]&&uById[x.urunId].ad)||"",u:uById[x.urunId]||null,
+    parcalar:{},toplam:0,tekli:0});
+    if(x.parca) o.parcalar[x.parca]=num(o.parcalar[x.parca])+x.adet; else o.tekli+=x.adet;
+    o.toplam+=x.adet; });
+  return Object.values(m).map(o=>{
+    const pr=(o.u&&o.u.parcalar)||[];
+    /* parçalı ürün: en az bulunan parça kaç takıma yeter. Ürün kartında parça
+       tanımlı değilse ya da kasaya parçasız girmişse adedin kendisi takımdır. */
+    const takim=(pr.length&&Object.keys(o.parcalar).length)
+      ? Math.min.apply(null,pr.map(pt=>Math.floor(num(o.parcalar[pt])/gerekenP(o.u,pt))))
+      : Math.floor(o.tekli);
+    const eksik=pr.length?pr.filter(pt=>Math.floor(num(o.parcalar[pt])/gerekenP(o.u,pt))<=takim
+      &&num(o.parcalar[pt])<(takim+1)*gerekenP(o.u,pt)):[];
+    return {...o,parcali:pr.length>0&&Object.keys(o.parcalar).length>0,
+      takim:Math.max(0,takim),eksik,ucret:num(o.u&&o.u.montajUcret)};
+  }).sort((a,b)=>b.toplam-a.toplam);
+}
+/* kasa listesi için tek satırlık özet */
+function kasaOzet(icerik){
+  const ad=(icerik||[]).reduce((s,x)=>s+num(x.adet),0);
+  const ces=new Set((icerik||[]).map(x=>x.urunId)).size;
+  if(!ad) return "boş";
+  return ces+" çeşit · "+ad+" parça";
+}
+/* toplanan tabladan kasaya girecek satırlar */
+function tablaKasaSatir(p,u){
+  const pr=(u&&u.parcalar)||[];
+  const ad=Math.max(0,Math.round(num(p&&p.adet)));
+  if(!pr.length||!plParcalari(p,pr).length){
+    return ad>0?[{urunId:p.urunId,urunAd:(u&&u.ad)||p.ad||"",parca:"",adet:ad}]:[];
+  }
+  const kk=plParcaKatki(p,u);
+  return Object.keys(kk).map(pt=>({urunId:p.urunId,urunAd:(u&&u.ad)||p.ad||"",
+    parca:pt,adet:Math.round(num(kk[pt]))})).filter(x=>x.adet>0);
+}
+/* kasayı montajcıya verirken: hangi görevler açılacak, kasadan ne düşecek.
+   Tam takım çıkmayan ürün görev açmaz — artan parçalar kasada kalır. */
+function kasaDevir(icerik,urunler){
+  const U=kasaUrunler(icerik,urunler);
+  const gorevler=[],dusum=[],bekleyen=[];
+  U.forEach(o=>{
+    if(!(o.takim>0)){ bekleyen.push({urunId:o.urunId,urunAd:o.urunAd,sebep:"takım tamamlanmadı"}); return; }
+    gorevler.push({urunId:o.urunId,urunAd:o.urunAd,adet:o.takim,birimUcret:o.ucret,
+      ucretYok:!(o.ucret>0),tutar:o.takim*o.ucret});
+    if(o.parcali) (o.u.parcalar||[]).forEach(pt=>dusum.push({urunId:o.urunId,urunAd:o.urunAd,
+      parca:pt,adet:o.takim*gerekenP(o.u,pt)}));
+    else dusum.push({urunId:o.urunId,urunAd:o.urunAd,parca:"",adet:o.takim});
+  });
+  return {gorevler,dusum,bekleyen,
+    tutar:gorevler.reduce((s,g)=>s+num(g.tutar),0),
+    ucretsiz:gorevler.filter(g=>g.ucretYok).length};
+}
 /* ————— 🖨 TEK TABLA BASKI BİLGİSİ — ürüne sabitlenen tarif —————
    Ürünün bir tablada kaç adet çıktığı MAKİNE TÜRÜNE GÖRE ayrı tutulur: aynı
    üründe hem baskı süresi hem filament tüketimi makineden makineye değişiyor.
@@ -2448,6 +2523,107 @@ function Sheet({ik,hex,baslik,alt,onClose,children,cta,onCta,disabled,basEk}){
       cta&&h("button",{onClick:disabled?null:onCta,disabled,style:{width:"100%",padding:16,borderRadius:16,marginTop:20,
         background:disabled?"var(--line)":"linear-gradient(90deg,"+hex+","+hex+"cc)",color:disabled?"var(--mut2)":"#fff",
         fontSize:16.5,fontWeight:800,boxShadow:disabled?"none":"0 8px 20px "+hex+"44"}},cta)));
+}
+/* 📦 TABLA TOPLA — hangi kasaya girsin. Kasa isteğe bağlı; seçmeden de toplanır. */
+function TablaKasaSheet({L,kasalar,bekle,onTopla,onYeniKasa,onClose}){
+  const acik=(kasalar||[]).filter(k=>k&&!k.arsiv&&k.durum!=="montajda");
+  const son=(()=>{ try{ return localStorage.getItem("tk_kasa")||""; }catch(e){ return ""; } })();
+  const [sec,setSec]=useState(()=>acik.some(k=>k.id===son)?son:(acik[0]?acik[0].id:""));
+  const satir=(id,ad,alt)=>h("button",{key:id||"yok",onClick:()=>setSec(id),
+    style:{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"12px 13px",borderRadius:13,marginBottom:8,
+      background:sec===id?"#eff6ff":"var(--surf2)",border:"1.5px solid "+(sec===id?"#3b82f6":"var(--line)"),textAlign:"left"}},
+    h("div",{style:{width:20,height:20,borderRadius:"50%",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",
+      background:sec===id?"#3b82f6":"transparent",border:"2px solid "+(sec===id?"#3b82f6":"var(--mut2)"),color:"#fff",fontSize:12,fontWeight:800}},sec===id?"✓":""),
+    h("div",{style:{minWidth:0,flex:1}},
+      h("div",{style:{fontSize:14,fontWeight:800}},ad),
+      alt?h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:1}},alt):null));
+  return h(Sheet,{ik:"🧹",hex:"#fb8c00",baslik:L.length>1?(L.length+" tabla topla"):"Tabla topla",
+      alt:L.slice(0,3).map(x=>x.ad||"baskı").join(" · ")+(L.length>3?(" +"+(L.length-3)):""),
+      onClose,cta:bekle?"…":"Topla",onCta:()=>onTopla(sec),disabled:bekle},
+    h("div",{className:"lbl",style:{marginBottom:8}},"Hangi kasaya"),
+    acik.map(k=>satir(k.id,k.ad||"Kasa",k.durum==="montajda"?"montajda":"")),
+    satir("","Kasasız","kasaya girmesin"),
+    h("button",{onClick:onYeniKasa,style:{width:"100%",padding:11,borderRadius:12,marginTop:4,
+      background:"var(--surf2)",border:"1px dashed var(--cyan)",color:"var(--cyan)",fontSize:12.5,fontWeight:800}},"+ Yeni kasa"));
+}
+/* 📦 KASALAR — atölyedeki kapların sayımı */
+function KasaSheet({kasalar,kasaHar,urunler,ekip,bekle,onAc,onYeni,onClose}){
+  const L=(kasalar||[]).filter(k=>k&&!k.arsiv);
+  return h(Sheet,{ik:"📦",hex:"#0e8fce",baslik:"Kasalar",alt:L.length+" kasa",onClose},
+    L.length?L.map(k=>{ const ic=kasaIcerik(kasaHar,k.id);
+      const U=kasaUrunler(ic,urunler);
+      const takim=U.reduce((s,x)=>s+num(x.takim),0);
+      return h("button",{key:k.id,onClick:()=>onAc(k),
+        style:{width:"100%",...GS.card,padding:"13px 14px",marginBottom:9,textAlign:"left",display:"block"}},
+        h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:4}},
+          h("div",{style:{fontSize:15,fontWeight:800,flex:1,minWidth:0}},k.ad||"Kasa"),
+          k.durum==="montajda"?h("span",{style:{fontSize:10.5,fontWeight:800,color:"#7a3e00",
+            background:"#ffe2b8",borderRadius:6,padding:"3px 7px"}},"🔧 "+(k.montajciAd||"montajda")):null),
+        h("div",{style:{fontSize:12,color:"var(--mut)"}},kasaOzet(ic)
+          +(takim>0?(" · "+takim+" takım hazır"):"")),
+        ic.length?h("div",{style:{fontSize:11.5,color:"var(--mut2)",marginTop:3,overflow:"hidden",
+          textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+          ic.slice(0,4).map(x=>(x.urunAd||"?")+(x.parca?(" "+x.parca):"")+" ×"+x.adet).join(" · ")
+          +(ic.length>4?(" +"+(ic.length-4)):"")):null); })
+      :h("div",{style:{fontSize:13,color:"var(--mut)",padding:"14px 0"}},"Henüz kasa yok."),
+    h("button",{onClick:onYeni,style:{width:"100%",padding:12,borderRadius:12,marginTop:4,
+      background:"var(--surf2)",border:"1px dashed var(--cyan)",color:"var(--cyan)",fontSize:13,fontWeight:800}},"+ Yeni kasa"));
+}
+/* 📦 tek kasanın içi — sayım, montajcıya ver, geri al */
+function KasaDetaySheet({kasa,kasaHar,urunler,ekip,bekle,onDevret,onGeriAl,onDuzelt,onClose}){
+  const ic=kasaIcerik(kasaHar,kasa.id);
+  const U=kasaUrunler(ic,urunler);
+  const plan=kasaDevir(ic,urunler);
+  const [ver,setVer]=useState(false);
+  /* kasa el değiştirdiği anda "kime verilecek" sayfası kapanır */
+  useEffect(()=>{ setVer(false); },[kasa.durum]);
+  const montajcilar=(ekip||[]).filter(u=>u&&u.rol==="montaj"&&!u.arsiv&&!u.demo);
+  const uAd=id=>{ const u=(urunler||[]).find(x=>x&&x.id===id); return (u&&u.ad)||id; };
+  /* sayım tutmuyorsa: satıra dokun, gerçek adedi yaz */
+  const say2=(o,parca,mevcut)=>{ const v=prompt((o.urunAd||"")+(parca?(" · "+parca):"")+" — kasada kaç adet var?",
+      String(Math.round(num(mevcut))));
+    if(v==null||v==="") return;
+    onDuzelt(kasa,{urunId:o.urunId,urunAd:o.urunAd,parca,adet:Math.round(num(mevcut))},num(v)); };
+  if(ver) return h(Sheet,{ik:"🔧",hex:"#7c3aed",baslik:"Kime verilecek?",
+      alt:plan.gorevler.length+" görev"+(plan.tutar>0?(" · "+tl(plan.tutar)):""),onClose:()=>setVer(false)},
+    plan.gorevler.map(g=>h("div",{key:g.urunId,style:{display:"flex",alignItems:"center",gap:8,
+        padding:"9px 11px",borderRadius:11,background:"var(--surf2)",marginBottom:7}},
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800}},g.urunAd),
+        h("div",{style:{fontSize:11.5,color:g.ucretYok?"#b45309":"var(--mut)",marginTop:1}},
+          g.adet+" adet · "+(g.ucretYok?"⚠ ürün kartında montaj ücreti yok":(tl(g.birimUcret)+"/ad")))),
+      h("div",{style:{fontSize:13,fontWeight:800,color:"var(--gold)"}},g.tutar>0?tl(g.tutar):"—"))),
+    plan.bekleyen.length?h("div",{style:{fontSize:11.5,color:"var(--mut)",marginTop:6,marginBottom:4}},
+      plan.bekleyen.map(x=>x.urunAd).join(", ")+" · takım tamamlanmadı, kasada kalıyor"):null,
+    h("div",{className:"lbl",style:{margin:"14px 0 8px"}},"Montajcı"),
+    montajcilar.length?montajcilar.map(u=>h("button",{key:u.id,onClick:()=>onDevret(kasa,u),disabled:bekle,
+      style:{width:"100%",padding:"13px 14px",borderRadius:13,marginBottom:8,textAlign:"left",
+        background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800}},
+      (u.simge||"🔧")+" "+(u.ad||"")))
+      :h("div",{style:{fontSize:12.5,color:"var(--mut)"}},"Montaj rolünde kullanıcı yok."));
+  return h(Sheet,{ik:"📦",hex:"#0e8fce",baslik:kasa.ad||"Kasa",
+      alt:kasaOzet(ic)+(kasa.durum==="montajda"?(" · 🔧 "+(kasa.montajciAd||"montajda")):""),onClose},
+    ic.length?U.map(o=>h("div",{key:o.urunId,style:{...GS.card,padding:"12px 13px",marginBottom:9}},
+      h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:o.parcali?6:0}},
+        h("div",{style:{fontSize:14.5,fontWeight:800,flex:1,minWidth:0}},o.urunAd||uAd(o.urunId)),
+        h("div",{style:{fontSize:12.5,fontWeight:800,color:o.takim>0?"#16a34a":"var(--mut2)"}},
+          o.takim>0?(o.takim+" takım"):"takım yok")),
+      o.parcali?h("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},
+        Object.keys(o.parcalar).map(pt=>h("button",{key:pt,onClick:()=>say2(o,pt,o.parcalar[pt]),
+          style:{fontSize:11.5,fontWeight:700,
+          padding:"4px 8px",borderRadius:8,background:o.eksik.includes(pt)?"#fff5f5":"var(--surf2)",
+          color:o.eksik.includes(pt)?"#b91c1c":"var(--mut)",border:"1px solid "+(o.eksik.includes(pt)?"#fca5a5":"var(--line)")}},
+          pt+" ×"+Math.round(o.parcalar[pt]))))
+        :h("button",{onClick:()=>say2(o,"",o.tekli),style:{fontSize:11.5,color:"var(--mut)",
+          fontWeight:700,padding:"4px 8px",borderRadius:8,background:"var(--surf2)",border:"1px solid var(--line)"}},
+          Math.round(o.tekli)+" adet")))
+      :h("div",{style:{fontSize:13,color:"var(--mut)",padding:"14px 0"}},"Kasa boş."),
+    kasa.durum==="montajda"
+      ?h("button",{onClick:()=>onGeriAl(kasa),disabled:bekle,style:{width:"100%",padding:14,borderRadius:14,marginTop:8,
+        background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800}},"↩ Atölyeye döndü")
+      :(plan.gorevler.length?h("button",{onClick:()=>setVer(true),disabled:bekle,style:{width:"100%",padding:15,borderRadius:15,marginTop:8,
+        background:"linear-gradient(90deg,#7c3aed,#7c3aedcc)",color:"#fff",fontSize:15.5,fontWeight:800}},
+        "🔧 Montajcıya ver · "+plan.gorevler.reduce((s,g)=>s+g.adet,0)+" adet"):null));
 }
 function Stat({ik,v,l,renk,onClick}){ const inner=[
   h("div",{key:"i",style:{fontSize:16,marginBottom:5}},ik),
@@ -5573,7 +5749,7 @@ function PlanlamaAraci({d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}){
         setSec(o=>({...o,[id]:L.reduce((s2,v)=>s2+Math.max(0,Math.round(num(v.adet))),0)}));
         setRenkAc(null); }}):null);
 }
-function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeriAl,onMakineTemizle,bekle,fotoMap}){
+function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeriAl,onMakineTemizle,bekle,fotoMap,kasalar,kasaHar}){
   const GERI_MS=4*3600*1000;   // üretim hattı her zaman 4 saat geriden başlar
   const gunBasi=t=>{ const d2=new Date(t); d2.setHours(0,0,0,0); return d2.getTime(); };
   const [bas,setBas]=useState(()=>gunBasi(Date.now()-GERI_MS));
@@ -5757,10 +5933,16 @@ function Uretim({d,plan,makineler,filamentler,ac,onTabla,onFilAta,onAktar,onGeri
   const filsizUrun=(()=>{ const m={}; filsizTarif.forEach(p=>{
       const k=(p.ad||"?")+(p.parcaAd?(" · "+p.parcaAd):""); m[k]=(m[k]||0)+1; });
     return Object.entries(m).sort((a,b)=>b[1]-a[1]); })();
+  /* 📦 içinde bir şey olan atölye kasası sayısı — sekme rozetinde çıkar */
+  const kasaBek=(kasalar||[]).filter(k=>k&&!k.arsiv&&kasaIcerik(kasaHar,k.id).length).length;
   const sekmeBtn=(k,lbl)=>h("button",{onClick:()=>setArac(k),style:{flex:1,padding:"11px 8px",borderRadius:12,fontSize:13.5,fontWeight:800,
     background:arac===k?"#1b1e25":"var(--surf2)",color:arac===k?"#fff":"var(--mut)",border:"1px solid "+(arac===k?"#1b1e25":GC.line)}},lbl);
   const sekmeler=h("div",{style:{display:"flex",gap:8,marginBottom:14}},
-    sekmeBtn("plan","📅 Üretim hattı"),sekmeBtn("planlama","🧮 Planlama"));
+    sekmeBtn("plan","📅 Üretim hattı"),sekmeBtn("planlama","🧮 Planlama"),
+    h("button",{onClick:()=>ac({tip:"kasalar"}),title:"Kasalar",
+      style:{flexShrink:0,padding:"11px 13px",borderRadius:12,fontSize:14,fontWeight:800,
+        background:"var(--surf2)",color:"var(--mut)",border:"1px solid "+GC.line}},
+      "📦"+(kasaBek>0?(" "+kasaBek):"")));
   if(arac==="planlama") return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
     sekmeler,h(PlanlamaAraci,{d,plan,makineler,filamentler,onAktar,onGeriAl,bekle}));
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 12px 84px"}},
@@ -9056,6 +9238,8 @@ function App(){
   const filamentler=useColl("filament");
   const sarflar=useColl("sarf");   // 🧵 sarf malzemesi (anahtarlık halkası, zincir, mıknatıs…)
   const montajGorev=useColl("montaj_gorev");   // 🔧 montaj personeli görevleri
+  const kasalar=useColl("kasa");               // 📦 tabladan çıkanın durduğu kaplar
+  const kasaHar=useColl("kasa_hareket");       // 📦 kasa giriş/çıkış defteri
   const giderler=useColl("gider");   // 💸 tek seferlik gider kalemleri
   const sabitGider=useColl("sabit_gider");   // 🔁 aylık sabit giderler (kira, internet…)
   const hakedisDonem=useColl("hakedis_donem");   // 🫰 pazarlamacı haftalık hakediş dönemleri
@@ -9798,15 +9982,33 @@ function App(){
       setModal(null);
       say((bek.length?(bek.length+" tabla toplandı · "):"")+"▶Başladı · "+(x.p.ad||"iş")); }
     catch(e){ console.error(e); say("Başlatılamadı"); } }
-  async function tablaTopla(p){ const L=(Array.isArray(p)?p:[p]).filter(x=>x&&x.id);
+  /* 📦 Kasa tanımlıysa hangi kasaya gireceği sorulur; hiç kasa yoksa eski
+     tek dokunuşluk akış sürer — kasa isteğe bağlıdır. */
+  function tablaTopla(p){ const L=(Array.isArray(p)?p:[p]).filter(x=>x&&x.id);
     if(!L.length||isBekle) return;
+    if((kasalar||[]).some(k=>k&&!k.arsiv&&k.durum!=="montajda")) return setModal({tip:"tablaKasa",L});
     const msj=L.length>1
       ?("🧹 "+L.length+" tabla toplandı olarak işaretlensin mi?\n"
         +L.slice(0,6).map(x=>"• "+(x.ad||"baskı")).join("\n")+(L.length>6?("\n• +"+(L.length-6)+" daha"):""))
       :("🧹 "+(L[0].ad||"baskı")+" tablası toplandı olarak işaretlensin mi?");
     if(!confirm(msj)) return;
+    tablaToplaUygula(L,""); }
+  async function tablaToplaUygula(L,kasaId){
+    if(!L||!L.length||isBekle) return;
+    const kasa=(kasalar||[]).find(k=>k&&k.id===kasaId)||null;
     setIsBekle(true);
-    try{ for(const x of L) await save("plan",{id:x.id,tablaAlindi:true});
+    try{ for(const x of L){
+        await save("plan",{id:x.id,tablaAlindi:true,
+          ...(kasa?{kasaId:kasa.id,kasaAd:kasa.ad||""}:{})});
+        if(!kasa) continue;
+        const u=(urunler||[]).find(y=>y&&y.id===x.urunId)||null;
+        for(const s of tablaKasaSatir(x,u))
+          await save("kasa_hareket",{id:uid(),kasaId:kasa.id,kasaAd:kasa.ad||"",
+            urunId:s.urunId,urunAd:s.urunAd,parca:s.parca,adet:s.adet,
+            sebep:"tablaTopla",planId:x.id,kullaniciAd:"Komuta",
+            tarih:new Date().toISOString()});
+      }
+      if(kasa) try{ localStorage.setItem("tk_kasa",kasa.id); }catch(e){}
       setModal(null);
       /* 🔄 tabla toplanınca o makinede sırada hangi filamentin takılması gerektiğini söyle —
          planlama sırasında makinede takılı olmayan filament seçilmiş olabilir */
@@ -9816,8 +10018,57 @@ function App(){
         return f?((flKod(f)?flKod(f)+" ":"")+(flRenk(f)||flAd(f)||"?")):"?"; };
       const not=eksik.length?(" · 🔄 takılmalı: "+eksik.slice(0,2).map(x=>flAdi(x.filamentId)).join(", ")
         +(eksik.length>2?(" +"+(eksik.length-2)):"")):"";
-      say((L.length>1?(L.length+" tabla toplandı"):("Tabla toplandı · "+(L[0].ad||"iş")))+not); }
+      say((L.length>1?(L.length+" tabla toplandı"):("Tabla toplandı · "+(L[0].ad||"iş")))
+        +(kasa?(" · 📦 "+(kasa.ad||"kasa")):"")+not); }
     catch(e){ console.error(e); say("İşlenemedi"); } finally{ setIsBekle(false); } }
+  function kasaEkle(){ const ad=prompt("Kasa adı","Kasa "+(((kasalar||[]).filter(k=>k&&!k.arsiv).length)+1));
+    if(ad==null||!ad.trim()) return; kasaKaydet({ad:ad.trim()}); }
+  /* 📦 yeni kasa · ad değiştir · arşivle */
+  async function kasaKaydet(k){ if(isBekle||!k) return; setIsBekle(true);
+    try{ await save("kasa",{id:k.id||uid(),ad:(k.ad||"").trim()||"Kasa",
+        durum:k.durum||"atolye",arsiv:!!k.arsiv,
+        ...(k.id?{}:{tarih:new Date().toISOString()})});
+      say(k.id?"Kasa güncellendi":"📦 Kasa eklendi"); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  /* 📦 kasayı montajcıya ver — içerikten tam takımlar için görev açar,
+     verilen parçalar kasadan düşer, artanlar kasada kalır */
+  async function kasaDevret(kasa,kisi){ if(isBekle||!kasa||!kisi) return;
+    const icerik=kasaIcerik(kasaHar,kasa.id);
+    const r=kasaDevir(icerik,urunler);
+    if(!r.gorevler.length) return say("Kasadan tam takım çıkmıyor");
+    setIsBekle(true);
+    const now=new Date().toISOString();
+    try{ await AUD.op(async()=>{
+        for(const g of r.gorevler)
+          await save("montaj_gorev",{id:uid(),urunId:g.urunId,urunAd:g.urunAd,
+            adet:g.adet,birimUcret:g.birimUcret,kullaniciId:kisi.id,kullaniciAd:kisi.ad||"",
+            durum:"acik",odendi:false,kasaId:kasa.id,kasaAd:kasa.ad||"",not:"",tarih:now});
+        for(const x of r.dusum)
+          await save("kasa_hareket",{id:uid(),kasaId:kasa.id,kasaAd:kasa.ad||"",
+            urunId:x.urunId,urunAd:x.urunAd,parca:x.parca,adet:-Math.abs(x.adet),
+            sebep:"montajaVer",montajciId:kisi.id,kullaniciAd:"Komuta",tarih:now});
+        await save("kasa",{id:kasa.id,durum:"montajda",montajciId:kisi.id,
+          montajciAd:kisi.ad||"",verilisTarih:now});
+      },"kasa","📦 Kasa montajcıya verildi");
+      setModal({tip:"kasa",k:{...kasa,durum:"montajda",montajciAd:kisi.ad||""}});
+      say("📦 "+(kasa.ad||"Kasa")+" → "+(kisi.ad||"montajcı")+" · "+r.gorevler.length+" görev"
+        +(r.tutar>0?(" · "+tl(r.tutar)):"")); }
+    catch(e){ console.error(e); say("Verilemedi"); } finally{ setIsBekle(false); } }
+  /* 📦 kasa atölyeye döndü */
+  async function kasaGeriAl(kasa){ if(isBekle||!kasa) return; setIsBekle(true);
+    try{ await save("kasa",{id:kasa.id,durum:"atolye",montajciId:"",montajciAd:"",verilisTarih:""});
+      say("📦 "+(kasa.ad||"Kasa")+" atölyeye döndü"); }
+    catch(e){ console.error(e); say("İşlenemedi"); } finally{ setIsBekle(false); } }
+  /* 📦 elle düzeltme — sayım tutmadığında */
+  async function kasaDuzelt(kasa,satir,yeniAdet){ if(isBekle||!kasa||!satir) return;
+    const fark=Math.round(num(yeniAdet))-Math.round(num(satir.adet));
+    if(!fark) return;
+    setIsBekle(true);
+    try{ await save("kasa_hareket",{id:uid(),kasaId:kasa.id,kasaAd:kasa.ad||"",
+        urunId:satir.urunId,urunAd:satir.urunAd,parca:satir.parca,adet:fark,
+        sebep:"elle",kullaniciAd:"Komuta",tarih:new Date().toISOString()});
+      say("📦 Sayım düzeltildi · "+(fark>0?"+":"")+fark); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   const [silinen,setSilinen]=useState(null); const silT=useRef(null);
   /* 🔀 tablayı başka makineye taşı — kaynak makinede açılan delik kapanır */
   async function isTasi(p2,hedefId){ if(!p2||!p2.id||!hedefId||isBekle) return;
@@ -9894,7 +10145,7 @@ function App(){
   let ekran;
   const gorunen=bandci?"uretim":view;
   if(gorunen==="us") ekran=h(Us,{d,ac:setModal,hareketler,go,talepler,onTalep:(t)=>setModal({tip:"talep",t}),onMesaj:()=>setModal({tip:"mesaj"}),onTalepSil:talepSil});
-  else if(gorunen==="uretim") ekran=h(Uretim,{d,plan,makineler,filamentler,ac:setModal,onTabla:tablaTopla,fotoMap,
+  else if(gorunen==="uretim") ekran=h(Uretim,{d,plan,makineler,filamentler,ac:setModal,onTabla:tablaTopla,fotoMap,kasalar,kasaHar,
     bekle:isBekle,onAktar:planAktar,onGeriAl:planGeriAl,onMakineTemizle:makinePlanTemizle,
     onFilAta:async(ids,fid)=>{ for(const id of ids){ await save("plan",{id,filamentId:fid}); }
       say(ids.length+" baskıya filament atandı"); }});
@@ -10029,6 +10280,14 @@ function App(){
     modal&&modal.tip==="komutaAyar"&&h(KomutaAyarSheet,{ad:((kullanicilar||[]).find(u=>u.id===BEN_ID)||{}).ad,gorunum,onGorunum:gorunumTog,onSifre:sifremiDegistir,
       onYedek:()=>yedekAl(false),onFotoYedek:()=>yedekAl(true),onKayit:()=>setModal({tip:"kayit"}),yedekGun:sonYedekGun(),yedekMesgul,onClose:()=>setModal(null)}),
     modal&&modal.tip==="kayit"&&h(KayitSheet,{say,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="tablaKasa"&&h(TablaKasaSheet,{L:modal.L,kasalar,bekle:isBekle,
+      onTopla:k=>tablaToplaUygula(modal.L,k),onYeniKasa:kasaEkle,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="kasalar"&&h(KasaSheet,{kasalar,kasaHar,urunler,ekip:kullanicilar,bekle:isBekle,
+      onAc:k=>setModal({tip:"kasa",k}),onYeni:kasaEkle,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="kasa"&&(()=>{ const k=(kasalar||[]).find(x=>x&&x.id===modal.k.id)||modal.k;
+      return h(KasaDetaySheet,{kasa:k,kasaHar,urunler,ekip:kullanicilar,bekle:isBekle,
+        onDevret:kasaDevret,onGeriAl:kasaGeriAl,onDuzelt:kasaDuzelt,
+        onClose:()=>setModal({tip:"kasalar"})}); })(),
     modal&&modal.tip==="yazismalar"&&h(YazismalarSheet,{talepler,kullanicilar,onAc:t=>setModal({tip:"talep",t}),onClose:()=>setModal(null)}),
     modal&&modal.tip==="uyariStok"&&h(StokUyariSheet,{d,onClose:()=>setModal(null),onGit:()=>{ setModal(null); go("stok"); }}),
     modal&&modal.tip==="uyariAlacak"&&h(AlacakUyariSheet,{d,onClose:()=>setModal(null),onGit:()=>{ setModal(null); go("rapor"); }}),

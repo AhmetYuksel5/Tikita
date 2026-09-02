@@ -82,7 +82,7 @@ const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo,useRef}=React; const h=React.createElement;
-const SURUM="M7";
+const SURUM="M8";
 let REAL_ID=null; try{ REAL_ID=localStorage.getItem("tk_uid"); }catch(e){}
 let AS_ID=null; try{ AS_ID=new URLSearchParams(location.search).get("as")||null; }catch(e){}   // 👁 yönetici görünümü
 let BEN_ID=AS_ID||REAL_ID;
@@ -207,6 +207,14 @@ function App(){
       adet+=num(g.teslimAdet); if(g.odendi) odenen+=t; else bekleyen+=t; });
     return {bekleyen,odenen,adet}; },[benim]);
 
+  /* 📦 henüz teslim etmediğim işleri geldikleri kasaya göre topla */
+  const kasalarim=useMemo(()=>{ const m={};
+    benim.forEach(g=>{ if(g.durum==="teslim"||!g.kasaAd) return;
+      const o=m[g.kasaAd]||(m[g.kasaAd]={ad:g.kasaAd,satir:[],tutar:0});
+      const ad=g.durum==="alindi"?num(g.alinanAdet):num(g.adet);
+      o.satir.push({ad:g.urunAd||"?",adet:ad});
+      o.tutar+=ad*num(g.birimUcret); });
+    return Object.values(m); },[benim]);
   const acik=benim.filter(g=>g.durum!=="alindi"&&g.durum!=="teslim");
   const montajda=benim.filter(g=>g.durum==="alindi");
   const biten=benim.filter(g=>g.durum==="teslim");
@@ -288,6 +296,16 @@ function App(){
       h(Stat,{v:String(montajda.reduce((s,g)=>s+num(g.alinanAdet),0)),l:"elimdeki adet",renk:"var(--cyan)"}),
       h(Stat,{v:String(hak.adet),l:"teslim ettiğim toplam",renk:"var(--txt)"})),
 
+    /* 📦 elimdeki kasalar — hangi kasadan ne aldım, karşılığı ne */
+    kasalarim.length?h("div",{style:{display:"grid",gap:8,marginBottom:16}},kasalarim.map(k=>
+      h("div",{key:k.ad,className:"card",style:{padding:"12px 14px"}},
+        h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:5}},
+          h("div",{style:{flex:1,minWidth:0,fontSize:14.5,fontWeight:800}},"📦 "+k.ad),
+          h("div",{style:{fontSize:13.5,fontWeight:800,color:"var(--gold)"}},tlk(k.tutar))),
+        h("div",{style:{fontSize:11.5,color:"var(--mut)",fontWeight:700}},
+          k.satir.map(x=>x.ad+" ×"+x.adet).join(" · ")))))
+      :null,
+
     h("div",{style:{display:"flex",gap:8,marginBottom:14}},
       sekmeBtn("acik","Bekleyen",acik.length),
       sekmeBtn("montajda","Montajda",montajda.length),
@@ -306,6 +324,8 @@ function App(){
         h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}},
           h("div",{style:{flex:1,minWidth:0,fontSize:16,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.urunAd||"?"),
           h("span",{style:{fontSize:11,fontWeight:800,color:d.renk,background:d.bg,border:"1px solid "+d.bd,padding:"3px 9px",borderRadius:9,flexShrink:0}},d.ad)),
+        /* 📦 iş hangi kasadan geldi — atölyeden aldığın kap */
+        g.kasaAd?h("div",{style:{fontSize:11.5,fontWeight:800,color:"var(--cyan)",marginBottom:6}},"📦 "+g.kasaAd):null,
         h("div",{style:{display:"flex",flexWrap:"wrap",gap:"3px 12px",fontSize:12,color:"var(--mut)",fontWeight:700,marginBottom:10}},
           h("span",null,"istenen "+istenen+" ad"),
           alinan>0?h("span",null,"alınan "+alinan+" ad"):null,
