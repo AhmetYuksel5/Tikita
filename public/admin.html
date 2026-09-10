@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L85";   // komuta (admin) deneme sürümü
+const SURUM="L86";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1934,6 +1934,103 @@ function tabloCanvas(bolumler,baslik,altBaslik,belge){
     y+=ARA; });
   return cv;
 }
+/* ————— 📔 KATALOG —————
+   Seçilen ürünlerden fotoğraflı bir seçki üretir. Yerleşim burada hesaplanır
+   (saf), çizim katalogCanvas'ta, dosyaya dökme pdfKur/pngIndir'de. */
+const KAT_SAYFA={g:1240,y:1754};          // A4 · 150 dpi
+const KAT_PAD=54, KAT_ARA=20, KAT_BAS=124, KAT_ALT=52;
+
+/* bir kartın yazıları — ürün kaydından okunur */
+function katalogKart(u,secenek){
+  const o=secenek||{};
+  const fy=o.fiyat==="paz"?num(u&&u.pazFiyat):(o.fiyat==="yok"?0:num(u&&u.satisFiyat));
+  const alt=[];
+  const kod=String((u&&u.kod)||"").trim();
+  if(kod) alt.push("Stok kodu: "+kod);
+  const mt=String((u&&u.materyal)||"").trim()||o.materyal||"";
+  if(mt) alt.push("Materyal: "+mt);
+  return {ad:String((u&&u.ad)||"").trim()||"—",alt,
+    fiyat:(o.fiyat==="yok"||!(fy>0))?"":(fy.toLocaleString("tr-TR")+" TL")};
+}
+/* ürünleri sayfalara ve kutulara böler — hiçbir şey çizmez */
+function katalogDuzen(secili,secenek){
+  const o=secenek||{};
+  const sutun=Math.max(1,Math.min(4,Math.round(num(o.sutun))||3));
+  const W=KAT_SAYFA.g,H=KAT_SAYFA.y;
+  const kg=Math.floor((W-KAT_PAD*2-KAT_ARA*(sutun-1))/sutun);
+  const metinH=o.fiyat==="yok"?86:118;
+  const alan=H-KAT_PAD-KAT_BAS-KAT_ALT-KAT_PAD;
+  /* Kaç satır sığdığı en KISA kabul edilebilir karta göre bulunur; sonra artan
+     boşluk görsele dağıtılır — sayfanın altında boş bant kalmaz. */
+  const enAzKart=Math.round(kg*0.52)+metinH;
+  const satir=Math.max(1,Math.floor((alan+KAT_ARA)/(enAzKart+KAT_ARA)));
+  const kartH=Math.floor((alan-(satir-1)*KAT_ARA)/satir);
+  const gorselH=kartH-metinH;
+  const sayfaBoyut=sutun*satir;
+  const L=(secili||[]).filter(Boolean);
+  const sayfalar=[];
+  for(let i=0;i<L.length;i+=sayfaBoyut){
+    const dilim=L.slice(i,i+sayfaBoyut);
+    /* Sayfa yarım kalmışsa altta kocaman beyaz bant durmasın: kirp seçiliyken
+       sayfa boyu içeriğe iner. PDF'te kağıt boyu sabit kalır (basılacak). */
+    const satirBu=Math.ceil(dilim.length/sutun);
+    const boy=o.kirp
+      ?(KAT_PAD+KAT_BAS+satirBu*(kartH+KAT_ARA)-KAT_ARA+KAT_ALT+KAT_PAD)
+      :H;
+    sayfalar.push({no:sayfalar.length+1,H:boy,kutular:dilim.map((u,j)=>({
+      urun:u,no:i+j+1,
+      x:KAT_PAD+(j%sutun)*(kg+KAT_ARA),
+      y:KAT_PAD+KAT_BAS+Math.floor(j/sutun)*(kartH+KAT_ARA),
+      g:kg,kartH,gorselH}))});
+  }
+  return {W,H,sutun,satir,sayfaBoyut,kartG:kg,gorselH,kartH,
+    toplam:L.length,sayfa:sayfalar.length,sayfalar};
+}
+/* ————— PDF ————— sayfa başına bir JPEG. Kütüphane yok; PDF elle kurulur. */
+function pdfKur(jpegler,W,H){
+  const par=[]; let boy=0;
+  const yazi=s=>{ const b=new Uint8Array(s.length);
+    for(let i=0;i<s.length;i++) b[i]=s.charCodeAt(i)&0xff;
+    par.push(b); boy+=b.length; };
+  const ham=b=>{ par.push(b); boy+=b.length; };
+  const N=(jpegler||[]).length;
+  const nesne=[];                            // 1 tabanlı bayt konumları
+  const bas=()=>{ nesne.push(boy); };
+  yazi("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+  bas(); yazi("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  const sayfaNo=i=>3+i*3;                    // sayfa, içerik, görsel üçlüsü
+  bas(); yazi("2 0 obj\n<< /Type /Pages /Count "+N+" /Kids [ "
+    +Array.from({length:N},(_,i)=>sayfaNo(i)+" 0 R").join(" ")+" ] >>\nendobj\n");
+  for(let i=0;i<N;i++){
+    const s=sayfaNo(i),ic=s+1,gr=s+2;
+    bas(); yazi(s+" 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "+W+" "+H+"] "
+      +"/Resources << /XObject << /Im0 "+gr+" 0 R >> >> /Contents "+ic+" 0 R >>\nendobj\n");
+    const akis="q "+W+" 0 0 "+H+" 0 0 cm /Im0 Do Q\n";
+    bas(); yazi(ic+" 0 obj\n<< /Length "+akis.length+" >>\nstream\n"+akis+"endstream\nendobj\n");
+    const j=jpegler[i];
+    bas(); yazi(gr+" 0 obj\n<< /Type /XObject /Subtype /Image /Width "+W+" /Height "+H
+      +" /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length "+j.length+" >>\nstream\n");
+    ham(j); yazi("\nendstream\nendobj\n");
+  }
+  const xref=boy;
+  const say=nesne.length+1;
+  let x="xref\n0 "+say+"\n0000000000 65535 f \n";
+  nesne.forEach(k=>{ x+=String(k).padStart(10,"0")+" 00000 n \n"; });
+  yazi(x);
+  yazi("trailer\n<< /Size "+say+" /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF\n");
+  const out=new Uint8Array(boy); let p=0;
+  par.forEach(b=>{ out.set(b,p); p+=b.length; });
+  return out;
+}
+/* dataURL → ham bayt (base64 çözümü) */
+function veriBayt(dataUrl){
+  const s=String(dataUrl||""); const i=s.indexOf(",");
+  const b64=i>=0?s.slice(i+1):s;
+  const bin=typeof atob==="function"?atob(b64):Buffer.from(b64,"base64").toString("binary");
+  const out=new Uint8Array(bin.length);
+  for(let k=0;k<bin.length;k++) out[k]=bin.charCodeAt(k)&0xff;
+  return out;
+}
 /* canvas'ı PNG dosyası olarak indirir */
 function pngIndir(cv,ad,belge){
   const D=belge||document;
@@ -1947,6 +2044,72 @@ function pngIndir(cv,ad,belge){
       else bit(cv.toDataURL("image/png"));
     }catch(e){ red(e); }
   });
+}
+/* 📔 katalogun tek sayfasını çizer. gorsel: urunId → yüklenmiş Image (yoksa boş kutu) */
+function katalogCanvas(duzen,sayfa,gorsel,secenek,belge){
+  const D=belge||document, o=secenek||{};
+  const YAZI='system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif';
+  const fnt=(w,s)=>w+" "+s+"px "+YAZI;
+  const H=num(sayfa&&sayfa.H)||duzen.H;
+  const cv=D.createElement("canvas");
+  cv.width=duzen.W; cv.height=H;
+  const c=cv.getContext("2d");
+  c.fillStyle="#ffffff"; c.fillRect(0,0,duzen.W,H);
+  c.textBaseline="middle"; c.textAlign="left";
+  /* başlık */
+  c.fillStyle="#111827"; c.font=fnt("800",38);
+  c.fillText(String(o.baslik||"Ürün kataloğu").toLocaleUpperCase("tr"),KAT_PAD,KAT_PAD+34);
+  c.strokeStyle="#111827"; c.lineWidth=3;
+  c.beginPath(); c.moveTo(KAT_PAD,KAT_PAD+72); c.lineTo(duzen.W-KAT_PAD,KAT_PAD+72); c.stroke();
+  /* kartlar */
+  const kisalt=(t,g,w,s)=>{ c.font=fnt(w,s); let x=String(t==null?"":t);
+    if(c.measureText(x).width<=g) return x;
+    while(x.length>1&&c.measureText(x+"…").width>g) x=x.slice(0,-1);
+    return x+"…"; };
+  (sayfa.kutular||[]).forEach(k=>{
+    c.fillStyle="#ffffff"; c.strokeStyle="#e5e7eb"; c.lineWidth=1.5;
+    if(c.roundRect){ c.beginPath(); c.roundRect(k.x,k.y,k.g,k.kartH,14); c.fill(); c.stroke(); }
+    else { c.fillRect(k.x,k.y,k.g,k.kartH); c.strokeRect(k.x,k.y,k.g,k.kartH); }
+    /* görsel — kutuyu tümüyle kaplar, taşan kısım kırpılır */
+    const gx=k.x+10,gy=k.y+10,gg=k.g-20,gh=k.gorselH-20;
+    c.save();
+    if(c.roundRect){ c.beginPath(); c.roundRect(gx,gy,gg,gh,10); c.clip(); }
+    else { c.beginPath(); c.rect(gx,gy,gg,gh); c.clip(); }
+    c.fillStyle="#f3f4f6"; c.fillRect(gx,gy,gg,gh);
+    const im=gorsel&&gorsel[k.urun&&k.urun.id];
+    if(im&&im.width>0){
+      const oran=Math.max(gg/im.width,gh/im.height);
+      const w=im.width*oran,hh=im.height*oran;
+      c.drawImage(im,gx+(gg-w)/2,gy+(gh-hh)/2,w,hh);
+    } else {
+      c.fillStyle="#c3c8d0"; c.font=fnt("700",15); c.textAlign="center";
+      c.fillText("fotoğraf yok",gx+gg/2,gy+gh/2); c.textAlign="left";
+    }
+    c.restore();
+    /* numara rozeti */
+    c.fillStyle="rgba(17,24,39,.86)";
+    if(c.roundRect){ c.beginPath(); c.roundRect(gx+8,gy+8,38,26,8); c.fill(); }
+    else c.fillRect(gx+8,gy+8,38,26);
+    c.fillStyle="#ffffff"; c.font=fnt("800",15); c.textAlign="center";
+    c.fillText(String(k.no),gx+27,gy+21); c.textAlign="left";
+    /* yazılar */
+    const kart=katalogKart(k.urun,o);
+    let ty=k.y+k.gorselH+6;
+    c.fillStyle="#111827";
+    c.fillText(kisalt(kart.ad,k.g-24,"800",21),k.x+12,ty+14); ty+=30;
+    c.fillStyle="#6b7280";
+    kart.alt.slice(0,2).forEach(s=>{
+      c.fillText(kisalt(s,k.g-24,"600",14),k.x+12,ty+9); ty+=21; });
+    if(kart.fiyat){ c.fillStyle="#111827";
+      c.fillText(kisalt(kart.fiyat,k.g-24,"800",22),k.x+12,ty+16); }
+  });
+  /* alt not + sayfa numarası */
+  c.fillStyle="#9ca3af"; c.font=fnt("600",15); c.textAlign="center";
+  c.fillText(String(o.dipnot||"Tüm ürünler 3D baskıdır; renk ve dokuda küçük farklılıklar olabilir."),
+    duzen.W/2,H-KAT_PAD-10);
+  if(duzen.sayfa>1){ c.font=fnt("700",14); c.textAlign="right";
+    c.fillText(sayfa.no+" / "+duzen.sayfa,duzen.W-KAT_PAD,H-KAT_PAD-10); }
+  return cv;
 }
 /* 🖨 BİR MAKİNENİN KUYRUĞU — şu an ne basıyor, sırada ne var, hangi ürünler.
    Aralıkla sınırlı değildir: makinenin bütün planı görünür. */
@@ -2523,6 +2686,121 @@ function Sheet({ik,hex,baslik,alt,onClose,children,cta,onCta,disabled,basEk}){
       cta&&h("button",{onClick:disabled?null:onCta,disabled,style:{width:"100%",padding:16,borderRadius:16,marginTop:20,
         background:disabled?"var(--line)":"linear-gradient(90deg,"+hex+","+hex+"cc)",color:disabled?"var(--mut2)":"#fff",
         fontSize:16.5,fontWeight:800,boxShadow:disabled?"none":"0 8px 20px "+hex+"44"}},cta)));
+}
+/* 📔 KATALOG — ürün seç, önizle, PNG ya da PDF indir */
+function KatalogSheet({urunler,fotoMap,onClose,say}){
+  const [q,setQ]=useState("");
+  const [sec,setSec]=useState(()=>{ const m={};
+    (urunler||[]).forEach(u=>{ if(u&&u.id&&(fotoMap||{})[u.id]) m[u.id]=true; }); return m; });
+  const [baslik,setBaslik]=useState("3D Baskı Koleksiyonu");
+  const [sutun,setSutun]=useState(3);
+  const [fiyat,setFiyat]=useState("satis");
+  const [bek,setBek]=useState("");
+  const [onizle,setOnizle]=useState("");
+  const L=useMemo(()=>{ const a=q.trim().toLocaleLowerCase("tr");
+    return (urunler||[]).filter(u=>u&&u.id&&(!a||String(u.ad||"").toLocaleLowerCase("tr").indexOf(a)>=0));
+  },[urunler,q]);
+  const secili=useMemo(()=>(urunler||[]).filter(u=>u&&sec[u.id]),[urunler,sec]);
+  const secenek={baslik,sutun,fiyat,materyal:"PLA"};
+  /* PNG paylaşmak için: sayfa içeriğe kırpılır. PDF basılacak: A4 sabit. */
+  const duzen=useMemo(()=>katalogDuzen(secili,{...secenek,kirp:true}),[secili,sutun,fiyat,baslik]);
+  const fotosuz=secili.filter(u=>!(fotoMap||{})[u.id]).length;
+
+  /* seçilen ürünlerin görsellerini çöz — çizimden önce hepsi yüklenmeli */
+  const gorselYukle=()=>Promise.all(secili.map(u=>new Promise(coz=>{
+    const f=(fotoMap||{})[u.id]; if(!f||!f.data) return coz([u.id,null]);
+    const im=new Image(); im.onload=()=>coz([u.id,im]); im.onerror=()=>coz([u.id,null]);
+    im.src=f.data;
+  }))).then(P=>{ const m={}; P.forEach(([id,im])=>{ if(im) m[id]=im; }); return m; });
+
+  const uret=async(tip)=>{
+    if(!secili.length||bek) return;
+    setBek(tip);
+    try{
+      const g=await gorselYukle();
+      const dz=tip==="pdf"?katalogDuzen(secili,secenek):duzen;
+      const cvs=dz.sayfalar.map(s=>katalogCanvas(dz,s,g,secenek,document));
+      const ad=(baslik||"katalog").replace(/[^\wçğıöşüÇĞİÖŞÜ -]/g,"").trim().replace(/\s+/g,"-").toLocaleLowerCase("tr");
+      if(tip==="png"){
+        for(let i=0;i<cvs.length;i++)
+          await pngIndir(cvs[i],ad+(cvs.length>1?("-"+(i+1)):"")+".png",document);
+        say("🖼 "+cvs.length+" sayfa PNG indirildi");
+      } else {
+        const jp=cvs.map(cv=>veriBayt(cv.toDataURL("image/jpeg",0.86)));
+        const pdf=pdfKur(jp,dz.W,dz.H);
+        const url=URL.createObjectURL(new Blob([pdf],{type:"application/pdf"}));
+        const a=document.createElement("a"); a.href=url; a.download=ad+".pdf";
+        document.body.appendChild(a); a.click();
+        setTimeout(()=>{ try{ document.body.removeChild(a); URL.revokeObjectURL(url); }catch(_){} },3000);
+        say("📄 PDF indirildi · "+cvs.length+" sayfa");
+      }
+    }catch(e){ console.error(e); say("Üretilemedi"); }
+    finally{ setBek(""); }
+  };
+  const bakBir=async()=>{ if(!secili.length||bek) return; setBek("bak");
+    try{ const g=await gorselYukle();
+      setOnizle(katalogCanvas(duzen,duzen.sayfalar[0],g,secenek,document).toDataURL("image/jpeg",0.8)); }
+    catch(e){ console.error(e); say("Önizlenemedi"); } finally{ setBek(""); } };
+
+  const secTog=id=>setSec(m=>{ const n={...m}; if(n[id]) delete n[id]; else n[id]=true; return n; });
+  const kucukBtn=(etk,secili2,tik)=>h("button",{key:etk,onClick:tik,
+    style:{flex:1,padding:"9px 6px",borderRadius:11,fontSize:12.5,fontWeight:800,
+      background:secili2?"#1b1e25":"var(--surf2)",color:secili2?"#fff":"var(--mut)",
+      border:"1px solid "+(secili2?"#1b1e25":"var(--line)")}},etk);
+
+  if(onizle) return h(Sheet,{ik:"📔",hex:"#0e8fce",baslik:"Önizleme",
+      alt:"1. sayfa · "+duzen.sayfa+" sayfa",onClose:()=>setOnizle("")},
+    h("img",{src:onizle,alt:"önizleme",style:{width:"100%",borderRadius:12,border:"1px solid var(--line)"}}));
+
+  return h(Sheet,{ik:"📔",hex:"#0e8fce",baslik:"Katalog",
+      alt:secili.length+" ürün · "+duzen.sayfa+" sayfa",onClose},
+    h("input",{value:baslik,onChange:e=>setBaslik(e.target.value),placeholder:"Katalog başlığı",
+      style:{...inp,fontSize:15,marginBottom:10}}),
+    h("div",{style:{display:"flex",gap:7,marginBottom:8}},
+      [2,3,4].map(n=>kucukBtn(n+" sütun",sutun===n,()=>setSutun(n)))),
+    h("div",{style:{display:"flex",gap:7,marginBottom:12}},
+      kucukBtn("Satış fiyatı",fiyat==="satis",()=>setFiyat("satis")),
+      kucukBtn("Pazarlamacı",fiyat==="paz",()=>setFiyat("paz")),
+      kucukBtn("Fiyatsız",fiyat==="yok",()=>setFiyat("yok"))),
+    h("input",{value:q,onChange:e=>setQ(e.target.value),placeholder:"ara",
+      style:{...inp,fontSize:14,marginBottom:8}}),
+    h("div",{style:{display:"flex",gap:7,marginBottom:10}},
+      kucukBtn("Fotoğraflılar",false,()=>{ const m={};
+        (urunler||[]).forEach(u=>{ if((fotoMap||{})[u.id]) m[u.id]=true; }); setSec(m); }),
+      kucukBtn("Hepsi",false,()=>{ const m={};
+        (urunler||[]).forEach(u=>{ if(u&&u.id) m[u.id]=true; }); setSec(m); }),
+      kucukBtn("Temizle",false,()=>setSec({}))),
+    h("div",{style:{maxHeight:300,overflowY:"auto",marginBottom:12,
+      border:"1px solid var(--line)",borderRadius:12,padding:6}},
+      L.map(u=>{ const f=(fotoMap||{})[u.id]; const s=!!sec[u.id];
+        return h("button",{key:u.id,onClick:()=>secTog(u.id),
+          style:{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 8px",
+            borderRadius:10,marginBottom:3,textAlign:"left",
+            background:s?"#eff6ff":"transparent",border:"1px solid "+(s?"#bfdbfe":"transparent")}},
+          h("div",{style:{width:19,height:19,borderRadius:6,flexShrink:0,display:"flex",
+            alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:"#fff",
+            background:s?"#3b82f6":"transparent",border:"2px solid "+(s?"#3b82f6":"var(--mut2)")}},s?"✓":""),
+          f?h(Foto,{src:f.data,s:30,r:7}):h("div",{style:{width:30,height:30,borderRadius:7,
+            flexShrink:0,background:"var(--surf2)",display:"flex",alignItems:"center",
+            justifyContent:"center",fontSize:13,color:"var(--mut2)"}},"—"),
+          h("div",{style:{flex:1,minWidth:0,fontSize:13.5,fontWeight:700,overflow:"hidden",
+            textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad||"—")); })),
+    fotosuz>0?h("div",{style:{fontSize:12,fontWeight:700,color:"#9a3412",background:"#fff7ed",
+      border:"1px solid #fdba74",borderRadius:11,padding:"9px 12px",marginBottom:12}},
+      "⚠️ Seçilenlerin "+fotosuz+" tanesinde fotoğraf yok — kutuları boş çıkar."):null,
+    h("div",{style:{display:"flex",gap:8}},
+      h("button",{onClick:bakBir,disabled:!secili.length||!!bek,
+        style:{flex:1,padding:14,borderRadius:14,background:"var(--surf2)",
+          border:"1px solid var(--line)",fontSize:14,fontWeight:800,
+          color:secili.length?"var(--txt)":"var(--mut2)"}},bek==="bak"?"…":"Önizle"),
+      h("button",{onClick:()=>uret("png"),disabled:!secili.length||!!bek,
+        style:{flex:1,padding:14,borderRadius:14,background:secili.length?"#0e8fce":"var(--line)",
+          color:secili.length?"#fff":"var(--mut2)",fontSize:14,fontWeight:800}},
+        bek==="png"?"…":"PNG"),
+      h("button",{onClick:()=>uret("pdf"),disabled:!secili.length||!!bek,
+        style:{flex:1,padding:14,borderRadius:14,background:secili.length?"#b91c1c":"var(--line)",
+          color:secili.length?"#fff":"var(--mut2)",fontSize:14,fontWeight:800}},
+        bek==="pdf"?"…":"PDF")));
 }
 /* 📦 TABLA TOPLA — hangi kasaya girsin. Kasa isteğe bağlı; seçmeden de toplanır. */
 function TablaKasaSheet({L,kasalar,bekle,onTopla,onYeniKasa,onClose}){
@@ -4545,6 +4823,8 @@ function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar,urunler}){
   const seriVar=v=>seciliSeri.some(x=>x.toLocaleLowerCase("tr")===String(v).toLocaleLowerCase("tr"));
   const seriTog=v=>setSeciliSeri(L=>seriVar(v)?L.filter(x=>x.toLocaleLowerCase("tr")!==String(v).toLocaleLowerCase("tr")):L.concat([v]));
   const seriYeniEkle=()=>{ const t=yeniSeri.trim(); if(!t) return; if(!seriVar(t)) setSeciliSeri(L=>L.concat([t])); setYeniSeri(""); };
+  const [kod,setKod]=useState(duzen?String((u.raw&&u.raw.kod)||u.kod||""):"");            // 📔 katalogda görünen stok kodu
+  const [materyal,setMateryal]=useState(duzen?String((u.raw&&u.raw.materyal)||u.materyal||""):"");
   const [satis,setSatis]=useState(duzen?String(u.fiyat||""):"");
   const [alis,setAlis]=useState(duzen?String(u.alis||""):"");
   const [stokta,setStokta]=useState(duzen?String(u.stokta||0):"0");
@@ -4584,9 +4864,15 @@ function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar,urunler}){
       pazFiyatK:(()=>{const m={};Object.keys(pazFiyatK).forEach(k=>{const v=num(pazFiyatK[k]);if(v>0)m[k]=v;});return m;})(),
       sarfList:Object.keys(sarfAd).filter(k=>num(sarfAd[k])>0).map(k=>({sarfId:k,adet:num(sarfAd[k])})),
       iscilik:num(iscilik),
+      kod:kod.trim(),materyal:materyal.trim(),
       _eskiStok:duzen?num(u.stokta):0})},
     h("div",{className:"lbl",style:{marginBottom:8}},"Ürün adı *"),
     h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Ahtapot",style:{...inp,marginBottom:14}}),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Stok kodu"),
+        h("input",{value:kod,onChange:e=>setKod(e.target.value),placeholder:"örn. 305",style:inp})),
+      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Materyal"),
+        h("input",{value:materyal,onChange:e=>setMateryal(e.target.value),placeholder:"PLA",style:inp}))),
     h("div",{className:"lbl",style:{marginBottom:8}},"Seriler — birden fazla seçilebilir, boş bırakılabilir"),
     tumSeri.length?h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:8}},
       tumSeri.map(s2=>h(Chip,{key:s2,on:seriVar(s2),onClick:()=>seriTog(s2)},s2)),
@@ -7317,6 +7603,10 @@ function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat,anlasmaSay}){
     h("button",{onClick:()=>ac({tip:"seriler"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:14,borderRadius:14,marginBottom:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
       h("span",{style:{fontSize:19,flexShrink:0}},"🗂"),h("span",{style:{flex:1,minWidth:0}},"Seriler"),
       h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},(seriSay?(seriSay+" seri"):"düzenle")+" ›")),
+    h("button",{onClick:()=>ac({tip:"katalog"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:14,borderRadius:14,marginBottom:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
+      h("span",{style:{fontSize:19,flexShrink:0}},"📔"),h("span",{style:{flex:1,minWidth:0}},"Katalog"),
+      h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},
+        Object.keys(fotoMap||{}).length+" fotoğraflı ürün ›")),
     h("button",{onClick:()=>ac({tip:"anlasma"}),style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:14,borderRadius:14,marginBottom:14,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
       h("span",{style:{fontSize:19,flexShrink:0}},"🤝"),h("span",{style:{flex:1,minWidth:0}},"Anlaşmalı fiyatlar"),
       h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},(num(anlasmaSay)>0?(anlasmaSay+" kayıt"):"yok")+" ›")),
@@ -9247,7 +9537,11 @@ function App(){
   const urunFoto=useColl("urun_foto");   // 🖼️ ürün fotoğrafları (pazarlamacı uygulamasıyla ortak)
   const fotoMap=useMemo(()=>{ const m={};
     (urunFoto||[]).forEach(f=>{ if(f&&f.urunId&&f.data&&!m[f.urunId]) m[f.urunId]={id:f.id,data:f.data}; });
-    // yüklenmiş fotoğrafı olmayan ürünlerde hazır görsele düş
+    /* yüklenmiş fotoğrafı yoksa ürün kaydındaki base64 görsele düş — eski
+       kayıtlarda foto ürünün kendi alanında duruyor ve hiç okunmuyordu */
+    (urunler||[]).forEach(u=>{ if(m[u.id]) return;
+      const d2=String((u&&u.foto)||"");
+      if(d2.slice(0,11)==="data:image/") m[u.id]={id:null,data:d2,gomulu:true}; });
     (urunler||[]).forEach(u=>{ if(m[u.id]) return; const k=adAnahtar(u.ad);
       const bul=Object.keys(YEREL_FOTO).find(x=>k.indexOf(x)>=0);
       if(bul) m[u.id]={id:null,data:YEREL_FOTO[bul],yerel:true}; });
@@ -9425,7 +9719,7 @@ function App(){
         if(esk && (num(esk.satisFiyat)!==num(p2.satisFiyat)||num(esk.pazFiyat)!==num(p2.pazFiyat)))
           try{ await save("fiyat_gecmisi",{urunId:p2.id,urunAd:p2.ad||esk.ad||"",satis:num(esk.satisFiyat),veris:num(esk.pazFiyat),gecerliBit:new Date().toISOString()}); }catch(e){ console.error(e); } }
       const seriDizi=(Array.isArray(p2.seriler)?p2.seriler:[]).map(x=>String(x||"").trim()).filter(Boolean);
-      const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{eklendi:new Date().toISOString()}),ad:p2.ad,seriler:seriDizi,seri:(seriDizi[0]||""),satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},pazFiyatK:p2.pazFiyatK||{},sarfList:p2.sarfList||[],iscilik:num(p2.iscilik),maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
+      const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{eklendi:new Date().toISOString()}),ad:p2.ad,seriler:seriDizi,seri:(seriDizi[0]||""),satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},pazFiyatK:p2.pazFiyatK||{},sarfList:p2.sarfList||[],iscilik:num(p2.iscilik),kod:String(p2.kod||""),materyal:String(p2.materyal||""),maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
       const delta=p2.stokta-(p2._eskiStok||0);
       if(delta) await stokLogla({id,ad:p2.ad},delta,"elle");   // elle düzeltme logu — eski panel uyumu
       setModal(null); say((p2.id?"Güncellendi":"Ürün eklendi")+" · "+p2.ad); }
@@ -10280,6 +10574,7 @@ function App(){
     modal&&modal.tip==="komutaAyar"&&h(KomutaAyarSheet,{ad:((kullanicilar||[]).find(u=>u.id===BEN_ID)||{}).ad,gorunum,onGorunum:gorunumTog,onSifre:sifremiDegistir,
       onYedek:()=>yedekAl(false),onFotoYedek:()=>yedekAl(true),onKayit:()=>setModal({tip:"kayit"}),yedekGun:sonYedekGun(),yedekMesgul,onClose:()=>setModal(null)}),
     modal&&modal.tip==="kayit"&&h(KayitSheet,{say,onClose:()=>setModal(null)}),
+    modal&&modal.tip==="katalog"&&h(KatalogSheet,{urunler,fotoMap,say,onClose:()=>setModal(null)}),
     modal&&modal.tip==="tablaKasa"&&h(TablaKasaSheet,{L:modal.L,kasalar,bekle:isBekle,
       onTopla:k=>tablaToplaUygula(modal.L,k),onYeniKasa:kasaEkle,onClose:()=>setModal(null)}),
     modal&&modal.tip==="kasalar"&&h(KasaSheet,{kasalar,kasaHar,urunler,ekip:kullanicilar,bekle:isBekle,
