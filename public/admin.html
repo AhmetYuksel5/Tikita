@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L88";   // komuta (admin) deneme sürümü
+const SURUM="L89";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1967,16 +1967,23 @@ const KAT_SAYFA={g:1240,y:1754};          // A4 · 150 dpi
 const KAT_PAD=54, KAT_ARA=20, KAT_BAS=124, KAT_ALT=52;
 
 /* bir kartın yazıları — ürün kaydından okunur */
+/* katalogda yazılacak fiyat — ürüne özel katalog fiyatı varsa o kazanır */
+function katalogFiyat(u,secenek){
+  const o=secenek||{};
+  if(o.fiyat==="yok") return 0;
+  const ozel=num(u&&u.katalogFiyat);
+  if(ozel>0) return ozel;
+  return o.fiyat==="paz"?num(u&&u.pazFiyat):num(u&&u.satisFiyat);
+}
 function katalogKart(u,secenek){
   const o=secenek||{};
-  const fy=o.fiyat==="paz"?num(u&&u.pazFiyat):(o.fiyat==="yok"?0:num(u&&u.satisFiyat));
+  const fy=katalogFiyat(u,o);
   const alt=[];
   const kod=String((u&&u.kod)||"").trim();
   if(kod) alt.push("Stok kodu: "+kod);
-  const mt=String((u&&u.materyal)||"").trim()||o.materyal||"";
-  if(mt) alt.push("Materyal: "+mt);
   return {ad:String((u&&u.ad)||"").trim()||"—",alt,
-    fiyat:(o.fiyat==="yok"||!(fy>0))?"":(fy.toLocaleString("tr-TR")+" TL")};
+    fiyat:fy>0?(fy.toLocaleString("tr-TR")+" TL"):"",
+    ozelFiyat:num(u&&u.katalogFiyat)>0};
 }
 /* ürünleri sayfalara ve kutulara böler — hiçbir şey çizmez */
 function katalogDuzen(secili,secenek){
@@ -1984,14 +1991,16 @@ function katalogDuzen(secili,secenek){
   const sutun=Math.max(1,Math.min(4,Math.round(num(o.sutun))||3));
   const W=KAT_SAYFA.g,H=KAT_SAYFA.y;
   const kg=Math.floor((W-KAT_PAD*2-KAT_ARA*(sutun-1))/sutun);
-  const metinH=o.fiyat==="yok"?86:118;
+  const metinH=o.fiyat==="yok"?66:96;
   const alan=H-KAT_PAD-KAT_BAS-KAT_ALT-KAT_PAD;
-  /* Kaç satır sığdığı en KISA kabul edilebilir karta göre bulunur; sonra artan
-     boşluk görsele dağıtılır — sayfanın altında boş bant kalmaz. */
-  const enAzKart=Math.round(kg*0.52)+metinH;
+  /* 📐 Ürün fotoğraflarının çoğu DİKEY. Görsel kutusu en az kare olsun diye
+     satır sayısı kare karta göre bulunur; artan boşluk görsele dağıtılınca
+     kutu kareden dikeye doğru uzar. Aşırı uzamasın diye üst sınır var. */
+  const enAzKart=Math.round(kg*0.95)+metinH;
   const satir=Math.max(1,Math.floor((alan+KAT_ARA)/(enAzKart+KAT_ARA)));
-  const kartH=Math.floor((alan-(satir-1)*KAT_ARA)/satir);
-  const gorselH=kartH-metinH;
+  const tamKart=Math.floor((alan-(satir-1)*KAT_ARA)/satir);
+  const gorselH=Math.min(tamKart-metinH,Math.round(kg*1.45));
+  const kartH=gorselH+metinH;
   const sayfaBoyut=sutun*satir;
   const L=(secili||[]).filter(Boolean);
   const sayfalar=[];
@@ -2714,7 +2723,7 @@ function Sheet({ik,hex,baslik,alt,onClose,children,cta,onCta,disabled,basEk}){
         fontSize:16.5,fontWeight:800,boxShadow:disabled?"none":"0 8px 20px "+hex+"44"}},cta)));
 }
 /* 📔 KATALOG — ürün seç, önizle, PNG ya da PDF indir */
-function KatalogSheet({urunler,fotoBilgi,onFotoSec,onClose,say}){
+function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFiyat,onClose,say}){
   const fotoMap={}; Object.keys(fotoBilgi||{}).forEach(id=>{
     const k=fotoBilgi[id]&&fotoBilgi[id].katalog; if(k) fotoMap[id]=k; });
   const [q,setQ]=useState("");
@@ -2730,7 +2739,7 @@ function KatalogSheet({urunler,fotoBilgi,onFotoSec,onClose,say}){
     return (urunler||[]).filter(u=>u&&u.id&&(!a||String(u.ad||"").toLocaleLowerCase("tr").indexOf(a)>=0));
   },[urunler,q]);
   const secili=useMemo(()=>(urunler||[]).filter(u=>u&&sec[u.id]),[urunler,sec]);
-  const secenek={baslik,sutun,fiyat,materyal:"PLA"};
+  const secenek={baslik,sutun,fiyat};
   /* PNG paylaşmak için: sayfa içeriğe kırpılır. PDF basılacak: A4 sabit. */
   const duzen=useMemo(()=>katalogDuzen(secili,{...secenek,kirp:true}),[secili,sutun,fiyat,baslik]);
   const fotosuz=secili.filter(u=>!(fotoMap||{})[u.id]).length;
@@ -2772,6 +2781,17 @@ function KatalogSheet({urunler,fotoBilgi,onFotoSec,onClose,say}){
     catch(e){ console.error(e); say("Önizlenemedi"); } finally{ setBek(""); } };
 
   const secTog=id=>setSec(m=>{ const n={...m}; if(n[id]) delete n[id]; else n[id]=true; return n; });
+  /* katalogda yazacak fiyat — boş bırakılırsa ürünün kendi fiyatına döner */
+  const fiyatSor=u=>{ const v=prompt((u.ad||"")+" — katalogda yazacak fiyat\n"
+      +"(boş bırakırsan ürünün kendi fiyatı yazılır)",
+      num(u.katalogFiyat)>0?String(num(u.katalogFiyat)):"");
+    if(v===null) return;
+    onFiyat&&onFiyat(u.id,v.trim()===""?0:num(v)); };
+  const hepsiFiyat=()=>{ if(!secili.length) return;
+    const v=prompt("Seçili "+secili.length+" ürünün hepsi katalogda hangi fiyatla yazılsın?\n"
+      +"(boş bırakırsan hepsi kendi fiyatına döner)","");
+    if(v===null) return;
+    onFiyat&&onFiyat(secili.map(u=>u.id),v.trim()===""?0:num(v)); };
   const kucukBtn=(etk,secili2,tik)=>h("button",{key:etk,onClick:tik,
     style:{flex:1,padding:"9px 6px",borderRadius:11,fontSize:12.5,fontWeight:800,
       background:secili2?"#1b1e25":"var(--surf2)",color:secili2?"#fff":"var(--mut)",
@@ -2800,10 +2820,15 @@ function KatalogSheet({urunler,fotoBilgi,onFotoSec,onClose,say}){
       style:{...inp,fontSize:15,marginBottom:10}}),
     h("div",{style:{display:"flex",gap:7,marginBottom:8}},
       [2,3,4].map(n=>kucukBtn(n+" sütun",sutun===n,()=>setSutun(n)))),
-    h("div",{style:{display:"flex",gap:7,marginBottom:12}},
+    h("div",{style:{display:"flex",gap:7,marginBottom:fiyat==="yok"?12:8}},
       kucukBtn("Satış fiyatı",fiyat==="satis",()=>setFiyat("satis")),
       kucukBtn("Pazarlamacı",fiyat==="paz",()=>setFiyat("paz")),
       kucukBtn("Fiyatsız",fiyat==="yok",()=>setFiyat("yok"))),
+    fiyat!=="yok"?h("button",{onClick:hepsiFiyat,disabled:!secili.length,
+      style:{width:"100%",padding:"9px 6px",borderRadius:11,marginBottom:12,fontSize:12.5,
+        fontWeight:800,background:"var(--surf2)",border:"1px dashed var(--line)",
+        color:secili.length?"var(--cyan)":"var(--mut2)"}},
+      "Seçilenlerin hepsine tek fiyat yaz"):null,
     h("input",{value:q,onChange:e=>setQ(e.target.value),placeholder:"ara",
       style:{...inp,fontSize:14,marginBottom:8}}),
     h("div",{style:{display:"flex",gap:7,marginBottom:10}},
@@ -2833,7 +2858,14 @@ function KatalogSheet({urunler,fotoBilgi,onFotoSec,onClose,say}){
                 border:"1px solid var(--line)"}},"değiştir")
             :null,
           h("div",{style:{flex:1,minWidth:0,fontSize:13.5,fontWeight:700,overflow:"hidden",
-            textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad||"—")); })),
+            textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad||"—"),
+          /* fiyat çipi — dokun, katalogda yazacak fiyatı değiştir */
+          fiyat!=="yok"?(()=>{ const fy=katalogFiyat(u,secenek), ozel=num(u.katalogFiyat)>0;
+            return h("span",{onClick:e=>{ e.stopPropagation(); fiyatSor(u); },
+              style:{flexShrink:0,fontSize:11.5,fontWeight:800,padding:"4px 8px",borderRadius:8,
+                background:ozel?"#fef3c7":"var(--surf2)",border:"1px solid "+(ozel?"#fcd34d":"var(--line)"),
+                color:ozel?"#92400e":"var(--mut)"}},
+              fy>0?(fy.toLocaleString("tr-TR")+" ₺"):"fiyat yok"); })():null); })),
     fotosuz>0?h("div",{style:{fontSize:12,fontWeight:700,color:"#9a3412",background:"#fff7ed",
       border:"1px solid #fdba74",borderRadius:11,padding:"9px 12px",marginBottom:12}},
       "⚠️ Seçilenlerin "+fotosuz+" tanesinde fotoğraf yok — kutuları boş çıkar."):null,
@@ -4909,7 +4941,6 @@ function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar,urunler}){
   const seriTog=v=>setSeciliSeri(L=>seriVar(v)?L.filter(x=>x.toLocaleLowerCase("tr")!==String(v).toLocaleLowerCase("tr")):L.concat([v]));
   const seriYeniEkle=()=>{ const t=yeniSeri.trim(); if(!t) return; if(!seriVar(t)) setSeciliSeri(L=>L.concat([t])); setYeniSeri(""); };
   const [kod,setKod]=useState(duzen?String((u.raw&&u.raw.kod)||u.kod||""):"");            // 📔 katalogda görünen stok kodu
-  const [materyal,setMateryal]=useState(duzen?String((u.raw&&u.raw.materyal)||u.materyal||""):"");
   const [satis,setSatis]=useState(duzen?String(u.fiyat||""):"");
   const [alis,setAlis]=useState(duzen?String(u.alis||""):"");
   const [stokta,setStokta]=useState(duzen?String(u.stokta||0):"0");
@@ -4949,15 +4980,13 @@ function UrunDuzenSheet({u,onKaydet,bekle,kullanicilar,sarflar,urunler}){
       pazFiyatK:(()=>{const m={};Object.keys(pazFiyatK).forEach(k=>{const v=num(pazFiyatK[k]);if(v>0)m[k]=v;});return m;})(),
       sarfList:Object.keys(sarfAd).filter(k=>num(sarfAd[k])>0).map(k=>({sarfId:k,adet:num(sarfAd[k])})),
       iscilik:num(iscilik),
-      kod:kod.trim(),materyal:materyal.trim(),
+      kod:kod.trim(),
       _eskiStok:duzen?num(u.stokta):0})},
     h("div",{className:"lbl",style:{marginBottom:8}},"Ürün adı *"),
     h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Ahtapot",style:{...inp,marginBottom:14}}),
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}},
-      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Stok kodu"),
-        h("input",{value:kod,onChange:e=>setKod(e.target.value),placeholder:"örn. 305",style:inp})),
-      h("div",null,h("div",{className:"lbl",style:{marginBottom:8}},"Materyal"),
-        h("input",{value:materyal,onChange:e=>setMateryal(e.target.value),placeholder:"PLA",style:inp}))),
+    h("div",{style:{marginBottom:14}},
+      h("div",{className:"lbl",style:{marginBottom:8}},"Stok kodu"),
+      h("input",{value:kod,onChange:e=>setKod(e.target.value),placeholder:"örn. 305",style:inp})),
     h("div",{className:"lbl",style:{marginBottom:8}},"Seriler — birden fazla seçilebilir, boş bırakılabilir"),
     tumSeri.length?h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",marginBottom:8}},
       tumSeri.map(s2=>h(Chip,{key:s2,on:seriVar(s2),onClick:()=>seriTog(s2)},s2)),
@@ -9785,6 +9814,15 @@ function App(){
       await save("stok_urun",{id:urunId,anaFoto:String(id||"")});
       say("🖼 Fotoğraf eklendi"); }
     catch(e){ console.error(e); say("⚠ Fotoğraf eklenemedi"); } }
+  /* 📔 katalogda yazacak fiyat — 0 yazılırsa ürünün kendi fiyatına döner */
+  async function katalogFiyatYaz(id,deger){
+    const L=(Array.isArray(id)?id:[id]).filter(Boolean); if(!L.length||isBekle) return;
+    const v=Math.max(0,num(deger));
+    setIsBekle(true);
+    try{ for(const uid2 of L) await save("stok_urun",{id:uid2,katalogFiyat:v});
+      say(v>0?("📔 "+(L.length>1?(L.length+" ürün · "):"")+tl(v)+" yazılacak")
+        :("📔 "+(L.length>1?(L.length+" üründe "):"")+"kendi fiyatına dönüldü")); }
+    catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   /* hangi görsel nerede görünsün — nerede: "ana" | "katalog" */
   async function urunFotoSec(urunId,fotoId,nerede){ if(!urunId||!fotoId) return;
     try{ await save("stok_urun",nerede==="katalog"
@@ -9833,7 +9871,7 @@ function App(){
         if(esk && (num(esk.satisFiyat)!==num(p2.satisFiyat)||num(esk.pazFiyat)!==num(p2.pazFiyat)))
           try{ await save("fiyat_gecmisi",{urunId:p2.id,urunAd:p2.ad||esk.ad||"",satis:num(esk.satisFiyat),veris:num(esk.pazFiyat),gecerliBit:new Date().toISOString()}); }catch(e){ console.error(e); } }
       const seriDizi=(Array.isArray(p2.seriler)?p2.seriler:[]).map(x=>String(x||"").trim()).filter(Boolean);
-      const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{eklendi:new Date().toISOString()}),ad:p2.ad,seriler:seriDizi,seri:(seriDizi[0]||""),satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},pazFiyatK:p2.pazFiyatK||{},sarfList:p2.sarfList||[],iscilik:num(p2.iscilik),kod:String(p2.kod||""),materyal:String(p2.materyal||""),maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
+      const id=await save("stok_urun",{...(p2.id?{id:p2.id}:{eklendi:new Date().toISOString()}),ad:p2.ad,seriler:seriDizi,seri:(seriDizi[0]||""),satisFiyat:p2.satisFiyat,pazFiyat:p2.pazFiyat,stokta:p2.stokta,gram:num(p2.gram),parcalar:p2.parcalar,parcaAdet:p2.parcaAdet||{},pazFiyatK:p2.pazFiyatK||{},sarfList:p2.sarfList||[],iscilik:num(p2.iscilik),kod:String(p2.kod||""),maliyet:num(p2.maliyet),maliyetTarih:num(p2.maliyet)>0?new Date().toISOString():""});
       const delta=p2.stokta-(p2._eskiStok||0);
       if(delta) await stokLogla({id,ad:p2.ad},delta,"elle");   // elle düzeltme logu — eski panel uyumu
       setModal(null); say((p2.id?"Güncellendi":"Ürün eklendi")+" · "+p2.ad); }
@@ -10690,7 +10728,8 @@ function App(){
       onYedek:()=>yedekAl(false),onFotoYedek:()=>yedekAl(true),onKayit:()=>setModal({tip:"kayit"}),yedekGun:sonYedekGun(),yedekMesgul,onClose:()=>setModal(null)}),
     modal&&modal.tip==="kayit"&&h(KayitSheet,{say,onClose:()=>setModal(null)}),
     modal&&modal.tip==="katalog"&&h(KatalogSheet,{urunler,fotoBilgi,say,
-      onFotoSec:(uid,fid,nerede)=>urunFotoSec(uid,fid,nerede),onClose:()=>setModal(null)}),
+      onFotoSec:(uid,fid,nerede)=>urunFotoSec(uid,fid,nerede),
+      onFiyat:(id,v)=>katalogFiyatYaz(id,v),onClose:()=>setModal(null)}),
     modal&&modal.tip==="tablaKasa"&&h(TablaKasaSheet,{L:modal.L,kasalar,bekle:isBekle,
       onTopla:k=>tablaToplaUygula(modal.L,k),onYeniKasa:kasaEkle,onClose:()=>setModal(null)}),
     modal&&modal.tip==="kasalar"&&h(KasaSheet,{kasalar,kasaHar,urunler,ekip:kullanicilar,bekle:isBekle,
