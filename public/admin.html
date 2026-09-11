@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L89";   // komuta (admin) deneme sürümü
+const SURUM="L90";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -1964,7 +1964,7 @@ function tabloCanvas(bolumler,baslik,altBaslik,belge){
    Seçilen ürünlerden fotoğraflı bir seçki üretir. Yerleşim burada hesaplanır
    (saf), çizim katalogCanvas'ta, dosyaya dökme pdfKur/pngIndir'de. */
 const KAT_SAYFA={g:1240,y:1754};          // A4 · 150 dpi
-const KAT_PAD=54, KAT_ARA=20, KAT_BAS=124, KAT_ALT=52;
+const KAT_PAD=54, KAT_ARA=20, KAT_BAS=124, KAT_ALT=30;
 
 /* bir kartın yazıları — ürün kaydından okunur */
 /* katalogda yazılacak fiyat — ürüne özel katalog fiyatı varsa o kazanır */
@@ -2091,9 +2091,17 @@ function katalogCanvas(duzen,sayfa,gorsel,secenek,belge){
   const c=cv.getContext("2d");
   c.fillStyle="#ffffff"; c.fillRect(0,0,duzen.W,H);
   c.textBaseline="middle"; c.textAlign="left";
-  /* başlık */
+  /* 🏷 başlık — logo varsa solda, başlık onun yanında */
+  const bandY=KAT_PAD+34;
+  let bx=KAT_PAD;
+  const lg=o.logo;
+  if(lg&&lg.width>0){
+    const lh=68, lw=Math.min(260,Math.round(lg.width*lh/lg.height));
+    c.drawImage(lg,bx,bandY-lh/2,lw,lh);
+    bx+=lw+22;
+  }
   c.fillStyle="#111827"; c.font=fnt("800",38);
-  c.fillText(String(o.baslik||"Ürün kataloğu").toLocaleUpperCase("tr"),KAT_PAD,KAT_PAD+34);
+  c.fillText(String(o.baslik||"Ürün kataloğu").toLocaleUpperCase("tr"),bx,bandY);
   c.strokeStyle="#111827"; c.lineWidth=3;
   c.beginPath(); c.moveTo(KAT_PAD,KAT_PAD+72); c.lineTo(duzen.W-KAT_PAD,KAT_PAD+72); c.stroke();
   /* kartlar */
@@ -2138,12 +2146,9 @@ function katalogCanvas(duzen,sayfa,gorsel,secenek,belge){
     if(kart.fiyat){ c.fillStyle="#111827";
       c.fillText(kisalt(kart.fiyat,k.g-24,"800",22),k.x+12,ty+16); }
   });
-  /* alt not + sayfa numarası */
-  c.fillStyle="#9ca3af"; c.font=fnt("600",15); c.textAlign="center";
-  c.fillText(String(o.dipnot||"Tüm ürünler 3D baskıdır; renk ve dokuda küçük farklılıklar olabilir."),
-    duzen.W/2,H-KAT_PAD-10);
-  if(duzen.sayfa>1){ c.font=fnt("700",14); c.textAlign="right";
-    c.fillText(sayfa.no+" / "+duzen.sayfa,duzen.W-KAT_PAD,H-KAT_PAD-10); }
+  /* altta yalnız sayfa numarası — tek sayfalık katalogda o da yok */
+  if(duzen.sayfa>1){ c.fillStyle="#9ca3af"; c.font=fnt("700",14); c.textAlign="right";
+    c.fillText(sayfa.no+" / "+duzen.sayfa,duzen.W-KAT_PAD,H-KAT_PAD-4); }
   return cv;
 }
 /* 🖨 BİR MAKİNENİN KUYRUĞU — şu an ne basıyor, sırada ne var, hangi ürünler.
@@ -2723,7 +2728,7 @@ function Sheet({ik,hex,baslik,alt,onClose,children,cta,onCta,disabled,basEk}){
         fontSize:16.5,fontWeight:800,boxShadow:disabled?"none":"0 8px 20px "+hex+"44"}},cta)));
 }
 /* 📔 KATALOG — ürün seç, önizle, PNG ya da PDF indir */
-function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFiyat,onClose,say}){
+function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFiyat,logo,onLogo,onClose,say}){
   const fotoMap={}; Object.keys(fotoBilgi||{}).forEach(id=>{
     const k=fotoBilgi[id]&&fotoBilgi[id].katalog; if(k) fotoMap[id]=k; });
   const [q,setQ]=useState("");
@@ -2745,19 +2750,21 @@ function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFiyat,onClose,say}){
   const fotosuz=secili.filter(u=>!(fotoMap||{})[u.id]).length;
 
   /* seçilen ürünlerin görsellerini çöz — çizimden önce hepsi yüklenmeli */
-  const gorselYukle=()=>Promise.all(secili.map(u=>new Promise(coz=>{
-    const f=(fotoMap||{})[u.id]; if(!f||!f.data) return coz([u.id,null]);
-    const im=new Image(); im.onload=()=>coz([u.id,im]); im.onerror=()=>coz([u.id,null]);
-    im.src=f.data;
-  }))).then(P=>{ const m={}; P.forEach(([id,im])=>{ if(im) m[id]=im; }); return m; });
+  const resimCoz=src=>new Promise(coz=>{ if(!src) return coz(null);
+    const im=new Image(); im.onload=()=>coz(im); im.onerror=()=>coz(null); im.src=src; });
+  const gorselYukle=()=>Promise.all(secili.map(u=>{
+    const f=(fotoMap||{})[u.id];
+    return resimCoz(f&&f.data).then(im=>[u.id,im]);
+  })).then(P=>{ const m={}; P.forEach(([id,im])=>{ if(im) m[id]=im; }); return m; });
 
   const uret=async(tip)=>{
     if(!secili.length||bek) return;
     setBek(tip);
     try{
-      const g=await gorselYukle();
-      const dz=tip==="pdf"?katalogDuzen(secili,secenek):duzen;
-      const cvs=dz.sayfalar.map(s=>katalogCanvas(dz,s,g,secenek,document));
+      const [g,lg]=await Promise.all([gorselYukle(),resimCoz(logo)]);
+      const sec2={...secenek,logo:lg};
+      const dz=tip==="pdf"?katalogDuzen(secili,sec2):duzen;
+      const cvs=dz.sayfalar.map(s=>katalogCanvas(dz,s,g,sec2,document));
       const ad=(baslik||"katalog").replace(/[^\wçğıöşüÇĞİÖŞÜ -]/g,"").trim().replace(/\s+/g,"-").toLocaleLowerCase("tr");
       if(tip==="png"){
         for(let i=0;i<cvs.length;i++)
@@ -2776,8 +2783,9 @@ function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFiyat,onClose,say}){
     finally{ setBek(""); }
   };
   const bakBir=async()=>{ if(!secili.length||bek) return; setBek("bak");
-    try{ const g=await gorselYukle();
-      setOnizle(katalogCanvas(duzen,duzen.sayfalar[0],g,secenek,document).toDataURL("image/jpeg",0.8)); }
+    try{ const [g,lg]=await Promise.all([gorselYukle(),resimCoz(logo)]);
+      setOnizle(katalogCanvas(duzen,duzen.sayfalar[0],g,{...secenek,logo:lg},document)
+        .toDataURL("image/jpeg",0.8)); }
     catch(e){ console.error(e); say("Önizlenemedi"); } finally{ setBek(""); } };
 
   const secTog=id=>setSec(m=>{ const n={...m}; if(n[id]) delete n[id]; else n[id]=true; return n; });
@@ -2816,8 +2824,19 @@ function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFiyat,onClose,say}){
 
   return h(Sheet,{ik:"📔",hex:"#0e8fce",baslik:"Katalog",
       alt:secili.length+" ürün · "+duzen.sayfa+" sayfa",onClose},
-    h("input",{value:baslik,onChange:e=>setBaslik(e.target.value),placeholder:"Katalog başlığı",
-      style:{...inp,fontSize:15,marginBottom:10}}),
+    h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:10}},
+      h("label",{style:{flexShrink:0,width:64,height:50,borderRadius:12,cursor:"pointer",
+          display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",
+          background:"var(--surf2)",border:"1px dashed "+(logo?"var(--line)":"var(--cyan)")}},
+        logo?h("img",{src:logo,alt:"",style:{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}})
+          :h("span",{style:{fontSize:11,fontWeight:800,color:"var(--cyan)"}},"logo"),
+        h("input",{type:"file",accept:"image/*",style:{display:"none"},
+          onChange:e=>{ const f=e.target.files&&e.target.files[0]; if(f) onLogo&&onLogo(f); e.target.value=""; }})),
+      h("input",{value:baslik,onChange:e=>setBaslik(e.target.value),placeholder:"Katalog başlığı",
+        style:{...inp,flex:1,minWidth:0,fontSize:15}}),
+      logo?h("button",{onClick:()=>onLogo&&onLogo(""),style:{flexShrink:0,padding:"12px 11px",
+        borderRadius:12,background:"var(--surf2)",border:"1px solid var(--line)",
+        fontSize:12,fontWeight:800,color:"var(--red)"}},"Logo\u00a0sil"):null),
     h("div",{style:{display:"flex",gap:7,marginBottom:8}},
       [2,3,4].map(n=>kucukBtn(n+" sütun",sutun===n,()=>setSutun(n)))),
     h("div",{style:{display:"flex",gap:7,marginBottom:fiyat==="yok"?12:8}},
@@ -9814,6 +9833,14 @@ function App(){
       await save("stok_urun",{id:urunId,anaFoto:String(id||"")});
       say("🖼 Fotoğraf eklendi"); }
     catch(e){ console.error(e); say("⚠ Fotoğraf eklenemedi"); } }
+  /* 🏷 katalog logosu — ayar/genel içinde durur; yoksa uygulamanın kendi logosu */
+  const katalogLogo=(ayar.katalogLogo==="yok")?"":(String(ayar.katalogLogo||"").trim()||"tikita-logo.png");
+  async function katalogLogoYaz(file){ if(isBekle) return; setIsBekle(true);
+    try{
+      if(!file){ await save("ayar",{id:"genel",katalogLogo:"yok"}); say("Logo kaldırıldı"); }
+      else { const data=await dosyaOku(file,600);
+        await save("ayar",{id:"genel",katalogLogo:data}); say("🏷 Logo güncellendi"); } }
+    catch(e){ console.error(e); say("Logo kaydedilemedi"); } finally{ setIsBekle(false); } }
   /* 📔 katalogda yazacak fiyat — 0 yazılırsa ürünün kendi fiyatına döner */
   async function katalogFiyatYaz(id,deger){
     const L=(Array.isArray(id)?id:[id]).filter(Boolean); if(!L.length||isBekle) return;
@@ -10729,7 +10756,8 @@ function App(){
     modal&&modal.tip==="kayit"&&h(KayitSheet,{say,onClose:()=>setModal(null)}),
     modal&&modal.tip==="katalog"&&h(KatalogSheet,{urunler,fotoBilgi,say,
       onFotoSec:(uid,fid,nerede)=>urunFotoSec(uid,fid,nerede),
-      onFiyat:(id,v)=>katalogFiyatYaz(id,v),onClose:()=>setModal(null)}),
+      onFiyat:(id,v)=>katalogFiyatYaz(id,v),
+      logo:katalogLogo,onLogo:katalogLogoYaz,onClose:()=>setModal(null)}),
     modal&&modal.tip==="tablaKasa"&&h(TablaKasaSheet,{L:modal.L,kasalar,bekle:isBekle,
       onTopla:k=>tablaToplaUygula(modal.L,k),onYeniKasa:kasaEkle,onClose:()=>setModal(null)}),
     modal&&modal.tip==="kasalar"&&h(KasaSheet,{kasalar,kasaHar,urunler,ekip:kullanicilar,bekle:isBekle,
