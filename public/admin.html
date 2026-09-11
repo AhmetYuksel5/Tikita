@@ -105,7 +105,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L87";   // komuta (admin) deneme sürümü
+const SURUM="L88";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -344,9 +344,9 @@ function urunFotolari(u,urunFoto,yerelCoz){
     .sort((a,b)=>String(a.tarih||"").localeCompare(String(b.tarih||"")))
     .forEach(f=>L.push({id:f.id,data:f.data,kaynak:"yuklenen",silinir:true}));
   const g=String((u&&u.foto)||"");
-  if(g.slice(0,11)==="data:image/") L.push({id:"gomulu",data:g,kaynak:"gomulu",silinir:false});
-  const y=yerelCoz?yerelCoz(u):"";
-  if(y) L.push({id:"yerel",data:y,kaynak:"yerel",silinir:false});
+  if(g.slice(0,11)==="data:image/") L.push({id:"gomulu",data:g,kaynak:"gomulu",silinir:true});
+  const y=(u&&u.yerelGizle)?"":(yerelCoz?yerelCoz(u):"");
+  if(y) L.push({id:"yerel",data:y,kaynak:"yerel",silinir:true});
   return L;
 }
 const fotoBul=(L,id)=>{ const A=L||[];
@@ -3611,7 +3611,7 @@ function FotoRolSheet({foto,bilgi,urunAd,onSec,onSil,onClose}){
     btn("Katalog fotoğrafı",kat,()=>onSec("katalog"),"#0e8fce"),
     foto.silinir?h("button",{onClick:onSil,style:{width:"100%",padding:13,borderRadius:14,
       background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,
-      color:"var(--red)"}},"Sil"):null);
+      color:"var(--red)"}},foto.kaynak==="yerel"?"Gizle":"Sil"):null);
 }
 // ⚙️ ÜRETİM aşama komutu — adet gir / doğrudan belirle → aksiyonlar
 function StokKomutSheet({cfg,onClose}){
@@ -9792,19 +9792,29 @@ function App(){
         :{id:urunId,anaFoto:fotoId});
       say(nerede==="katalog"?"📔 Katalog fotoğrafı seçildi":"🖼 Ürün fotoğrafı seçildi"); }
     catch(e){ console.error(e); say("Seçilemedi"); } }
+  /* Görsel üç ayrı yerde durabiliyor; silmek her birinde başka bir iş:
+       yuklenen → urun_foto kaydı silinir
+       gomulu   → ürün kaydındaki base64 foto alanı boşaltılır (asıl yük burada)
+       yerel    → uygulamayla gelen dosya silinemez, o ürün için gizlenir */
   async function urunFotoSil(urunId,fotoId){
     const B=fotoBilgi[urunId]; const f=(B&&B.liste||[]).find(x=>x.id===fotoId);
     if(!f){ say("Fotoğraf bulunamadı"); return; }
-    if(!f.silinir){ say("Bu hazır bir görsel — silinemez, başkasını seçebilirsin"); return; }
-    if(!confirm("Bu fotoğraf silinsin mi?")) return;
-    try{ await remove("urun_foto",fotoId);
-      /* silinen görsel bir yerde seçiliyse o işaret temizlensin */
+    const kb=Math.round(String(f.data||"").length/1024);
+    if(!confirm(f.kaynak==="yerel"
+      ?"Bu hazır görsel bu üründe gizlensin mi?"
+      :("Bu fotoğraf silinsin mi?"+(kb>40?("\n"+kb+" KB yer açılır."):"")))) return;
+    try{
       const u=(urunler||[]).find(x=>x&&x.id===urunId)||{};
       const yama={id:urunId};
+      if(f.kaynak==="gomulu") yama.foto="";
+      else if(f.kaynak==="yerel") yama.yerelGizle=true;
+      else await remove("urun_foto",fotoId);
+      /* silinen görsel bir yerde seçiliyse o işaret temizlensin */
       if(u.anaFoto===fotoId) yama.anaFoto="";
       if(u.katalogFoto===fotoId) yama.katalogFoto="";
       if(Object.keys(yama).length>1) await save("stok_urun",yama);
-      say("Fotoğraf silindi"); }
+      say(f.kaynak==="yerel"?"Hazır görsel gizlendi"
+        :("Fotoğraf silindi"+(kb>40?(" · "+kb+" KB"):""))); }
     catch(e){ console.error(e); say("⚠ Silinemedi"); } }
   /* 🖨 iş planlarken seçilen baskı düzenini ürünün baskı bilgisine yazar —
      var olan tarif ezilmez, yalnız o makine türünün bloğu tazelenir */
