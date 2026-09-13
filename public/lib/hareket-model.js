@@ -16,7 +16,7 @@
    stok_hareket HİÇBİR adapterde mali satır üretmez.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const HM_SURUM = "1";
+export const HM_SURUM = "2";   // 2: defter çift kayda geçti (fisBacaklari)
 export const HM_TURLER = ["SATIS", "TAHSILAT", "MASRAF", "ODEME"];
 
 /* Hakediş düzeni kesim tarihi — TEK KAYNAK. admin/deneme/finans'taki üç kopya
@@ -105,15 +105,104 @@ export function etki(s) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   BORÇ / ALACAK — defter sütunlarının TEK KAYNAĞI.
-   Bina hareket defteriyle BİREBİR aynı kural: hizmet satırı BORÇ, diğer üç tür
-   ALACAK sütununa yazılır (TEMİZLİK HİZMETİ→borc · TAHSİLAT/MASRAF/ÖDEME→alacak).
-   Tikita karşılığı: SATIŞ→borç · TAHSİLAT/MASRAF/ÖDEME→alacak.
+   HESAP PLANI — finans defteriyle (finans.html · TDHP uyarlaması) AYNI kodlar.
+   Burada yalnız hareket defterinin dokunduğu hesaplar var.
    ───────────────────────────────────────────────────────────────────────── */
+export const HM_HESAP = {
+  "100":   "Kasa",
+  "108":   "Saha Kasası (pazarlamacıda)",
+  "120":   "Alıcılar (kaleler)",
+  "152.1": "Mamuller · Depo",
+  "150":   "İlk Madde ve Malzeme (filament)",
+  "157":   "Sarf Malzemesi",
+  "335":   "Personele Borçlar (hakediş)",
+  "340":   "Alınan Avanslar",
+  "360":   "Ödenecek Vergi ve Fonlar",
+  "600":   "Yurtiçi Satışlar",
+  "631":   "Pazarlamacı Payı (değişken)",
+  "631.9": "Diğer Pazarlama Giderleri",
+  "632":   "Genel Yönetim Giderleri",
+  "730":   "Genel Üretim Giderleri",
+};
+export const hmHesapAd = k => HM_HESAP[k] || String(k || "");
+
+/* gider türü → hesap (finans defteriyle aynı eşleme) */
+const MASRAF_HESAP = { "Elektrik": "730", "Bakım": "730", "Kargo": "631.9",
+  "Tanıtım": "631.9", "Vergi": "360", "Diğer": "632" };
+
+/* ─────────────────────────────────────────────────────────────────────────
+   ÇİFT KAYIT BACAKLARI — defter sütunlarının TEK KAYNAĞI.
+
+   Eskiden kural tek bacaklıydı: SATIŞ→borç, diğer üç tür→alacak. O kural
+   MÜŞTERİ CARİ EKSTRESİ için doğrudur (satış müşteriyi borçlandırır, tahsilat
+   alacaklandırır — bina hareket defterindeki okuma) ve ekstre bunu kaleEkstre
+   içinde cariEtki'den ZATEN doğru hesaplıyor. Ama GENEL hareket defterinde
+   aynı kural tutmuyordu: gider bir BORÇ kaydıdır, alacak sütununda duruyordu;
+   nakit teslim gibi iç transfer "tahsilat" gibi görünüyordu; ve sütunlar
+   birbirine denk gelmiyordu (canlı veride 61.715 ₺ açık).
+
+   Artık her satır iki bacağını hesap koduyla verir; BORÇ = ALACAK her satırda
+   ve dolayısıyla toplamda denktir. Nakit bacağı kasaYeri()'ne göre merkez (100)
+   ya da saha (108) kasasıdır.
+
+   ⚠ KDV bu modelde yok — bacaklar BRÜT tutarla kurulur. KDV ayrımı ve
+   tahakkuk/amortisman gibi vergi düzeyindeki işler finans defterinin işidir.
+   ───────────────────────────────────────────────────────────────────────── */
+export function fisBacaklari(s) {
+  if (!s) return [];
+  const t = r2(s.tutar); if (!t) return [];
+  const tur = s.tur, a = s.altTur;
+  const kasa = kasaYeri(s) === "saha" ? "108" : "100";
+  const B = (h, v) => ({ h, borc: r2(v), alacak: 0 });
+  const A = (h, v) => ({ h, borc: 0, alacak: r2(v) });
+
+  if (tur === "SATIS")
+    // satış anı: kale borçlanır, gelir doğar. Nakit girişi TAHSİLAT satırındadır.
+    return [B("120", t), A("600", t)];
+
+  if (tur === "TAHSILAT") {
+    // saha→merkez taşıma: iki nakit hesabı arasında transfer, gelir/alacak YOK
+    if (a === "icTransfer") return [B("100", t), A("108", t)];
+    // sayımsız avans cariye mahsup edilmez → alınan avanslar
+    if (a === "avans")      return [B(kasa, t), A("340", t)];
+    return [B(kasa, t), A("120", t)];
+  }
+
+  if (tur === "MASRAF") {
+    // tahakkuk: gider doğar, karşılığı personele borç (ödeme sonra ÖDEME satırında)
+    if (a === "tabla" || a === "montajIscilik") return [B("631", t), A("335", t)];
+    // numune/hediye: mal bedelsiz çıkar, maliyeti gidere yazılır
+    if (a === "numune")   return [B("631.9", t), A("152.1", t)];
+    // stok alımı gidere DEĞİL stoğa girer; hangi stok hesabı gider türünden gelir
+    if (a === "stokAlim") return [B(/filament/i.test(s.tarafAd || "") ? "150" : "157", t), A(kasa, t)];
+    if (a === "vergi")    return [B("360", t), A(kasa, t)];
+    // işletme gideri / sabit gider — türü eşlenmiyorsa genel yönetim
+    return [B(MASRAF_HESAP[s.tarafAd] || "632", t), A(kasa, t)];
+  }
+
+  if (tur === "ODEME")
+    // personele borcun kapanması — gider DEĞİL, borç ödemesi
+    return [B("335", t), A(kasa, t)];
+
+  return [];
+}
+
+/* Satırın defterdeki BORÇ/ALACAK sütunları — bacakların toplamı.
+   Çift kayıt olduğu için borc === alacak; sütunlar toplamda denk gelir. */
 export function borcAlacak(s) {
-  if (!s) return { borc: 0, alacak: 0 };
-  return (s.tur === "SATIS") ? { borc: r2(s.tutar), alacak: 0 }
-                             : { borc: 0, alacak: r2(s.tutar) };
+  const L = fisBacaklari(s);
+  if (!L.length) return { borc: 0, alacak: 0, bacaklar: [] };
+  return { borc: r2(L.reduce((z, x) => z + x.borc, 0)),
+           alacak: r2(L.reduce((z, x) => z + x.alacak, 0)), bacaklar: L };
+}
+
+/* Bacakların tek satırda okunur hali: "120 → 600" (borç hesabı → alacak hesabı) */
+export function fisOzet(s) {
+  const L = fisBacaklari(s);
+  if (!L.length) return "";
+  const b = L.filter(x => x.borc > 0).map(x => x.h).join("+");
+  const al = L.filter(x => x.alacak > 0).map(x => x.h).join("+");
+  return b + " → " + al;
 }
 
 /* Defter satırının kısa açıklaması — tabloda tek sütunda okunur olsun.

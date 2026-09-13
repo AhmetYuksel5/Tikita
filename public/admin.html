@@ -93,6 +93,7 @@ import { yedekTopla, yedekIndir, sonYedekIsaretle, sonYedekGun, yedekEskiMi, ymd
    mutabakat/ürün-kârlılığı fonksiyonları lib/hareket-model.js'te DURUYOR — yeni
    raporlar oradan beslenecek; ekran kurulunca buraya import edilir. */
 import { olayUret as hmOlayUret, borcAlacak as hmBorcAlacak, satirAciklama as hmSatirAciklama,
+         fisOzet as hmFisOzet, fisBacaklari as hmBacaklar, hmHesapAd,
          kaleBakiyeleri as hmBakiyeler, kaleEkstre as hmEkstre, donemRapor as hmDonemRapor,
          genelOzet as hmGenel, cariler as hmCariler, HM_TURLER } from "./lib/hareket-model.js";
 /* 📔 katalog motoru — pazarlamacı uygulamasıyla ortak */
@@ -110,7 +111,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L93";   // komuta (admin) deneme sürümü
+const SURUM="L94";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -7950,10 +7951,10 @@ function mhIko(baslik,ikon,onClick,opt){ opt=opt||{};
 /* ── DEFTER (HAREKETLER) — satır satır tablo; bina HAREKETLER'in Tikita karşılığı ──
    Sütun listesi TEK KAYNAK: görünürlük, sıra ve genişlik buradan türer. */
 const HD_COLS=[["tarih","TARİH"],["donem","DÖNEM"],["tur","TÜR"],["taraf","TARAF"],["aciklama","AÇIKLAMA"],
-  ["adet","ADET"],["borc","BORÇ"],["alacak","ALACAK"],["kisi","KİŞİ"],["kaynak","KAYNAK"],["ref","KAYIT NO"]];
-const HD_COLS_DEF={tarih:true,donem:true,tur:true,taraf:true,aciklama:true,adet:true,borc:true,alacak:true,kisi:false,kaynak:false,ref:false};
+  ["adet","ADET"],["fis","FİŞ"],["borc","BORÇ"],["alacak","ALACAK"],["kisi","KİŞİ"],["kaynak","KAYNAK"],["ref","KAYIT NO"]];
+const HD_COLS_DEF={tarih:true,donem:true,tur:true,taraf:true,aciklama:true,adet:true,fis:true,borc:true,alacak:true,kisi:false,kaynak:false,ref:false};
 /* Sütun genişlikleri (px) — kullanıcı ayarlar, localStorage'da kalır. */
-const HD_W_DEF={tarih:72,donem:96,tur:74,taraf:130,aciklama:170,adet:46,borc:82,alacak:82,kisi:80,kaynak:92,ref:120};
+const HD_W_DEF={tarih:72,donem:96,tur:74,taraf:130,aciklama:170,adet:46,fis:96,borc:82,alacak:82,kisi:80,kaynak:92,ref:120};
 const HD_W_MIN=38, HD_W_MAX=340;
 const TUR_ETIKET={SATIS:"SATIŞ",TAHSILAT:"TAHSİLAT",MASRAF:"MASRAF",ODEME:"ÖDEME"};
 /* Dönem = "2026 AĞUSTOS" (bina defteriyle aynı okunuş; hafta sütunu bilerek YOK). */
@@ -7976,7 +7977,13 @@ function hdFormDoldur(r){
     urunAd:r.urunAd||"", giderTur:(r.kaynakKol==="gider")?(r.tarafAd||""):"" };
 }
 const HD_TURBADGE={SATIS:["SATIŞ","#E3F6EC","#1FA855"],TAHSILAT:["TAHSİL","#E0F2F1","#0E8C7F"],
-  MASRAF:["MASRAF","#FCEEDD","#B45309"],ODEME:["ÖDEME","#FDECEC","#C0392B"]};
+  MASRAF:["MASRAF","#FCEEDD","#B45309"],ODEME:["ÖDEME","#FDECEC","#C0392B"],
+  TRANSFER:["TRANSFER","#EEF2FF","#4338CA"]};
+/* Nakit teslim modelde TAHSILAT/icTransfer'dir (her toplam onu doğru şekilde
+   dışarıda bırakıyor) ama TAHSİL yazması yanlış okunuyordu: bu bir tahsilat
+   değil, zaten tahsil edilmiş paranın sahadan merkeze taşınması. Rozet bunu
+   TRANSFER diye gösterir; modeldeki tür değişmez. */
+const hdTurBadge=r=>HD_TURBADGE[(r&&r.altTur==="icTransfer")?"TRANSFER":(r&&r.tur)]||["",""];
 const hdFd=t=>{ const d=new Date(t); if(isNaN(+d)) return "—";
   const p=n=>String(n).padStart(2,"0"); return p(d.getDate())+"."+p(d.getMonth()+1)+"."+d.getFullYear(); };
 const hdFmk=n=>{ const v=num(n); return v?v.toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2}):""; };
@@ -8046,9 +8053,9 @@ function HareketDefteri({rows,say}){
     return {borc:hrR2(b),alacak:hrR2(a)}; },[suz]);
   const gosterilen=useMemo(()=>tablaGizli?suz.filter(r=>r.altTur!=="tabla"):suz,[suz,tablaGizli]);
   const satirVeri=r=>({ tarih:hdFd(r.tarih), donem:hdDonem(r.tarih),
-    tur:(HD_TURBADGE[r.tur]||["",""])[0]||r.tur,
+    tur:hdTurBadge(r)[0]||r.tur,
     taraf:r.tarafAd||"", aciklama:hmSatirAciklama(r), adet:num(r.adet)||"",
-    borc:hdFmk(hmBorcAlacak(r).borc), alacak:hdFmk(hmBorcAlacak(r).alacak),
+    fis:hmFisOzet(r), borc:hdFmk(hmBorcAlacak(r).borc), alacak:hdFmk(hmBorcAlacak(r).alacak),
     kisi:r.kullaniciAd||"", kaynak:r.kaynakKol||"", ref:r.ref||"" });
   const gorunen=HD_COLS.filter(c=>cols[c[0]]);
   const sagMi=k=>k==="borc"||k==="alacak"||k==="adet";
@@ -8211,7 +8218,7 @@ function HareketDefteri({rows,say}){
           gosterilen.length===0?h("tr",null,h("td",{colSpan:gorunen.length,style:{padding:24,textAlign:"center",color:"var(--mut)",fontSize:12.5}},
             (rows||[]).length?"Süzgece uyan hareket yok.":"Henüz hareket yok.")):
           gosterilen.slice(0,lim).map(r=>{
-            const v=satirVeri(r); const bg=HD_TURBADGE[r.tur]||["","#eee","#666"];
+            const v=satirVeri(r); const bg0=hdTurBadge(r); const bg=bg0[1]?bg0:[bg0[0]||"","#eee","#666"];
             return h("tr",{key:r.ref,onClick:()=>duzenAc(r),title:"Düzenle",
               style:{cursor:"pointer",background:r.sentetik?"var(--surf2)":"transparent"}},
               gorunen.map(c=>{ const k=c[0];
@@ -8221,7 +8228,7 @@ function HareketDefteri({rows,say}){
                 const st={...hucre,textAlign:sagMi(k)?"right":"left"};
                 if(k==="borc"&&v.borc) st.color="#1FA855", st.fontWeight=800;
                 if(k==="alacak"&&v.alacak) st.color="#C0392B", st.fontWeight=800;
-                if(k==="ref"||k==="donem") st.fontSize=Math.max(7,font-2), st.color="var(--mut)";
+                if(k==="ref"||k==="donem"||k==="fis") st.fontSize=Math.max(7,font-2), st.color="var(--mut)";
                 return h("td",{key:k,style:st},v[k]); }));
           }))),
       gosterilen.length>lim?h("button",{type:"button",onClick:()=>setLim(x=>x+300),
