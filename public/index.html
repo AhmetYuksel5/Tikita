@@ -139,7 +139,7 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }   // kalıcı önbellek — okuma kotasını ve açılış süresini düşürür
 
 const { useState, useEffect, useMemo, useRef } = React;
-const SURUM="G2";   // giriş kapısı sürümü — hata kalkanı bunu yazar
+const SURUM="G3";   // giriş kapısı sürümü — hata kalkanı bunu yazar
 const h = React.createElement;
 
 /* ---------- DEMO MODU — demo hesabı aktifken oyun koleksiyonları 'demo_' önekine gider,
@@ -197,8 +197,17 @@ function useColl(name, demoFlag){
 // kullanıcılar — yüklendi bilgisiyle (ilk-açılış ekranı için)
 function useKullanici(){
   const [st,setSt]=useState({rows:[],loaded:false});
-  useEffect(()=>onSnapshot(collection(db,"kullanici"),s=>{ const R=s.docs.map(d=>({id:d.id,...d.data()}));
-    AUD.snapPut("kullanici",R); setSt({rows:R,loaded:true}); },e=>console.error("kullanici",e)),[]);
+  useEffect(()=>onSnapshot(collection(db,"kullanici"),{includeMetadataChanges:true},s=>{
+    const R=s.docs.map(d=>({id:d.id,...d.data()}));
+    AUD.snapPut("kullanici",R);
+    /* ⚠ BOŞ LİSTE "kullanıcı yok" DEMEK DEĞİLDİR. Kalıcı önbellek, cihaz çevrimdışıyken
+       ya da ilk açılışta sunucudan önce boş bir anlık görüntü verir; o boşluğa güvenilirse
+       giriş ekranı "ilk yöneticiyi oluştur" kipine düşer ve kullanıcı kendi adıyla YENİ BİR
+       YÖNETİCİ hesabı yaratıp doğrudan içeri girer. Bu yüzden boş liste yalnız SUNUCUDAN
+       geldiyse kabul edilir; önbellekten gelen boşlukta sunucu yanıtı beklenir.
+       Önbellekte kullanıcı varsa (dönen cihaz) çevrimdışı giriş eskisi gibi çalışır. */
+    if(R.length||!s.metadata.fromCache) setSt({rows:R,loaded:true});
+  },e=>console.error("kullanici",e)),[]);
   return st;
 }
 const num = v => { const n=parseFloat(v); return isNaN(n)?0:n; };
