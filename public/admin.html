@@ -99,6 +99,7 @@ import { olayUret as hmOlayUret, borcAlacak as hmBorcAlacak, satirAciklama as hm
 import { urunFotolari, fotoBul, urunFotoBilgi, fotoKaynakAd,
          katalogFiyat, katalogKart, katalogDuzen, katalogCanvas, pdfKur, veriBayt,
          KAT_SAYFA, KAT_PAD, KAT_ARA, KAT_BAS, KAT_ALT, kurKatalogSheet, pngIndir } from "./lib/katalog.js";
+import { listeAyikla, urunEsle, cantaPlan, planOzet as cantaPlanOzet } from "./lib/cantaListe.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -109,7 +110,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L92";   // komuta (admin) deneme sürümü
+const SURUM="L93";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -2962,7 +2963,71 @@ function EkipSatir({e,onClick}){ const u=e.u; const tip=kulTip(u);
         "hafta "+tl(e.hafC)+" · bugün "+tl(e.bugunC)+(e.alacak>0.5?(" · "+tl(e.alacak)):""))),
     h("span",{style:{fontSize:12,fontWeight:800,color:"var(--gold)",flexShrink:0}},"💪 "+e.guc.toLocaleString("tr-TR")));
 }
-function EkipSheet({e,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,onView,bekle,kisiTalep,onTalep}){
+/* ————— 📋 ÇANTA LİSTESİ —————
+   Yapıştırılan "ürün adı + adet" metnini pazarlamacının çantasına yazar.
+   Ekle → listedeki adet çantaya eklenir. Eşitle → çanta tam o sayıya çekilir
+   (aynı liste iki kez yapıştırılsa bile çanta iki katına çıkmaz).
+   Eşleşmeyen ya da birden çok adayı olan satırda ürünü kullanıcı seçer. */
+function CantaListeSheet({kul,urunler,onClose,onUygula,bekle}){
+  const [metin,setMetin]=useState("");
+  const [mod,setMod]=useState("ekle");
+  const [sec,setSec]=useState({});   // istek adı → seçilen ürün id ("" = atla)
+  const ayr=useMemo(()=>listeAyikla(metin),[metin]);
+  const esli=useMemo(()=>urunEsle(ayr.kalemler,urunler),[ayr,urunler]);
+  /* kullanıcının elle seçtiği ürün, eşleştiricinin bulduğunun önüne geçer */
+  const son=useMemo(()=>esli.map(x=>{
+    const s=sec[x.ad];
+    if(s===undefined) return x;
+    return {...x,urun:s?(urunler||[]).find(u=>u.id===s)||null:null,elle:true};
+  }),[esli,sec,urunler]);
+  const plan=useMemo(()=>cantaPlan(son,kul.id,mod),[son,kul.id,mod]);
+  const oz=useMemo(()=>cantaPlanOzet(plan),[plan]);
+  const bekleyen=son.filter(x=>!x.urun);
+  const planOf=ad=>plan.find(p=>p.istek===ad);
+  const opt=x=>{ const L=x.adaylar.length?x.adaylar:(urunler||[]).filter(u=>!u.arsiv);
+    return [h("option",{key:"_",value:""},"— atla —")]
+      .concat(L.slice().sort((a,b)=>String(a.ad).localeCompare(String(b.ad),"tr"))
+        .map(u=>h("option",{key:u.id,value:u.id},u.ad))); };
+  const satir=(x,i)=>{ const p=planOf(x.ad);
+    return h("div",{key:x.ad+i,style:{padding:"9px 0",borderTop:i?"1px solid var(--line)":"none"}},
+      h("div",{style:{display:"flex",alignItems:"baseline",gap:8}},
+        h("div",{style:{flex:1,minWidth:0,fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},x.ad),
+        h("span",{style:{flexShrink:0,fontSize:13.5,fontWeight:800,color:"var(--gold)"}},x.adet+" ad")),
+      x.urun?h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginTop:3}},
+        h("div",{style:{flex:1,minWidth:0,fontSize:11.5,fontWeight:700,color:x.kesin?"var(--mut)":"var(--cyan)",
+          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+          (x.kesin?"":(x.elle?"✋ ":"≈ "))+x.urun.ad),
+        p?h("span",{style:{flexShrink:0,fontSize:11.5,fontWeight:800,
+          color:p.delta===0?"var(--mut)":"var(--txt)"}},
+          "🎒 "+p.cantaOnce+"→"+p.cantaSonra):null,
+        (p&&p.delta!==0)?h("span",{style:{flexShrink:0,fontSize:11.5,fontWeight:800,
+          color:p.stokSonra<0?"var(--red)":"var(--mut)"}},"📦 "+p.stokOnce+"→"+p.stokSonra):null):null,
+      x.urun?null:h("select",{value:sec[x.ad]===undefined?"":sec[x.ad],
+        onChange:ev=>setSec(s=>({...s,[x.ad]:ev.target.value})),
+        style:{...inp,marginTop:5,fontSize:13,padding:"9px 10px"}},opt(x))); };
+  return h(Sheet,{ik:"📋",hex:"#1e3a5f",baslik:"Çanta listesi",alt:kul.ad,onClose,
+    cta:oz.yazilacak?("🎒 "+oz.yazilacak+" ürünü çantaya yaz"):"Liste yapıştır",
+    disabled:bekle||!oz.yazilacak,onCta:()=>onUygula&&onUygula(kul,plan,mod)},
+    h("div",{style:{display:"flex",gap:7,marginBottom:12}},
+      h(Chip,{on:mod==="ekle",onClick:()=>setMod("ekle")},"Ekle"),
+      h(Chip,{on:mod==="esitle",onClick:()=>setMod("esitle")},"Eşitle")),
+    h("textarea",{value:metin,onChange:ev=>setMetin(ev.target.value),rows:6,
+      placeholder:"Ahtapot\t56\nKaplumbağa\t42",
+      style:{...inp,fontSize:14,fontWeight:600,lineHeight:1.5,resize:"vertical",
+        fontFamily:"ui-monospace,Menlo,monospace",whiteSpace:"pre"}}),
+    ayr.kalemler.length?h("div",{style:{marginTop:14}},
+      h("div",{className:"lbl",style:{marginBottom:2}},
+        ayr.kalemler.length+" satır · "+ayr.kalemler.reduce((s,x)=>s+x.adet,0)+" adet"
+        +(bekleyen.length?(" · "+bekleyen.length+" ürün seçilmeli"):"")
+        +(oz.degismeyen?(" · "+oz.degismeyen+" değişmiyor"):"")),
+      son.map(satir),
+      oz.eksiyeDusen?h("div",{style:{marginTop:12,padding:"10px 12px",borderRadius:12,
+        background:"#fef2f2",border:"1px solid #fca5a5",fontSize:12,fontWeight:800,color:"#b91c1c"}},
+        "⚠️ "+oz.eksiyeDusen+" üründe atölye stoğu eksiye düşecek"):null,
+      ayr.atlanan.length?h("div",{style:{marginTop:10,fontSize:11.5,color:"var(--mut)",fontWeight:700}},
+        "atlanan satır: "+ayr.atlanan.length):null):null);
+}
+function EkipSheet({e,urunler,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,onView,onCantaListe,bekle,kisiTalep,onTalep}){
   const u=e.u; const tip=kulTip(u);
   const cur=(u.pin!=null&&u.pin!=="")?String(u.pin):""; const gizliPin=!cur&&!!u.pinHash;
   const [pinVal,setPinVal]=useState(cur); const [gor,setGor]=useState(false);
@@ -2970,6 +3035,9 @@ function EkipSheet({e,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,onView,b
   const pinTemiz=String(pinVal||"").trim();
   const kaydedilir=pinTemiz.length>=4&&pinTemiz!==cur;
   const islemli=(e.mine||[]).length>0;   // herhangi bir hareket varsa → sadece arşiv (kayıtlar saklı); yoksa → silinebilir
+  const canta=(urunler||[]).map(x=>({id:x.id,ad:x.ad||"?",adet:num((x.pazStokK||{})[u.id])}))
+    .filter(x=>x.adet>0).sort((a,b)=>b.adet-a.adet);
+  const cantaTop=canta.reduce((s,x)=>s+x.adet,0);
   const son=e.mine.filter(x=>["satis","tahsilat","konsinye","iade","stant","tabla"].includes(x.tip))
     .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).slice(0,10);
   const oz=x=>{ if(x.tip==="satis") return {t:num(x.adet)+" × "+(x.urunAd||"?")+(x.gerilla?" ⚡":""),v:tl(num(x.adet)*num(x.satisFiyat)),renk:"var(--green)"};
@@ -3002,6 +3070,23 @@ function EkipSheet({e,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,onView,b
       h(Stat,{ik:"📅",v:tl(e.bugunC),l:"bugün",renk:"var(--txt)"}),
       h(Stat,{ik:"🫰",v:tl(e.hafPay),l:"hafta hakedişi (satış−alış)",renk:"var(--gold)"}),
       h(Stat,{ik:"🧾",v:tl(e.alacak),l:"açık alacak (sahada)",renk:e.alacak>0.5?"var(--red)":"var(--green)"})),
+    /* 🎒 ÇANTASI — hangi üründen kaç adet taşıyor. Ürün ürün dökümü yalnız
+       pazarlamacı ekranında vardı; komuta bunu görmek için 👁 ile karşıya
+       geçmek zorunda kalıyordu. */
+    (u.rol!=="montaj"&&canta.length)?h("div",{style:{marginBottom:14}},
+      h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}},
+        h("div",{className:"lbl",style:{flex:1}},"Çantasında · "+cantaTop+" adet · "+canta.length+" çeşit"),
+        onCantaListe?h("button",{onClick:()=>onCantaListe(u),
+          style:{flexShrink:0,padding:"5px 10px",borderRadius:9,background:"var(--surf2)",
+            border:"1px solid var(--line)",fontSize:11.5,fontWeight:800,color:"var(--cyan)"}},"📋 Liste"):null),
+      canta.map((c,i)=>h("div",{key:c.id||i,style:{display:"flex",alignItems:"baseline",gap:8,
+        padding:"6px 0",borderTop:i?"1px solid var(--line)":"none"}},
+        h("span",{style:{flex:1,minWidth:0,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},c.ad),
+        h("span",{style:{flexShrink:0,fontSize:13,fontWeight:800,color:"var(--gold)"}},c.adet+" ad")))):null,
+    (u.rol!=="montaj"&&!canta.length&&onCantaListe)?h("button",{onClick:()=>onCantaListe(u),
+      style:{width:"100%",padding:13,borderRadius:14,marginBottom:14,background:"var(--surf2)",
+        border:"1px solid var(--line)",fontSize:13.5,fontWeight:800,color:"var(--cyan)"}},
+      "📋 Çantasına liste yapıştır"):null,
     e.kaleler.length?h("div",{style:{marginBottom:14}},
       h("div",{className:"lbl",style:{marginBottom:6}},"En güçlü kaleleri"),
       e.kaleler.slice(0,5).map((k,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"7px 0",borderTop:i?"1px solid var(--line)":"none",fontSize:13.5}},
@@ -9563,6 +9648,32 @@ function App(){
     try{ await save("kullanici",{id,pin:String(pin).trim(),pinHash:"",pinSalt:""}); say("Şifre güncellendi"); }
     catch(e){ console.error(e); say("Güncellenemedi"); } finally{ setIsBekle(false); } }
   const sifreGor=u=>{ if(u&&u.id) location.href=(u.rol==="montaj"?"montaj.html?as=":"deneme.html?as=")+u.id; };   // 👁 rolüne uygun ekrana geç
+  /* 📋 yapıştırılan liste çantaya — pazarlamacı uygulamasındaki cantaEkle ile
+     AYNI akış: çanta sayacı, atölye stoğu ve hareket kaydı birlikte oynar.
+     Artı delta "al" (atölyeden çantaya), eksi delta "iade" (çantadan atölyeye). */
+  async function cantaListeUygula(kul,plan,mod){
+    const yaz=(plan||[]).filter(p=>p&&p.id&&p.delta!==0);
+    if(!kul||!kul.id||!yaz.length||isBekle) return;
+    const top=yaz.reduce((s,p)=>s+p.delta,0);
+    const eksi=yaz.filter(p=>p.stokSonra<0).length;
+    if(!confirm("🎒 "+(kul.ad||"pazarlamacı")+" · "+yaz.length+" ürün\n"
+      +(mod==="esitle"?"Çanta listeye eşitlenecek":"Çantaya eklenecek")
+      +" · net "+(top>0?"+":"")+top+" adet\n"
+      +"Atölye stoğundan "+(top>0?("düşülecek: "+top):("geri alınacak: "+(-top)))+" adet"
+      +(eksi?("\n\n⚠ "+eksi+" üründe stok eksiye düşecek"):"")+"\n\nOnaylıyor musun?")) return;
+    setIsBekle(true);
+    const now=new Date().toISOString();
+    let n=0;
+    try{
+      for(const p of yaz){
+        await save("stok_urun",{id:p.id,pazStokK:{[kul.id]:increment(p.delta)},stokta:increment(-p.delta)});
+        await save("pazarlama_hareket",{kullaniciId:kul.id,kullaniciAd:kul.ad||"",
+          tip:p.delta>0?"al":"iade",kaynak:"canta",urunId:p.id,urunAd:p.ad||"",
+          adet:Math.abs(p.delta),tarih:now});
+        n++; }
+      setModal(null); say("🎒 "+n+" ürün yazıldı · net "+(top>0?"+":"")+top+" adet"); }
+    catch(er){ console.error(er); say(n?("Yarıda kaldı — "+n+" ürün yazıldı"):"Yazılamadı"); }
+    finally{ setIsBekle(false); } }
   async function alacakKapat(o){ if(!o||!o.x||!o.x.id||isBekle) return;
     if(!confirm("✓ "+(o.yer||"kale")+" · "+tl(o.acik)+" açık borç kapatılsın mı?\nSatış kaydı ve cirosu korunur; alacak 0 olur.")) return; setIsBekle(true);
     try{ await save("pazarlama_hareket",{id:o.x.id,tahsil:o.bek}); say("Borç kapatıldı · "+tl(o.acik)); }
@@ -10355,9 +10466,13 @@ function App(){
     modal&&modal.tip==="kullanici"&&h(KullaniciSheet,{u:modal.u,bekle:isBekle,onKaydet:kullaniciKaydet}),
     modal&&modal.tip==="ekip"&&(()=>{ const cu=(kullanicilar||[]).find(x=>x.id===modal.e.u.id)||modal.e.u;   // canlı kayıt (şifre kaydedince tazelensin)
       const kt=(talepler||[]).filter(x=>(x.kullaniciId||"")===cu.id).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
-      return h(EkipSheet,{e:{...modal.e,u:cu},bekle:isBekle,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:cu}),
+      return h(EkipSheet,{e:{...modal.e,u:cu},urunler:d.stok,bekle:isBekle,onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"kullanici",u:cu}),
         onSil:kullaniciSil,onArsiv:kullaniciArsivle,onArsivGeri:kullaniciArsivGeri,onSifre:sifreSet,onView:sifreGor,
+        onCantaListe:uu=>setModal({tip:"cantaListe",u:uu}),
         kisiTalep:kt,onTalep:t=>setModal({tip:"talep",t})}); })(),
+    modal&&modal.tip==="cantaListe"&&h(CantaListeSheet,{kul:modal.u,urunler:d.stok,bekle:isBekle,
+      onClose:()=>setModal({tip:"ekip",e:(d.ekip||[]).find(x=>x.u.id===modal.u.id)||{u:modal.u,mine:[],kaleler:[],rutbe:KOMUTAN[0],guc:0,kaleSay:0}}),
+      onUygula:cantaListeUygula}),
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
       return h(StokSheet,{u:s,kullanicilar,hareketler,makineler,filamentler,montajGorev,onBaski:uu=>setModal({tip:"baskiBilgi",u:uu}),foto:(fotoMap[s.id]||{}).data,fotoBilgi:fotoBilgi[s.id],onFoto:f=>urunFotoEkle(s.id,f),
         onFotoSec:(fid,nerede)=>urunFotoSec(s.id,fid,nerede),onFotoSil:fid=>urunFotoSil(s.id,fid),onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
