@@ -96,6 +96,7 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
 import { kurAudit } from "./lib/tikita-audit.js";
 /* 📔 katalog motoru — komuta uygulamasıyla ortak */
 import { urunFotoBilgi, kurKatalogSheet } from "./lib/katalog.js";
+import { kdvHesap, kdvOraniOku, kdvMatrah } from "./lib/hareket-model.js";
 const cfg={apiKey:"AIzaSyDLf4LIJikzWGVgN_k_d6SuGlgiBWBxt5k",authDomain:"tikita-2026.firebaseapp.com",projectId:"tikita-2026",storageBucket:"tikita-2026.firebasestorage.app",messagingSenderId:"518493033310",appId:"1:518493033310:web:a687bc4409974277d0f5cf"};
 const __app=initializeApp(cfg);
 let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})}); }
@@ -106,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v123";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v124";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -527,7 +528,7 @@ function useColl(name){ const [rows,setRows]=useState(null);
     return ()=>{clearTimeout(t);un();}; },[]);
   return rows; }
 
-function hesap(hareketler,musteriler,kullanicilar,urunler){
+function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
   const emir=(kullanicilar||[]).find(u=>u.id===BEN_ID)||{id:BEN_ID||"",ad:"Pazarlamacı",simge:"🎖️"};
   const _tumHar=hareketler||[];                                              // GLOBAL — sadece lider tablosu için
   hareketler=_tumHar.filter(x=>(x.kullaniciId||"")===emir.id);               // ⬇️ bundan sonrası: SADECE bu pazarlamacının kayıtları (kişisel istatistik sızmasın)
@@ -546,7 +547,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   (hareketler||[]).forEach(x=>{ if(x.gerilla) return; const k=kk(x); const t=new Date(x.tarih).getTime()||0;
     if(["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi"].includes(x.tip)) sonK[k]=Math.max(sonK[k]||0,t);
     // deneme (overlay) yazımları: gerçek kayda dokunmadan borç/konsinyeyi düzelt
-    if(x._ov){ if(x.tip==="tahsilat") ovTah[k]=(ovTah[k]||0)+num(x.tutar);
+    if(x._ov){ if(x.tip==="tahsilat") ovTah[k]=(ovTah[k]||0)+kdvMatrah(x);   // 🧾 KDV borçtan düşmez
       if((x.tip==="satis"&&x.kaynak==="konsinye")||x.tip==="iade"){ const ad=x.urunAd||"?";
         ovCoz[k]=(ovCoz[k]||0)+num(x.adet); (ovCozList[k]||(ovCozList[k]={}))[ad]=(ovCozList[k][ad]||0)+num(x.adet); } }
     if(x.tip==="tahsilat"){ (tahByK[k]||(tahByK[k]=[])).push(x); if(x.avans&&num(x.acikAvans)>0) avansK[k]=(avansK[k]||0)+num(x.acikAvans); }
@@ -601,7 +602,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
     k.marjEski=Math.max(0,marjEskiK[k.key]||0);      // kesme öncesi satışların marjı
     const ornE=(ciroEskiK[k.key]||0)>0?Math.min(1,k.marjEski/ciroEskiK[k.key]):0;
     k.eskiAlinan=Math.min(k.marjEski,(tahByK[k.key]||[])
-      .filter(x=>new Date(x.tarih).getTime()<HAKEDIS_BAS_MS).reduce((s,x)=>s+num(x.tutar)*ornE,0));
+      .filter(x=>new Date(x.tarih).getTime()<HAKEDIS_BAS_MS).reduce((s,x)=>s+kdvMatrah(x)*ornE,0));
     k.eskiBekleyen=Math.max(0,k.marjEski-k.eskiAlinan);
     k.hakedis=k.marjYeni+k.eskiAlinan;               // bugün itibarıyla hak edilmiş toplam
     k.yeniBorc=Math.max(0,(borcYeniK[k.key]||0)-avansAcik);   // yeni dönem satışlarından tahsil edilmemiş (açık tahsilat düşülmüş)
@@ -674,6 +675,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler){
   const elde=sinirsiz?cephane.slice():cephane.filter(u=>u.canta>0||u.odul>0);
   const eksiStok=sinirsiz?cephane.filter(u=>u.stokta<0).sort((a,b)=>a.stokta-b.stokta):[];
   return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,hafGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
+    kdvOran:kdvOraniOku(opt&&opt.ayar),   // 🧾 tahsilatta eklenecek KDV oranı (ayar/genel)
     sinirsiz,elde,eksiStok,
     gorevHaf,rozetler,lider,emirSira,toplamCiro,hakedisTop,tablaKazTop,tablaOdenenTop,tablaKalanTop,bugunSat,bugunCiro,bugunTah,vurkac,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
@@ -2618,6 +2620,7 @@ function ActionSheet({type,k,d,onClose,onFire}){
   const stokEt=u=>(num(u.odul)>0?("🎁 "+num(u.odul)+" · "):"")+(SZ?("🏭 "+num(u.stokta)):("🎒 "+num(u.canta)));
   const bosMetin=SZ?"Atölyede ürün yok.":"Çantan boş.";
   const [tut,setTut]=useState(type==="tahsilat"?Math.round(k?k.borc:0):0);
+  const [kdvli,setKdvli]=useState(false);   // 🧾 tahsilatta KDV ekle (fatura kesiliyorsa)
   const [urun,setUrun]=useState(d.elde[0]||{ad:"",fiyat:0});
   const [adet,setAdet]=useState(1);
   const [fiyat,setFiyat]=useState(num((d.elde[0]||{}).fiyat)||0);
@@ -2639,15 +2642,32 @@ function ActionSheet({type,k,d,onClose,onFire}){
     setAdet(1); setKfiyat(""); setKkalem({ad:"",adet:0}); setLines({}); };   // kalıcı: seçim sıfırlansın, başka ürün seçilebilsin
 
   if(type==="tahsilat"){ const borc=k?k.borc:0;
+    /* 🧾 KDV — fatura kesilen tahsilatta borcun ÜSTÜNE eklenir. Girilen tutar
+       borçtan düşen kısımdır; müşteri tutar+KDV öder. Fatura kesilmeyen
+       satışta KDV doğmaz (opsiyon kapalı), o yüzden varsayılan kapalıdır. */
+    const kdvT=kdvli?kdvHesap(tut,d.kdvOran):0;
+    const toplam=tut+kdvT;
     return h(Sheet,{ik:"🧾",hex:"#d97b12",baslik:"Tahsilat · "+(k?k.ad:""),alt:"Bu kalenin borcu "+tl(borc),
-      onClose,cta:bekle?"⏳ İşleniyor…":"🧾 "+tl(tut)+" tahsil et",disabled:tut<=0||bekle,
-      onCta:()=>fire(tl(tut)+" tahsilat işlendi · "+(k?k.ad:""),XP.tahsilat,{tut})},
-      h("div",{className:"lbl",style:{marginBottom:8}},"Alınan tutar"),
+      onClose,cta:bekle?"⏳ İşleniyor…":"🧾 "+tl(toplam)+" tahsil et",disabled:tut<=0||bekle,
+      onCta:()=>fire(tl(toplam)+" tahsilat işlendi · "+(k?k.ad:"")+(kdvT>0?(" · "+tl(kdvT)+" KDV"):""),
+        XP.tahsilat,{tut,kdv:kdvT,kdvOran:kdvli?d.kdvOran:0})},
+      h("div",{className:"lbl",style:{marginBottom:8}},"Borçtan düşülecek tutar"),
       h("input",{type:"number",inputMode:"numeric",value:tut||"",onChange:e=>setTut(num(e.target.value)),style:inp}),
       h("div",{style:{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}},
         h(Chip,{on:tut===Math.round(borc),onClick:()=>setTut(Math.round(borc))},"Tümü · "+tl(borc)),
         borc>1&&h(Chip,{on:tut===Math.round(borc/2),onClick:()=>setTut(Math.round(borc/2))},"Yarısı"),
-        h(Chip,{on:false,onClick:()=>setTut(0)},"Temizle")));
+        h(Chip,{on:false,onClick:()=>setTut(0)},"Temizle")),
+      h("div",{style:{display:"flex",gap:8,marginTop:14,flexWrap:"wrap",alignItems:"center"}},
+        h(Chip,{on:kdvli,onClick:()=>setKdvli(v=>!v)},"🧾 KDV ekle · %"+num(d.kdvOran))),
+      kdvT>0?h("div",{style:{marginTop:12,padding:"11px 13px",borderRadius:13,
+        background:"#f0f9ff",border:"1px solid #a5d8f3"}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12.5,fontWeight:700,color:"var(--mut)"}},
+          h("span",null,"Borçtan düşen"),h("span",null,tl(tut))),
+        h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12.5,fontWeight:700,color:"var(--mut)",marginTop:4}},
+          h("span",null,"KDV %"+num(d.kdvOran)),h("span",null,tl(kdvT))),
+        h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14.5,fontWeight:900,marginTop:7,
+          paddingTop:7,borderTop:"1px solid #a5d8f3",color:"#0369a1"}},
+          h("span",null,"Müşteriden alınacak"),h("span",null,tl(toplam)))):null);
   }
   if(type==="satis"){
     // 🤝 bu kalede bu ürüne anlaşmalı fiyat varsa satış ve veriliş birlikte oradan gelir
@@ -3438,7 +3458,8 @@ function App(){
   const yuk=[canliHar,musteriler,kullanicilar,urunler].some(x=>x===null);
   const hareketler=useMemo(()=>canliHar||[],[canliHar]);
   const tumMus=useMemo(()=>musteriler||[],[musteriler]);
-  const d=useMemo(()=>yuk?null:hesap(hareketler,tumMus,kullanicilar,urunler,{}),[hareketler,tumMus,kullanicilar,urunler,yuk]);
+  const ayarGenel=useMemo(()=>(ayarlar||[]).find(a=>a.id==="genel")||{},[ayarlar]);
+  const d=useMemo(()=>yuk?null:hesap(hareketler,tumMus,kullanicilar,urunler,{ayar:ayarGenel}),[hareketler,tumMus,kullanicilar,urunler,ayarGenel,yuk]);
   const emirId=(d&&d.emir&&d.emir.id)||"mr14ih8vc39wug";
   // 💬 komuta hattı — Emir'in talepleri + cevaplar
   const emirTalep=useMemo(()=>(talepler||[]).filter(t=>(t.kullaniciId||"")===emirId).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)),[talepler,emirId]);
@@ -3632,7 +3653,15 @@ function App(){
       for(const o of acik){ if(kalan<=0)break; const dd=Math.min(o.borc,kalan);
         const b=payBol(o.x,dd,o.onceki); uP+=b.u;pP+=b.p; kalan-=dd; uyg+=dd; plan.push({id:o.x.id,dd}); }
       if(uyg<=0) return {iptal:"Bu kalede açık borç yok."};
-      await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:uyg,ureticiPay:uP,pazPay:pP,...yerB,...gecEk,tarih:now});
+      /* 🧾 KDV borcun ÜSTÜNE eklenir: kayıttaki `tutar` tahsil edilen TOPLAMDIR
+         (nakdi okuyan her yer doğru kalsın), `kdv` onun içindeki vergi payıdır.
+         Borçtan düşen yalnız `uyg` — aşağıdaki plan döngüsü onu işler.
+         KDV oranı girilen tutara göre yeniden hesaplanır: kullanıcı tutarı
+         düşürdüyse (borç azalmışsa) vergi de o kadar olsun. */
+      const kdvO=num(p.kdvOran), kdvT=kdvO>0?kdvHesap(uyg,kdvO):0;
+      const kdvEk=kdvT>0?{kdv:kdvT,kdvOran:kdvO}:{};
+      await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:uyg+kdvT,...kdvEk,
+        ureticiPay:uP,pazPay:pP,...yerB,...gecEk,tarih:now});
       for(const it of plan) await save("pazarlama_hareket",{id:it.id,tahsil:increment(it.dd)});   // atomik — satışın borcu gerçekten kapanır
     } else if(p.type==="satis"){
       const u=p.urun||{}; const gerilla=!k; const satisId=uid();

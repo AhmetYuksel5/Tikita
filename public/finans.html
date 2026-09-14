@@ -234,7 +234,9 @@ function defterUret(D,V){
   const M=D.maliyet;
   const kdvO=num(V.kdvOran)/100;
   const brutView=V.hasilatGorusu!=="net";
-  // KDV dahil fiyattan net ve KDV ayrıştırma
+  /* KDV dahil fiyattan net ve KDV ayrıştırma — ALIŞ tarafı için.
+     ⚠ SATIŞ tarafında artık kullanılmaz: fatura kesilmeyen satışta KDV doğmaz,
+     KDV yalnız "KDV ekle" işaretli TAHSİLAT kayıtlarından (x.kdv) gelir. */
   const ayir=brut=>{ const b=num(brut); if(!V.fiyatlarKdvDahil) return {net:b,kdv:b*kdvO};
     const net=b/(1+kdvO); return {net,kdv:b-net}; };
   const ek=(t,tur,ac,sat,ref)=>{ const s=(sat||[]).filter(x=>Math.abs(num(x.b))>0.004||Math.abs(num(x.a))>0.004)
@@ -380,7 +382,7 @@ function defterUret(D,V){
     const konsMu=x.kaynak==="konsinye";
     const kaynakH=konsMu?"152.3":"152.2";
     const hasilatBrut=brutView?mus:Math.min(veris,mus>0?mus:veris);
-    const {net,kdv}=ayir(hasilatBrut);
+    const net=hasilatBrut;   // 🧾 satışta KDV yok (bkz. ayir yorumu)
     // şirket pazarlamacısında pay yok: bedelin tamamı Tikita'ya kalır
     const prim=(brutView&&!sirketSet[x.kullaniciId])?Math.max(0,mus-veris):0;
     // ⚡ gerilla (seyyar) satış PEŞİNDİR: ayrı tahsilat kaydı yazılmaz, para anında alınır.
@@ -391,11 +393,11 @@ function defterUret(D,V){
       const yeni=ISO(x.tarih)>=HAKEDIS_BAS_MS;
       // kesme sonrası: para PAZARLAMACININ elinde (108), teslim edilince 100'e geçer
       ek(x.tarih,"satis","Gerilla satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
-        yeni?[{h:"108",b:hasilatBrut},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv},{h:"335",a:prim}]
-            :[{h:"100",b:hasilatBrut-prim},{h:"631",b:prim},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
+        yeni?[{h:"108",b:hasilatBrut},{h:"631",b:prim},{h:"600",a:net},{h:"335",a:prim}]
+            :[{h:"100",b:hasilatBrut-prim},{h:"631",b:prim},{h:"600",a:net}],"har:"+x.id);
     } else {
       ek(x.tarih,"satis","Satış · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
-        [{h:"120",b:hasilatBrut},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
+        [{h:"120",b:hasilatBrut},{h:"600",a:net}],"har:"+x.id);
       if(prim>0.004) ek(x.tarih,"prim","Pazarlamacı payı tahakkuku · "+(x.kullaniciAd||""),
         [{h:"631",b:prim},{h:"335",a:prim}],"har:"+x.id+":p");
     }
@@ -410,22 +412,30 @@ function defterUret(D,V){
   /* ——— 4.8 tahsilat ——— */
   (D.hareketler||[]).forEach(x=>{ if(x.tip!=="tahsilat") return;
     const tut=num(x.tutar); if(tut<=0) return;
-    if(x.avans){ ek(x.tarih,"tahsilat","Sayımsız avans · "+(x.yer||""),
-        [{h:"100",b:tut},{h:"340",a:tut}],"har:"+x.id); return; }
+    /* 🧾 KDV — "KDV ekle" işaretli tahsilatta kasaya TOPLAM girer, cariden
+       yalnız MATRAH düşer, aradaki fark Hesaplanan KDV'dir (391). Satış
+       fişlerinde KDV yoktur; beyan edilecek KDV yalnız burada doğar.
+       kdvB: KDV varsa eklenecek bacak, yoksa boş dizi. */
+    const kdv=num(x.kdv), mat=Math.max(0,tut-kdv);
+    const kdvB=kdv>0?[{h:"391",a:kdv}]:[];
+    const et=kdv>0?" · KDV "+tl(kdv):"";
+    if(x.avans){ ek(x.tarih,"tahsilat","Sayımsız avans · "+(x.yer||"")+et,
+        [{h:"100",b:tut},{h:"340",a:mat},...kdvB],"har:"+x.id); return; }
     const uP=num(x.ureticiPay), pP=num(x.pazPay);
     if(brutView){
       // kesme sonrası: tahsilatın tamamı Tikita'ya gelir, pazarlamacı payı mahsup edilmez
       if(ISO(x.tarih)>=HAKEDIS_BAS_MS){
-        ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||""),
-          [{h:"108",b:tut},{h:"120",a:tut}],"har:"+x.id);
+        ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||"")+et,
+          [{h:"108",b:tut},{h:"120",a:mat},...kdvB],"har:"+x.id);
       } else {
-        const bilinen=uP+pP; const artik=Math.max(0,tut-bilinen);
-        ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||""),
-          [{h:"100",b:uP+artik},{h:"335",b:pP},{h:"120",a:tut}],"har:"+x.id);
+        const bilinen=uP+pP; const artik=Math.max(0,mat-bilinen);
+        ek(x.tarih,"tahsilat","Tahsilat · "+(x.yer||"")+" · "+(x.kullaniciAd||"")+et,
+          [{h:"100",b:uP+artik+kdv},{h:"335",b:pP},{h:"120",a:mat},...kdvB],"har:"+x.id);
       }
     } else {
-      ek(x.tarih,"tahsilat","Tahsilat (üretici payı) · "+(x.yer||""),
-        [{h:"100",b:uP>0?uP:tut},{h:"120",a:uP>0?uP:tut}],"har:"+x.id);
+      const nP=uP>0?uP:mat;
+      ek(x.tarih,"tahsilat","Tahsilat (üretici payı) · "+(x.yer||"")+et,
+        [{h:"100",b:nP+kdv},{h:"120",a:nP},...kdvB],"har:"+x.id);
     }
   });
 
@@ -438,9 +448,8 @@ function defterUret(D,V){
     if(x.mod==="hediye"){
       ek(x.tarih,"stant","Stant · hediye · "+(x.yer||""),[{h:"631.9",b:f},{h:"100",a:f}],"har:"+x.id);
     } else {
-      const {net,kdv}=ayir(f);
       ek(x.tarih,"stant","Stant geliri · "+(x.yer||""),
-        [{h:"100",b:f},{h:"600",a:net},{h:"391",a:kdv}],"har:"+x.id);
+        [{h:"100",b:f},{h:"600",a:f}],"har:"+x.id);
     } });
 
   /* ——— 4.9b nakit teslim: saha kasası → Tikita kasası ——— */

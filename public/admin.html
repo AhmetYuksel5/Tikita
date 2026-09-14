@@ -94,6 +94,7 @@ import { yedekTopla, yedekIndir, sonYedekIsaretle, sonYedekGun, yedekEskiMi, ymd
    raporlar oradan beslenecek; ekran kurulunca buraya import edilir. */
 import { olayUret as hmOlayUret, borcAlacak as hmBorcAlacak, satirAciklama as hmSatirAciklama,
          fisOzet as hmFisOzet, fisBacaklari as hmBacaklar, hmHesapAd,
+         kdvHesap as hmKdvHesap, kdvOraniOku as hmKdvOran,
          kaleBakiyeleri as hmBakiyeler, kaleEkstre as hmEkstre, donemRapor as hmDonemRapor,
          genelOzet as hmGenel, cariler as hmCariler, HM_TURLER } from "./lib/hareket-model.js";
 /* 📔 katalog motoru — pazarlamacı uygulamasıyla ortak */
@@ -111,7 +112,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L95";   // komuta (admin) deneme sürümü
+const SURUM="L96";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -7508,11 +7509,14 @@ function AyarSheet({ayar,onKaydet,bekle}){
   const [gF,setGF]=useState(a.gorevFetih!=null?String(a.gorevFetih):"3");
   const [gT,setGT]=useState(a.gorevTahsil!=null?String(a.gorevTahsil):"3");
   const [gK,setGK]=useState(a.gorevKurtar!=null?String(a.gorevKurtar):"2");
+  const [kdvO,setKdvO]=useState(a.kdvOran!=null?String(a.kdvOran):"20");
   const [gkey,setGkey]=useState(a.googleKey||"");
   const alan=(lbl,val,set,txt)=>h("div",null,h("div",{className:"lbl",style:{marginBottom:6}},lbl),
     h("input",{type:txt?"text":"number",inputMode:txt?"text":"numeric",value:val,onChange:e=>set(e.target.value),style:{...inp,marginBottom:12}}));
   return h(Sheet,{ik:"⚙️",hex:"#1e3a5f",baslik:"Oyun ayarları",alt:"",onClose:()=>onKaydet(null),
-    cta:bekle?"⏳…":"Kaydet",disabled:bekle,onCta:()=>onKaydet({tablaUcret:num(tabla),uzakKm:num(uzak),tehdit1:num(t1),tehdit2:num(t2),tehdit3:num(t3),terkEsik:num(terk),gorevAkin:num(gA),gorevFetih:num(gF),gorevTahsil:num(gT),gorevKurtar:num(gK),googleKey:gkey.trim()})},
+    cta:bekle?"⏳…":"Kaydet",disabled:bekle,onCta:()=>onKaydet({tablaUcret:num(tabla),uzakKm:num(uzak),tehdit1:num(t1),tehdit2:num(t2),tehdit3:num(t3),terkEsik:num(terk),gorevAkin:num(gA),gorevFetih:num(gF),gorevTahsil:num(gT),gorevKurtar:num(gK),kdvOran:num(kdvO),googleKey:gkey.trim()})},
+    h("div",{className:"lbl",style:{marginBottom:8,color:"var(--mut2)"}},"KDV"),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},alan("KDV oranı (%)",kdvO,setKdvO)),
     h("div",{className:"lbl",style:{marginBottom:8,color:"var(--mut2)"}},"TABLA & MESAFE"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},alan("Tabla ücreti (₺)",tabla,setTabla),alan("Uzak kale (km)",uzak,setUzak)),
     h("div",{className:"lbl",style:{marginBottom:8,color:"var(--mut2)"}},"TEHDİT EŞİĞİ (gün)"),
@@ -8000,7 +8004,7 @@ function hdCsvIndir(sutunlar,satirlar,dosyaAdi){
 /* ═══ 📒 DEFTER — satır satır hareket tablosu (raporların KAYNAĞI) ═══
    Bina HAREKETLER tablosunun Tikita karşılığı: sütunlu tablo, sütun seçici,
    yazı boyutu, dönem/tür süzgeci, arama, CSV çıktı. Satıra dokun → ham kayıt. */
-function HareketDefteri({rows,say}){
+function HareketDefteri({rows,say,ayar}){
   const [q,setQ]=useState("");
   /* Tür süzgeci ARAÇ ÇUBUĞUNDA DEĞİL, TÜR SÜTUN BAŞLIĞINDA (kullanıcı 2026-08-24):
      başlığa dokun → küçük süzgeç penceresi, istenmeyen türün tikini kaldır.
@@ -8096,8 +8100,10 @@ function HareketDefteri({rows,say}){
             elle:true,not:(f.aciklama||"").trim()});
         } else if(t==="TAHSILAT"){
           if(tutar<=0){ say&&say("Tutar girin"); setBekle(false); return; }
+          const kdvO=f.kdvli?hmKdvOran(ayar):0, kdvT=kdvO>0?hmKdvHesap(tutar,kdvO):0;
           await save("pazarlama_hareket",{tip:"tahsilat",tarih:new Date(f.tarih+"T12:00:00").toISOString(),
-            girildi:new Date().toISOString(),tutar,yer:(f.taraf||"").trim(),kullaniciAd:"Komuta",kullaniciId:BEN_ID||"",
+            girildi:new Date().toISOString(),tutar:tutar+kdvT,...(kdvT>0?{kdv:kdvT,kdvOran:kdvO}:{}),
+            yer:(f.taraf||"").trim(),kullaniciAd:"Komuta",kullaniciId:BEN_ID||"",
             elle:true,not:(f.aciklama||"").trim()});
         } else {
           if(tutar<=0){ say&&say("Tutar girin"); setBekle(false); return; }
@@ -8173,6 +8179,18 @@ function HareketDefteri({rows,say}){
                 :["Filament alımı","Sarf malzemesi alımı","Yedek parça alımı","Elektrik","Bakım","Kargo","Vergi","Tanıtım","Diğer"])
                 .map(t=>h("option",{key:t,value:t},t))))
         :alan("TARAF (kale / kişi)","taraf"),
+      /* 🧾 KDV — fatura kesilen tahsilatta TUTARIN ÜSTÜNE eklenir. Kayda giden
+         `tutar` toplamdır, `kdv` içindeki vergidir; borçtan yalnız matrah düşer. */
+      (duzen.yeni?duzen.f.tur:duzen.r.tur)==="TAHSILAT"?(()=>{
+        const oran=hmKdvOran(ayar), mat=num(String(duzen.f.tutar||"").replace(",",".")),
+              kdvT=duzen.f.kdvli?hmKdvHesap(mat,oran):0;
+        return h("div",{style:{marginTop:4}},
+          h("label",{style:{...lblSt,display:"flex",alignItems:"center",gap:8,cursor:"pointer"}},
+            h("input",{type:"checkbox",checked:!!duzen.f.kdvli,
+              onChange:e=>fSet("kdvli",e.target.checked?1:0)}),
+            "KDV EKLE · %"+oran),
+          kdvT>0?h("div",{style:{fontSize:11.5,fontWeight:700,color:"var(--mut)",marginTop:2}},
+            "borçtan düşen "+hrTl(mat)+" · KDV "+hrTl(kdvT)+" · tahsil edilen "+hrTl(mat+kdvT)):null); })():null,
       alan("AÇIKLAMA","aciklama"),
       h("div",{style:{display:"flex",gap:9,marginTop:15}},
         duzen.yeni?null:h("button",{type:"button",onClick:sil,disabled:bekle,
@@ -8373,7 +8391,7 @@ function EkstreGorselBtn({kaleAd,E,say}){
               fontSize:12.5,fontWeight:700,color:"var(--txt)",background:"none",textAlign:"left"}},
             mhSvg(ic,"var(--mut)",15),l)))):null);
 }
-function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,kullanicilar,say}){
+function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,kullanicilar,say,ayar}){
   const [alt,setAlt]=useState(()=>{ try{ return sessionStorage.getItem("tk_mh_alt")||"hareket"; }catch(e){ return "hareket"; } });
   useEffect(()=>{ try{ sessionStorage.setItem("tk_mh_alt",alt); }catch(e){} },[alt]);
   const [kale,setKale]=useState(null);        // BAKİYE → seçili carinin ekstresi
@@ -8417,7 +8435,7 @@ function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,ku
         marginBottom:8,lineHeight:1.5}},
         "Bu ayın sabit giderleri ay bitince deftere düşer: "
         +bekleyenSabit.map(x=>x.tur+" "+hrTl(x.tutar)).join(" · ")):null,
-      h(HareketDefteri,{rows,say}));
+      h(HareketDefteri,{rows,say,ayar}));
   } else if(alt==="bakiye"){
     /* CARİ = MÜŞTERİ + PERSONEL (kullanıcı 2026-08-24: "bir ödeme mi yaptım o
        aslında bir caridir, Emir'e tabla ödemesi mi yaptım o da bir cari harekettir").
@@ -10356,7 +10374,7 @@ function App(){
       say(ids.length+" baskıya filament atandı"); }});
   else if(gorunen==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap,onPlanSil:x=>isSil({p:x.p,durum:"bekliyor"}),bekle:isBekle,onFiyat:fiyatKaydet,anlasmaSay:anlasmalar.length});
   else if(gorunen==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler,yinelenenSay:yinelenenler.length});
-  else if(gorunen==="muhasebe") ekran=h(MuhasebeTab,{hareketler,giderler,sabitGider,montajGorev,hakedisDonem,kullanicilar,say});
+  else if(gorunen==="muhasebe") ekran=h(MuhasebeTab,{hareketler,giderler,sabitGider,montajGorev,hakedisDonem,kullanicilar,say,ayar});
   else ekran=h(RaporA,{d,ac:setModal,giderler,sabitGider,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal,
     hakedisDonem,onHakOnay:hakedisOnay,onHakOde:hakedisOde,onHakGeriAl:hakedisGeriAl,
     onNakitOnay:nakitOnay,onNakitGeriAl:nakitGeriAl,montajGorev,say});

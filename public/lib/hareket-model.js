@@ -16,7 +16,7 @@
    stok_hareket HİÇBİR adapterde mali satır üretmez.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const HM_SURUM = "3";   // 3: fisBacaklari/FİŞ sütunu var, BORÇ/ALACAK tek bacaklı
+export const HM_SURUM = "4";   // 4: tahsilatta KDV (391) bacağı
 export const HM_TURLER = ["SATIS", "TAHSILAT", "MASRAF", "ODEME"];
 
 /* Hakediş düzeni kesim tarihi — TEK KAYNAK. admin/deneme/finans'taki üç kopya
@@ -41,6 +41,23 @@ export function haftaKod(t) {
 }
 export const ayKod = t => { const d = new Date(t);
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
+
+/* ── 🧾 KDV ───────────────────────────────────────────────────────────────
+   Fatura kesilen tahsilatta KDV borcun ÜSTÜNE eklenir: müşteri tutar+KDV öder,
+   borçtan yalnız tutar düşer. Fatura kesilmeyen satışta KDV doğmaz — bu yüzden
+   satış fiyatından KDV AYRIŞTIRILMAZ, KDV yalnız işaretli tahsilatlardan gelir.
+   Kayıtta: tutar = tahsil edilen TOPLAM (KDV dahil) · kdv = içindeki KDV.
+   tutar'ın toplam olması, nakdi okuyan onlarca yerin kendiliğinden doğru
+   kalmasını sağlar; borçtan düşen kısım kdvMatrah() ile bulunur. */
+export const KDV_ORAN_VARSAYILAN = 20;
+export const kdvOraniOku = ayar => {
+  const v = num(ayar && ayar.kdvOran);
+  return (v > 0 && v < 100) ? v : KDV_ORAN_VARSAYILAN;
+};
+// matrahın üstüne eklenecek KDV (kuruşa yuvarlanır)
+export const kdvHesap = (matrah, oran) => r2(num(matrah) * (num(oran) / 100));
+// bir tahsilat kaydının borçtan düşen (KDV'siz) kısmı
+export const kdvMatrah = x => r2(num(x && x.tutar) - num(x && x.kdv));
 
 /* ── ödeme/masraf tür ayrımı (gider koleksiyonu) ────────────────────────── */
 export const ODEME_GIDER_TUR = { "Pazarlamacı hakedişi": "hakedis", "Montaj işçiliği": "montajIscilik" };
@@ -118,6 +135,7 @@ export const HM_HESAP = {
   "335":   "Personele Borçlar (hakediş)",
   "340":   "Alınan Avanslar",
   "360":   "Ödenecek Vergi ve Fonlar",
+  "391":   "Hesaplanan KDV",
   "600":   "Yurtiçi Satışlar",
   "631":   "Pazarlamacı Payı (değişken)",
   "631.9": "Diğer Pazarlama Giderleri",
@@ -161,9 +179,13 @@ export function fisBacaklari(s) {
   if (tur === "TAHSILAT") {
     // saha→merkez taşıma: iki nakit hesabı arasında transfer, gelir/alacak YOK
     if (a === "icTransfer") return [B("100", t), A("108", t)];
+    /* 🧾 KDV'li tahsilat: kasaya TOPLAM girer, borçtan yalnız matrah düşer,
+       aradaki fark Hesaplanan KDV'dir. KDV yoksa üçüncü bacak hiç çıkmaz. */
+    const kdv = r2(num(s.kdv)), mat = r2(t - kdv);
     // sayımsız avans cariye mahsup edilmez → alınan avanslar
-    if (a === "avans")      return [B(kasa, t), A("340", t)];
-    return [B(kasa, t), A("120", t)];
+    if (a === "avans")
+      return kdv > 0 ? [B(kasa, t), A("340", mat), A("391", kdv)] : [B(kasa, t), A("340", t)];
+    return kdv > 0 ? [B(kasa, t), A("120", mat), A("391", kdv)] : [B(kasa, t), A("120", t)];
   }
 
   if (tur === "MASRAF") {
@@ -333,7 +355,7 @@ export function olayUret(D, opts) {
     if (x.tip === "tahsilat") {
       const t = num(x.tutar); if (t <= 0) return;
       ekle(satir("har:" + x.id, "TAHSILAT", x.avans ? "avans" : "normal", x,
-        { ...kale(x), tutar: t, kaynakKol: "pazarlama_hareket", kaynakId: x.id }));
+        { ...kale(x), tutar: t, kdv: r2(x.kdv), kaynakKol: "pazarlama_hareket", kaynakId: x.id }));
       return;
     }
 
@@ -506,6 +528,13 @@ export function cariEtki(s) {
 }
 export function cariAnahtar(s) { return (s.tarafTip || "musteri") + "|" + kaleAnahtar(s); }
 
+/* Satırın CARİYE yansıyan tutarı. KDV'li tahsilatta kasaya toplam girer ama
+   müşterinin borcundan yalnız MATRAH düşer — KDV devlete ödenecek vergidir. */
+export function cariTutar(s) {
+  if (!s) return 0;
+  return (s.tur === "TAHSILAT" && num(s.kdv) > 0) ? r2(num(s.tutar) - num(s.kdv)) : r2(s.tutar);
+}
+
 /* Bu tarafla ilgili TÜM hareketler — tür kısıtı YOK (kullanıcı isteği: "onunla
    alakalı bütün hareketleri görebilmeliyim"). Yürüyen bakiye yalnız gerçekten
    cari etkisi olan satırlarda ilerler; avans ve tarafın adına rastgele denk
@@ -526,9 +555,11 @@ export function kaleEkstre(rows, kaleAd, tip) {
     const avansMi = s.tur === "TAHSILAT" && s.altTur === "avans";
     const cariMi = !avansMi && ce !== 0;
     // artış = bakiyeyi büyüten yön (+1), azalış = küçülten (−1)
-    const artis = (cariMi && ce > 0) ? s.tutar : 0;
-    const azalis = (cariMi && ce < 0) ? s.tutar
-      : ((!cariMi && !avansMi && (s.tur === "TAHSILAT" || s.tur === "MASRAF" || s.tur === "ODEME")) ? s.tutar : 0);
+    // 🧾 KDV'li tahsilatta cariden düşen yalnız MATRAHTIR (bkz. cariTutar)
+    const cariTut = cariTutar(s);
+    const artis = (cariMi && ce > 0) ? cariTut : 0;
+    const azalis = (cariMi && ce < 0) ? cariTut
+      : ((!cariMi && !avansMi && (s.tur === "TAHSILAT" || s.tur === "MASRAF" || s.tur === "ODEME")) ? cariTut : 0);
     if (cariMi) run = r2(run + artis - azalis);
     return { ...s, artis, azalis, borc: artis, alacak: azalis,
       bakiye: run, avansMi, cariDisi: !cariMi && !avansMi };
@@ -565,7 +596,7 @@ export function kaleBakiyeleri(rows) {
   (rows || []).forEach(s => {
     const e = etki(s); if (!e.musteriCari) return;
     const k = kaleAnahtar(s);
-    M[k] = r2((M[k] || 0) + e.musteriCari * s.tutar);
+    M[k] = r2((M[k] || 0) + e.musteriCari * cariTutar(s));
   });
   return Object.entries(M).map(([kale, bakiye]) => ({ kale, bakiye }))
     .sort((a, b) => b.bakiye - a.bakiye);
