@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v124";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v125";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -3815,7 +3815,23 @@ function App(){
   const __geriAlKayit=async(x)=>{ const o=ovOzet(x); if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
     try{
       const ad2=num(x.adet); const gecmisMi=x.kaynak==="gecmis";
-      const sonKons=()=>emirHar.filter(h2=>h2.tip==="konsinye"&&h2.id!==x.id&&kkOf(h2)===kkOf(x)&&(h2.urunAd||"?")===(x.urunAd||"?")).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih))[0];
+      /* ↩️ RAFA DÖNDÜR — konsinye satışı/hediyesi/iadesi geri alınınca adet rafa döner.
+         Satış kaydı hangi PARTİDEN çıktığını saklamaz; düşüş FIFO olduğu için dönüş de
+         EN ESKİ boş yeri olan partiden başlar ve HİÇBİR PARTİ KENDİ ADEDİNİ AŞAMAZ.
+         Eskiden yalnız EN YENİ partiye sınırsız increment yazılıyordu:
+           • iki parti varsa yanlış partiye dönüyordu,
+           • sınır olmadığı için yarıda kalan/tekrarlanan geri almada kalan şişiyordu.
+         Canlı veride 10'luk bir parti bu yüzden kalan=22 görünmüştü. */
+      const rafaDondur=async(n0)=>{ let n=Math.round(num(n0)); if(!(n>0)) return 0;
+        const partiler=emirHar.filter(h2=>h2.tip==="konsinye"&&h2.id!==x.id
+            &&kkOf(h2)===kkOf(x)&&(h2.urunAd||"?")===(x.urunAd||"?"))
+          .sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));   // en eski önce
+        const bas=n;
+        for(const pt of partiler){ if(n<=0) break;
+          const yer=Math.max(0,num(pt.adet)-num(pt.kalan)); if(yer<=0) continue;
+          const dd=Math.min(yer,n);
+          await save("pazarlama_hareket",{id:pt.id,kalan:increment(dd)}); n-=dd; }
+        return bas-n; };
       if(x.tip==="konsinye"&&num(x.kalan)!==ad2) return alert("Bu konsinyenin bir kısmı satılmış/iade olmuş.\nÖnce ilgili satış/iadeleri geri al.");
       if(x.tip==="nakitTeslim"&&x.onay!==false) return alert("Bu nakit teslimi komuta onayladı.\nGeri alınması için komutaya haber ver.");
       if(x.tip==="tahsilat"&&x.avans){
@@ -3825,12 +3841,14 @@ function App(){
         let kalan=num(x.tutar);
         const tahsilli=emirHar.filter(s=>s.tip==="satis"&&!s.gerilla&&kkOf(s)===kkOf(x)&&num(s.tahsil)>0).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
         for(const s of tahsilli){ if(kalan<=0.001)break; const dd=Math.min(kalan,num(s.tahsil)); await save("pazarlama_hareket",{id:s.id,tahsil:increment(-dd)}); kalan-=dd; } }
-      // raftan çıkan (konsinye kaynaklı) satış VE hediye geri alınınca "kalan" rafa döner
-      if((x.tip==="satis"||x.tip==="hediye")&&x.kaynak==="konsinye"){ const kx=sonKons(); if(kx) await save("pazarlama_hareket",{id:kx.id,kalan:increment(ad2)}); }
-      if(x.tip==="iade"){ const kx=sonKons(); if(kx) await save("pazarlama_hareket",{id:kx.id,kalan:increment(ad2)}); }
       if(x.tip==="tabla"&&x.planId){ try{ await save("plan",{id:x.planId,tablaAlindi:false}); }catch(e){} }
       if(x.tip==="tablaOde"&&x.kaynakTalep){ try{ await save("talep",{id:x.kaynakTalep,durum:"acik",cevap:"",cevapTarih:""}); }catch(e){} }   // ödeme geri alınırsa emir yeniden açılır
+      /* ⚠️ SIRA: önce KAYIT SİLİNİR, sonra raf doldurulur. Tersi olursa (eski hâl)
+         silme adımı hata alıp kullanıcı tekrar denediğinde raf her denemede yeniden
+         şişer ve satış da yerinde durur — canlıda tam bu oldu. */
       await remove("pazarlama_hareket",x.id);
+      // raftan çıkan (konsinye kaynaklı) satış VE hediye geri alınınca "kalan" rafa döner
+      if(((x.tip==="satis"||x.tip==="hediye")&&x.kaynak==="konsinye")||x.tip==="iade") await rafaDondur(ad2);
       // çanta etkisini tersine çevir (geçmiş kayıtlar çantayı oynatmamıştı)
       if(x.urunId&&!gecmisMi){
         if((x.tip==="satis"||x.tip==="hediye")&&x.kaynak!=="konsinye") await cantaDelta(x.urunId,x.urunAd,+ad2);
