@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v130";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v131";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -1462,7 +1462,9 @@ function KaleDetay({k,back,say,openSheet,ovList,geriAl,kaleHar,openDuzen,kampany
     h("div",{style:{padding:"18px 16px 0"}},
       // durum kartları — tıklanabilir (aksiyon = kartın kendisi)
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
-        h(Stat,{ik:"🧾",v:tl(k.borc),l:k.borc>0.5?"Tahsil et →":"Borç yok",renk:k.borc>0.5?"var(--gold)":"var(--green)",onClick:k.borc>0.5?()=>openSheet("tahsilat",k):null}),
+        /* Borç yokken de açılır: sayım yapılmadan alınan para (avans) tam bu durumda
+   gerekiyor. Sayfa borç yoksa doğrudan "Sayımsız" kipinde açılır. */
+      h(Stat,{ik:"🧾",v:tl(k.borc),l:k.borc>0.5?"Tahsil et →":"Avans al →",renk:k.borc>0.5?"var(--gold)":"var(--green)",onClick:()=>openSheet("tahsilat",k)}),
         h(Stat,{ik:"🏬",v:k.acikKons+" adet",l:"Konsinye →",renk:"var(--violet)",onClick:()=>openSheet("konsinye",k)}),
         h(Stat,{ik:"💰",v:tl(k.ciro),l:"Toplam ciro · geçmiş →",renk:"var(--txt)",onClick:()=>setPanel("hareket")}),
         h(Stat,{ik:"⚔️",v:k.satisAdet+" satış",l:"İlişki gücü",renk:"var(--txt)"})),
@@ -2675,6 +2677,8 @@ function ActionSheet({type,k,d,onClose,onFire}){
   const bosMetin=SZ?"Atölyede ürün yok.":"Çantan boş.";
   const [tut,setTut]=useState(type==="tahsilat"?Math.round(k?k.borc:0):0);
   const [kdvli,setKdvli]=useState(false);   // 🧾 tahsilatta KDV ekle (fatura kesiliyorsa)
+  // tahsilat kipi: borç varsa mahsup, yoksa doğrudan sayımsız avans
+  const [tmod,setTmod]=useState(()=>(k&&num(k.borc)>0.5)?"borc":"avans");
   const [urun,setUrun]=useState(d.elde[0]||{ad:"",fiyat:0});
   const [adet,setAdet]=useState(1);
   const [fiyat,setFiyat]=useState(num((d.elde[0]||{}).fiyat)||0);
@@ -2701,27 +2705,45 @@ function ActionSheet({type,k,d,onClose,onFire}){
     setAdet(1); setKfiyat(""); setKkalem({ad:"",adet:0}); setLines({}); };   // kalıcı: seçim sıfırlansın, başka ürün seçilebilsin
 
   if(type==="tahsilat"){ const borc=k?k.borc:0;
+    /* 🧾 SAYIMSIZ (AVANS) — sayım yapılmadan alınan para. Borca mahsup EDİLMEZ;
+       kalenin cari hesabında bekler ve sonraki konsinye satışını karşılar.
+       Girişi v126'ya kadar konsinye sayfasının "Tahsilat" sekmesindeydi; o sekme
+       Hediye'ye verilince akış erişilemez kalmıştı, doğru yeri burası. */
+    const avansli=tmod==="avans";
     /* 🧾 KDV — fatura kesilen tahsilatta borcun ÜSTÜNE eklenir. Girilen tutar
        borçtan düşen kısımdır; müşteri tutar+KDV öder. Fatura kesilmeyen
        satışta KDV doğmaz (opsiyon kapalı), o yüzden varsayılan kapalıdır. */
     const kdvT=kdvli?kdvHesap(tut,d.kdvOran):0;
     const toplam=tut+kdvT;
-    return h(Sheet,{ik:"🧾",hex:"#d97b12",baslik:"Tahsilat · "+(k?k.ad:""),alt:"Bu kalenin borcu "+tl(borc),
-      onClose,cta:bekle?"⏳ İşleniyor…":"🧾 "+tl(toplam)+" tahsil et",disabled:tut<=0||bekle,
-      onCta:()=>fire(tl(toplam)+" tahsilat işlendi · "+(k?k.ad:"")+(kdvT>0?(" · "+tl(kdvT)+" KDV"):""),
-        XP.tahsilat,{tut,kdv:kdvT,kdvOran:kdvli?d.kdvOran:0})},
-      h("div",{className:"lbl",style:{marginBottom:8}},"Borçtan düşülecek tutar"),
+    return h(Sheet,{ik:"🧾",hex:"#d97b12",rozet:avansli?"Sayımsız tahsilat":"Tahsilat",baslik:(k?k.ad:""),
+      alt:"Bu kalenin borcu "+tl(borc)+((k&&num(k.avansAcik)>0.5)?(" · bekleyen avans "+tl(k.avansAcik)):""),
+      onClose,cta:bekle?"⏳ İşleniyor…":("🧾 "+tl(toplam)+(avansli?" avans al":" tahsil et")),disabled:tut<=0||bekle,
+      onCta:()=>fire(tl(toplam)+(avansli?" sayımsız tahsilat alındı · ":" tahsilat işlendi · ")+(k?k.ad:"")
+          +(kdvT>0?(" · "+tl(kdvT)+" KDV"):""),
+        XP.tahsilat,{tut,avans:avansli,kdv:kdvT,kdvOran:kdvli?d.kdvOran:0})},
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6,marginBottom:12}},
+        [["borc","🧾 Borca mahsup"],["avans","⏳ Sayımsız"]].map(([m,lbl])=>
+          h("button",{key:m,onClick:()=>setTmod(m),
+            style:{padding:"9px 2px",borderRadius:11,fontSize:12,fontWeight:800,minWidth:0,
+              whiteSpace:"nowrap",overflow:"hidden",
+              background:tmod===m?"#1b1e25":"var(--surf2)",color:tmod===m?"#fff":"var(--mut)",
+              border:"1px solid "+(tmod===m?"#1b1e25":"var(--line)")}},lbl))),
+      h("div",{className:"lbl",style:{marginBottom:8}},avansli?"Alınan tutar":"Borçtan düşülecek tutar"),
       h("input",{type:"number",inputMode:"numeric",value:tut||"",onChange:e=>setTut(num(e.target.value)),style:inp}),
-      h("div",{style:{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}},
+      avansli?null:h("div",{style:{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}},
         h(Chip,{on:tut===Math.round(borc),onClick:()=>setTut(Math.round(borc))},"Tümü · "+tl(borc)),
         borc>1&&h(Chip,{on:tut===Math.round(borc/2),onClick:()=>setTut(Math.round(borc/2))},"Yarısı"),
         h(Chip,{on:false,onClick:()=>setTut(0)},"Temizle")),
       h("div",{style:{display:"flex",gap:8,marginTop:14,flexWrap:"wrap",alignItems:"center"}},
         h(Chip,{on:kdvli,onClick:()=>setKdvli(v=>!v)},"🧾 KDV ekle · %"+num(d.kdvOran))),
+      (avansli&&k&&num(k.avansAcik)>0.5)?h("div",{style:{marginTop:12,padding:"11px 13px",borderRadius:12,
+        background:"#fff7ed",border:"1px solid #fdba74",fontSize:12.5,fontWeight:700,color:"#9a3412"}},
+        "Bu kalede daha önce alınmış "+tl(k.avansAcik)+" var"
+        +(num(k.borcHam)>0.5?(" · "+tl(Math.min(num(k.avansAcik),num(k.borcHam)))+"'si borca sayıldı"):"")):null,
       kdvT>0?h("div",{style:{marginTop:12,padding:"11px 13px",borderRadius:13,
         background:"#f0f9ff",border:"1px solid #a5d8f3"}},
         h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12.5,fontWeight:700,color:"var(--mut)"}},
-          h("span",null,"Borçtan düşen"),h("span",null,tl(tut))),
+          h("span",null,avansli?"Avans":"Borçtan düşen"),h("span",null,tl(tut))),
         h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12.5,fontWeight:700,color:"var(--mut)",marginTop:4}},
           h("span",null,"KDV %"+num(d.kdvOran)),h("span",null,tl(kdvT))),
         h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14.5,fontWeight:900,marginTop:7,
@@ -3792,6 +3814,19 @@ function App(){
     const kul={kullaniciId:emirId,kullaniciAd:(d&&d.emir&&d.emir.ad)||"Emir"};
     const yerB=k?{yer:k.ad,bolge:k.bolge||"",musteriId:k.musteriId||""}:{};
     if(p.type==="tahsilat"){
+      /* ⏳ SAYIMSIZ (AVANS) — borca mahsup EDİLMEZ, satışa da bağlanmaz.
+         Kalenin cari hesabında acikAvans olarak bekler; hesap() onu borçtan
+         düşer ve borcu aşan kısmı "sayımsız tahsilat" diye gösterir.
+         Üretici/pazarlamacı payı burada bilinemez (hangi ürün satıldı belli
+         değil), mahsup anında doğar. */
+      if(p.avans){
+        const tutA=Math.round(num(p.tut)); if(tutA<=0) return {iptal:"Tutar gir."};
+        const kdvOA=num(p.kdvOran), kdvA=kdvOA>0?kdvHesap(tutA,kdvOA):0;
+        await save("pazarlama_hareket",{...kul,tip:"tahsilat",avans:true,
+          tutar:tutA+kdvA,...(kdvA>0?{kdv:kdvA,kdvOran:kdvOA}:{}),acikAvans:tutA,
+          ureticiPay:0,pazPay:0,...yerB,...gecEk,tarih:now});
+        return {};
+      }
       const acik=emirHar.filter(x=>x.tip==="satis"&&!x.gerilla&&kkOf(x)===key)
         .map(x=>{const bek=num(x.adet)*num(x.satisFiyat);const onceki=x.tahsil==null?bek:num(x.tahsil);return {x,bek,onceki,borc:Math.max(0,bek-onceki)};})
         .filter(o=>o.borc>0).sort((a,b)=>new Date(a.x.tarih)-new Date(b.x.tarih));
