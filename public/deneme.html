@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v127";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v128";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -639,6 +639,10 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
     {ad:"Bu hafta 5.000 ₺ ciro",deg:Math.round(hafCiro),hedef:5000,renk:"var(--gold)",birim:"tl"},
     {ad:"15 konsinye bırak",deg:hafKons,hedef:15,renk:"var(--violet)"}];
   const gorevler=kaleler.filter(k=>k.durum.key!=="saglam").sort((a,b)=>oncelik[a.durum.key]-oncelik[b.durum.key]||b.guc-a.guc);
+  /* 🗂 bu pazarlamacının geçmişinde işlem görmüş ürünler — konsinye listesinde
+     "az kullanılanlar" akordiyonunun otomatik kuralı bunu kullanır */
+  const kullanilanUrun={};
+  (hareketler||[]).forEach(x=>{ if(x&&x.urunId&&x.tip!=="al") kullanilanUrun[x.urunId]=(kullanilanUrun[x.urunId]||0)+1; });
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
   const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",eklendi:u.eklendi||"",seriler:seriListe(u),stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),odul:num((u.odulStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
@@ -688,6 +692,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
   const eksiStok=sinirsiz?cephane.filter(u=>u.stokta<0).sort((a,b)=>a.stokta-b.stokta):[];
   return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,hafGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
     kdvOran:kdvOraniOku(opt&&opt.ayar),   // 🧾 tahsilatta eklenecek KDV oranı (ayar/genel)
+    kullanilanUrun,
     sinirsiz,elde,eksiStok,
     gorevHaf,rozetler,lider,emirSira,toplamCiro,hakedisTop,tablaKazTop,tablaOdenenTop,tablaKalanTop,bugunSat,bugunCiro,bugunTah,vurkac,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
@@ -2678,7 +2683,8 @@ function ActionSheet({type,k,d,onClose,onFire}){
   const [anlKay,setAnlKay]=useState(false);// 🤝 bu fiyat bu müşteride kalsın
   const [lines,setLines]=useState({});     // 🏬 çoklu konsinye bırak: urunId -> adet
   const [bfiyat,setBfiyat]=useState({});   // 🏬 konsinye bırakışta anlaşılan birim ₺ (urunId -> fiyat)
-  const [birakMod,setBirakMod]=useState("konsinye");   // konsinye/hediye/odunc
+  const [azAcik,setAzAcik]=useState(false);      // 🗂 az kullanılanlar akordiyonu
+  const [duzenAz,setDuzenAz]=useState(false);    // ✎ listeyi düzenle kipi
   const [bekle,setBekle]=useState(false);
   const fire=async(mesaj,xp,ekstra)=>{ setBekle(true); const ok=await onFire({type,k,mesaj,xp,...(ekstra||{})});
     if(!(ekstra&&ekstra.kalici)) return;   // klasik akış: parent sheet'i kapattı
@@ -2830,48 +2836,104 @@ function ActionSheet({type,k,d,onClose,onFire}){
 
     /* tek satır — solda ad, sağda adet ve (varsa) birim fiyat.
        ⚠ Sıra: önce ADET, sonra BİRİM ₺. Alt satırda ikinci bir simge YOK. */
-    const satir=(ad,altYazi,anahtar,fiyatli,fiyatYer,sim,vurgu)=>{
+    /* 📦 STOK SAYISI — eskiden her satırın altında "çantanda 20 · liste 35 ₺"
+       yazıyordu; "atölyede / çantanda" üst üste tekrarlayınca göz yoruyordu.
+       Artık yalnız RAKAM, ürün adının hemen sağında soluk bir rozet olarak
+       duruyor. Ne olduğu liste başlığında bir kez söyleniyor. */
+    const satir=(ad,altYazi,anahtar,fiyatli,fiyatYer,sim,vurgu,sayi,ekBtn,sira)=>{
       const dolu=num(lines[anahtar])>0;
-      return h("div",{key:anahtar,style:{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",borderRadius:12,
+      return h("div",{key:anahtar,style:{display:"flex",alignItems:"center",gap:7,padding:"5px 9px",borderRadius:11,
         background:dolu?vurgu+"0d":"var(--surf2)",border:"1px solid "+(dolu?vurgu+"44":"var(--line)")}},
+        ekBtn||null,
         h("div",{style:{flex:1,minWidth:0}},
-          h("div",{style:{fontSize:13.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-            (sim||"")+urunAdi(ad)),
-          altYazi?h("div",{style:{fontSize:11,color:"var(--mut)"}},altYazi):null),
+          h("div",{style:{display:"flex",alignItems:"baseline",gap:6,minWidth:0}},
+            h("span",{style:{minWidth:0,fontSize:13.5,fontWeight:700,overflow:"hidden",whiteSpace:"nowrap"}},
+              (sim||"")+urunAdi(ad)),
+            sayi!=null?h("span",{style:{flexShrink:0,fontSize:11,fontWeight:700,color:"var(--mut2)"}},sayi):null),
+          altYazi?h("div",{style:{fontSize:10.5,color:"var(--mut)",lineHeight:1.3}},altYazi):null),
         h("input",{type:"number",inputMode:"numeric",placeholder:"0",value:lines[anahtar]||"",
+          "data-adet":sira==null?undefined:String(sira),
           onChange:e=>setLines(s2=>({...s2,[anahtar]:e.target.value})),title:"adet",
-          style:{...inp,width:64,textAlign:"center",padding:"10px 8px",fontSize:15}}),
+          /* ⏎ ENTER → ALT SATIRIN adet kutusu. Varsayılanda sağdaki fiyat kutusuna
+             geçiyordu; fiyat nadiren değiştiği için sürekli atlanması gerekiyordu. */
+          onKeyDown:e=>{ if(e.key!=="Enter") return; e.preventDefault();
+            const hepsi=Array.from(document.querySelectorAll("input[data-adet]"));
+            const i=hepsi.indexOf(e.target);
+            const sonraki=hepsi[i+1]; if(sonraki){ sonraki.focus(); sonraki.select&&sonraki.select(); }
+            else e.target.blur(); },
+          style:{...inp,width:58,textAlign:"center",padding:"7px 5px",fontSize:15}}),
         fiyatli?h("input",{type:"number",inputMode:"numeric",placeholder:tl(fiyatYer),
           value:bfiyat[anahtar]!==undefined?bfiyat[anahtar]:"",
           onChange:e=>setBfiyat(s2=>({...s2,[anahtar]:e.target.value})),title:"birim ₺",
-          style:{...inp,width:78,textAlign:"center",padding:"10px 8px",fontSize:14}}):null);
+          style:{...inp,width:72,textAlign:"center",padding:"7px 5px",fontSize:14}}):null);
     };
 
-    const cantaListe=()=>h("div",{style:{display:"grid",gap:8}},
-      cantam.length?cantam.map(u=>{ const anl=anlasmaOf(k,u.id);
-        return satir(u.ad,
-          (SZ?("atölyede "+num(u.stokta)):("çantanda "+num(u.canta)))
-            +(kmod==="hediye"?"":" · "+(anl?("anlaşmalı "+tl(anl.satis)):("liste "+tl(u.fiyat)))),
-          u.id, kmod!=="hediye", bfOf(u), anl?"🤝 ":"", "#7c46e6"); })
-        :h("div",{style:{padding:"14px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},bosMetin));
+    /* 🗂 AZ KULLANILANLAR — uzun ürün listesi her seferinde baştan sona
+       taranmasın diye seyrek kullanılanlar altta KAPALI bir akordiyonda durur.
+       Kural: pazarlamacının kendi geçmişinde HİÇ işlem görmemiş ürün otomatik
+       aşağı iner. Kullanıcı ✎ ile bunu ürün ürün değiştirebilir; seçimi kendi
+       kullanıcı kaydında saklanır (azKul) ve otomatik kuralın önüne geçer. */
+    const kullanilan=(d&&d.kullanilanUrun)||{};
+    const emirId2=(d&&d.emir&&d.emir.id)||"";
+    const kulSec=(d&&d.emir&&d.emir.azKul)||{};
+    const azOto=u=>!kullanilan[u.id];
+    const azMi=u=>kulSec[u.id]!==undefined?!!kulSec[u.id]:azOto(u);
+    const tasi=async(u,az)=>{ if(!emirId2) return;
+      try{ await save("kullanici",{id:emirId2,azKul:{...kulSec,[u.id]:!!az}}); }catch(e){ console.error(e); } };
+    const tasiBtn=(u,az)=>h("button",{onClick:()=>tasi(u,az),title:az?"Az kullanılanlara taşı":"Yukarı taşı",
+      style:{flexShrink:0,width:26,height:26,borderRadius:7,background:"var(--surf)",border:"1px solid var(--line)",
+        color:"var(--mut)",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}},az?"⌄":"⌃");
+
+    const uSatir=u=>{ const anl=anlasmaOf(k,u.id);
+      return satir(u.ad, kmod==="hediye"?"":(anl?("anlaşmalı "+tl(anl.satis)):("liste "+tl(u.fiyat))),
+        u.id, kmod!=="hediye", bfOf(u), anl?"🤝 ":"",
+        "#7c46e6", SZ?num(u.stokta):num(u.canta),
+        duzenAz?tasiBtn(u,!azMi(u)):null, sirali.indexOf(u.id)); };
+
+    const ustler=cantam.filter(u=>!azMi(u)), altlar=cantam.filter(u=>azMi(u));
+    const sirali=ustler.concat(altlar).map(u=>u.id);   // ⏎ sırası: önce üst liste
+
+    const cantaListe=()=>h("div",null,
+      h("div",{style:{display:"grid",gap:6}},
+        ustler.length?ustler.map(uSatir)
+          :h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},
+            altlar.length?"Hepsi aşağıda — açıp seçebilirsin.":bosMetin)),
+      altlar.length?h("div",{style:{marginTop:8}},
+        h("div",{style:{display:"flex",alignItems:"center",gap:8}},
+          h("button",{onClick:()=>setAzAcik(v=>!v),
+            style:{flex:1,display:"flex",alignItems:"center",gap:8,padding:"8px 11px",borderRadius:11,
+              background:"var(--surf2)",border:"1px dashed var(--line)",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},
+            h("span",null,azAcik?"⌃":"⌄"),
+            h("span",{style:{flex:1,textAlign:"left"}},"Az kullanılanlar"),
+            h("span",null,altlar.length)),
+          h("button",{onClick:()=>setDuzenAz(v=>!v),title:"Listeyi düzenle",
+            style:{flexShrink:0,width:34,height:34,borderRadius:10,background:duzenAz?"#7c46e61a":"var(--surf2)",
+              border:"1px solid "+(duzenAz?"#7c46e655":"var(--line)"),fontSize:13,color:duzenAz?"var(--violet)":"var(--mut)"}},"✎")),
+        azAcik?h("div",{style:{display:"grid",gap:6,marginTop:6}},altlar.map(uSatir)):null):null,
+      (duzenAz&&!altlar.length)?h("div",{style:{marginTop:8,fontSize:11.5,color:"var(--mut)",textAlign:"center"}},
+        "⌄ ile ürünü aşağı indir"):null);
 
     const rafListe=()=>konsList.length
-      ? h("div",{style:{display:"grid",gap:8}},
-          konsList.map(c=>satir(c.ad,"rafta "+num(c.adet)+" adet",rafKey(c),kmod==="satis",rfOf(c),"","#7c46e6")))
+      ? h("div",{style:{display:"grid",gap:6}},
+          konsList.map((c,i)=>satir(c.ad,"",rafKey(c),kmod==="satis",rfOf(c),"","#7c46e6",num(c.adet),null,1000+i)))
       : h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)"}},
           "Bu kalede açık konsinye yok — önce '🏬 Bırak' ile konsinye bırak.");
+
+    const listeBaslik=(kmod==="birak"||kmod==="hediye")
+      ? ("Ürünler · "+(SZ?"atölyedeki":"çantandaki")+" adet")
+      : "Ürünler · raftaki adet";
 
     return h(Sheet,{ik:"🏬",hex:"#7c46e6",rozet:"Konsinye",baslik:(k?k.ad:""),
       alt:(k?k.acikKons:0)+" adet açık konsinye"+((konsDeger>0.5)?(" · "+tl(konsDeger)):""),
       onClose,cta:bekle?"⏳ İşleniyor…":cta,disabled:!gecerli||bekle,onCta:onOk},
-      h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+      h("div",{style:{display:"flex",gap:8,marginBottom:12}},
         modlar.map(([m,lbl])=>h(Chip,{key:m,on:kmod===m,onClick:()=>setKmod(m)},lbl))),
-      h("div",{className:"lbl",style:{marginBottom:8}},"Ürünler"),
+      h("div",{className:"lbl",style:{marginBottom:6}},listeBaslik),
       (kmod==="birak"||kmod==="hediye")?cantaListe():rafListe(),
       (kmod==="birak"||kmod==="hediye")
-        ? (secili.length?h("div",{style:{textAlign:"center",marginTop:12,fontSize:13.5,fontWeight:700,color:"var(--violet)"}},
+        ? (secili.length?h("div",{style:{textAlign:"center",marginTop:10,fontSize:13.5,fontWeight:700,color:"var(--violet)"}},
             topAdet+" adet"+(kmod==="hediye"?" · hediye":(" · toplam "+tl(topDeger)))):null)
-        : (rafSecili.length?h("div",{style:{textAlign:"center",marginTop:12,fontSize:13.5,fontWeight:700,color:"var(--violet)"}},
+        : (rafSecili.length?h("div",{style:{textAlign:"center",marginTop:10,fontSize:13.5,fontWeight:700,color:"var(--violet)"}},
             rafAdet+" adet"+(kmod==="satis"?(" · toplam "+tl(rafDeger)):"")):null));
   }
   if(type==="stant"){
