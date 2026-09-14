@@ -16,7 +16,7 @@
    stok_hareket HİÇBİR adapterde mali satır üretmez.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const HM_SURUM = "2";   // 2: defter çift kayda geçti (fisBacaklari)
+export const HM_SURUM = "3";   // 3: fisBacaklari/FİŞ sütunu var, BORÇ/ALACAK tek bacaklı
 export const HM_TURLER = ["SATIS", "TAHSILAT", "MASRAF", "ODEME"];
 
 /* Hakediş düzeni kesim tarihi — TEK KAYNAK. admin/deneme/finans'taki üç kopya
@@ -131,19 +131,17 @@ const MASRAF_HESAP = { "Elektrik": "730", "Bakım": "730", "Kargo": "631.9",
   "Tanıtım": "631.9", "Vergi": "360", "Diğer": "632" };
 
 /* ─────────────────────────────────────────────────────────────────────────
-   ÇİFT KAYIT BACAKLARI — defter sütunlarının TEK KAYNAĞI.
+   ÇİFT KAYIT BACAKLARI — bir hareketin HANGİ HESAPLARI oynattığı.
 
-   Eskiden kural tek bacaklıydı: SATIŞ→borç, diğer üç tür→alacak. O kural
-   MÜŞTERİ CARİ EKSTRESİ için doğrudur (satış müşteriyi borçlandırır, tahsilat
-   alacaklandırır — bina hareket defterindeki okuma) ve ekstre bunu kaleEkstre
-   içinde cariEtki'den ZATEN doğru hesaplıyor. Ama GENEL hareket defterinde
-   aynı kural tutmuyordu: gider bir BORÇ kaydıdır, alacak sütununda duruyordu;
-   nakit teslim gibi iç transfer "tahsilat" gibi görünüyordu; ve sütunlar
-   birbirine denk gelmiyordu (canlı veride 61.715 ₺ açık).
+   Defterin BORÇ/ALACAK sütunları buradan gelmez (onlar borcAlacak'ta, tek
+   bacaklı). Buranın işi hesap eşlemesi: FİŞ sütunu ("100 → 108") bunu gösterir
+   ve denklik/mizan gerektiğinde bu bacaklardan hesaplanır.
 
-   Artık her satır iki bacağını hesap koduyla verir; BORÇ = ALACAK her satırda
-   ve dolayısıyla toplamda denktir. Nakit bacağı kasaYeri()'ne göre merkez (100)
-   ya da saha (108) kasasıdır.
+   fisBacaklari her satırın iki bacağını hesap koduyla verir ve bacaklar kendi
+   içinde denktir; defterdeki FİŞ sütunu bunu "100 → 108" diye gösterir.
+   BORÇ/ALACAK SÜTUNLARI ise tek bacaklı kalır (bkz. borcAlacak) — iki bacağı da
+   sütunlara yazmak denendi, her satırda aynı sayı iki kez çıkınca geri alındı.
+   Nakit bacağı kasaYeri()'ne göre merkez (100) ya da saha (108) kasasıdır.
 
    ⚠ KDV bu modelde yok — bacaklar BRÜT tutarla kurulur. KDV ayrımı ve
    tahakkuk/amortisman gibi vergi düzeyindeki işler finans defterinin işidir.
@@ -187,13 +185,16 @@ export function fisBacaklari(s) {
   return [];
 }
 
-/* Satırın defterdeki BORÇ/ALACAK sütunları — bacakların toplamı.
-   Çift kayıt olduğu için borc === alacak; sütunlar toplamda denk gelir. */
+/* Satırın defterdeki BORÇ/ALACAK sütunları.
+   Bina hareket defteriyle aynı okuma: SATIŞ→borç · TAHSİLAT/MASRAF/ÖDEME→alacak.
+   ⚠ Her satıra iki bacağın toplamını yazmak DENENDİ ve GERİ ALINDI (L95): o zaman
+   her satırda aynı sayı iki sütunda birden çıkıyor, tablo okunmaz oluyordu.
+   Hangi hesapların oynadığı FİŞ sütununda (fisOzet) zaten yazıyor; denklik
+   gerektiğinde fisBacaklari'ndan hesaplanır — sütunlar tek bacaklı kalır. */
 export function borcAlacak(s) {
-  const L = fisBacaklari(s);
-  if (!L.length) return { borc: 0, alacak: 0, bacaklar: [] };
-  return { borc: r2(L.reduce((z, x) => z + x.borc, 0)),
-           alacak: r2(L.reduce((z, x) => z + x.alacak, 0)), bacaklar: L };
+  if (!s) return { borc: 0, alacak: 0 };
+  return (s.tur === "SATIS") ? { borc: r2(s.tutar), alacak: 0 }
+                             : { borc: 0, alacak: r2(s.tutar) };
 }
 
 /* Bacakların tek satırda okunur hali: "120 → 600" (borç hesabı → alacak hesabı) */
