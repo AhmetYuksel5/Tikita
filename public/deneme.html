@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v129";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v130";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -641,8 +641,11 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
   const gorevler=kaleler.filter(k=>k.durum.key!=="saglam").sort((a,b)=>oncelik[a.durum.key]-oncelik[b.durum.key]||b.guc-a.guc);
   /* 🗂 bu pazarlamacının geçmişinde işlem görmüş ürünler — konsinye listesinde
      "az kullanılanlar" akordiyonunun otomatik kuralı bunu kullanır */
-  const kullanilanUrun={};
-  (hareketler||[]).forEach(x=>{ if(x&&x.urunId&&x.tip!=="al") kullanilanUrun[x.urunId]=(kullanilanUrun[x.urunId]||0)+1; });
+  const kullanilanUrun={}, satilanUrun={};
+  (hareketler||[]).forEach(x=>{ if(!x||!x.urunId||x.tip==="al") return;
+    kullanilanUrun[x.urunId]=(kullanilanUrun[x.urunId]||0)+1;
+    /* 🔥 en çok satan = SATILAN ADET (konsinye bırakma değil) */
+    if(x.tip==="satis") satilanUrun[x.urunId]=(satilanUrun[x.urunId]||0)+num(x.adet); });
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
   const cephane=(urunler||[]).map(u=>({id:u.id,ad:u.ad||"?",eklendi:u.eklendi||"",seriler:seriListe(u),stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),odul:num((u.odulStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
@@ -692,7 +695,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
   const eksiStok=sinirsiz?cephane.filter(u=>u.stokta<0).sort((a,b)=>a.stokta-b.stokta):[];
   return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,hafGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
     kdvOran:kdvOraniOku(opt&&opt.ayar),   // 🧾 tahsilatta eklenecek KDV oranı (ayar/genel)
-    kullanilanUrun,
+    kullanilanUrun, satilanUrun,
     sinirsiz,elde,eksiStok,
     gorevHaf,rozetler,lider,emirSira,toplamCiro,hakedisTop,tablaKazTop,tablaOdenenTop,tablaKalanTop,bugunSat,bugunCiro,bugunTah,vurkac,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
@@ -2685,6 +2688,10 @@ function ActionSheet({type,k,d,onClose,onFire}){
   const [anlKay,setAnlKay]=useState(false);// 🤝 bu fiyat bu müşteride kalsın
   const [lines,setLines]=useState({});     // 🏬 çoklu konsinye bırak: urunId -> adet
   const [bfiyat,setBfiyat]=useState({});   // 🏬 konsinye bırakışta anlaşılan birim ₺ (urunId -> fiyat)
+  /* 🔀 ürün sırası: "cok" = en çok satanlar · "az" = alfabetik. Görünüm tercihi,
+     cihazda saklanır. */
+  const [sirala,setSirala]=useState(()=>{ try{ return localStorage.getItem("tk_konsSira")||"cok"; }catch(e){ return "cok"; } });
+  const siralaSec=v=>{ setSirala(v); try{ localStorage.setItem("tk_konsSira",v); }catch(e){} };
   const [azAcik,setAzAcik]=useState(false);      // 🗂 az kullanılanlar akordiyonu
   const [duzenAz,setDuzenAz]=useState(false);    // ✎ listeyi düzenle kipi
   const [bekle,setBekle]=useState(false);
@@ -2892,7 +2899,14 @@ function ActionSheet({type,k,d,onClose,onFire}){
         "#7c46e6", SZ?num(u.stokta):num(u.canta),
         duzenAz?tasiBtn(u,!azMi(u)):null, sirali.indexOf(u.id)); };
 
-    const ustler=cantam.filter(u=>!azMi(u)), altlar=cantam.filter(u=>azMi(u));
+    /* 🔀 sıralama: en çok satanlar (bu pazarlamacının satış adedi) ya da alfabetik.
+       Alfabetikte görünen ad esas alınır — liste ekranda nasıl duruyorsa öyle sıralanır. */
+    const satilan=(d&&d.satilanUrun)||{};
+    const sirala2=L=>L.slice().sort(sirala==="az"
+      ? (a,b)=>urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr")
+      : (a,b)=>(num(satilan[b.id])-num(satilan[a.id]))||urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr"));
+    const sirali0=sirala2(cantam);
+    const ustler=sirali0.filter(u=>!azMi(u)), altlar=sirali0.filter(u=>azMi(u));
     const sirali=ustler.concat(altlar).map(u=>u.id);   // ⏎ sırası: önce üst liste
 
     const cantaListe=()=>h("div",null,
@@ -2915,9 +2929,12 @@ function ActionSheet({type,k,d,onClose,onFire}){
       (duzenAz&&!altlar.length)?h("div",{style:{marginTop:8,fontSize:11.5,color:"var(--mut)",textAlign:"center"}},
         "⌄ ile ürünü aşağı indir"):null);
 
-    const rafListe=()=>konsList.length
+    const rafSirali=konsList.slice().sort(sirala==="az"
+      ? (a,b)=>urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr")
+      : (a,b)=>(num(b.adet)-num(a.adet))||urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr"));
+    const rafListe=()=>rafSirali.length
       ? h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}},
-          konsList.map((c,i)=>satir(c.ad,"",rafKey(c),kmod==="satis",rfOf(c),"","#7c46e6",num(c.adet),null,1000+i)))
+          rafSirali.map((c,i)=>satir(c.ad,"",rafKey(c),kmod==="satis",rfOf(c),"","#7c46e6",num(c.adet),null,1000+i)))
       : h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)"}},
           "Bu kalede açık konsinye yok — önce '🏬 Bırak' ile konsinye bırak.");
 
@@ -2936,7 +2953,16 @@ function ActionSheet({type,k,d,onClose,onFire}){
             whiteSpace:"nowrap",overflow:"hidden",
             background:kmod===m?"#1b1e25":"var(--surf2)",color:kmod===m?"#fff":"var(--mut)",
             border:"1px solid "+(kmod===m?"#1b1e25":"var(--line)")}},lbl))),
-      h("div",{className:"lbl",style:{marginBottom:6}},listeBaslik),
+      /* başlık solda, sıralama düğmesi sağda — küçük ve soluk, göze batmasın */
+      h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:6}},
+        h("div",{className:"lbl",style:{flex:1,minWidth:0}},listeBaslik),
+        h("div",{style:{display:"flex",flexShrink:0,borderRadius:8,overflow:"hidden",
+          border:"1px solid var(--line)",background:"var(--surf2)"}},
+          [["cok","🔥","en çok satanlar"],["az","A–Z","alfabetik"]].map(([v,et,ti])=>
+            h("button",{key:v,onClick:()=>siralaSec(v),title:ti,
+              style:{padding:"3px 8px",fontSize:10.5,fontWeight:800,border:"none",
+                background:sirala===v?"var(--surf)":"transparent",
+                color:sirala===v?"var(--txt)":"var(--mut2)"}},et)))),
       (kmod==="birak"||kmod==="hediye")?cantaListe():rafListe(),
       (kmod==="birak"||kmod==="hediye")
         ? (secili.length?h("div",{style:{textAlign:"center",marginTop:10,fontSize:13.5,fontWeight:700,color:"var(--violet)"}},
