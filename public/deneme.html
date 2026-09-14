@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v128";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v129";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -2651,7 +2651,11 @@ function Sheet({ik,hex,baslik,alt,rozet,onClose,children,cta,onCta,disabled}){
       padding:"calc(env(safe-area-inset-top,0px) + 18px) 12px calc(env(safe-area-inset-bottom,0px) + 22px)"}},
     h("div",{onClick:e=>e.stopPropagation(),style:{width:"100%",maxWidth:520,background:"var(--surf)",borderRadius:24,
         padding:"16px 18px 24px",animation:"pop .3s cubic-bezier(.2,.8,.2,1)",
-        boxShadow:"0 24px 64px rgba(0,0,0,.3)",maxHeight:"100%",overflowY:"auto"}},
+        boxShadow:"0 24px 64px rgba(0,0,0,.3)",maxHeight:"100%",overflowY:"auto",
+        /* ⛔ YATAY KAYMA YOK — içerikten biri taşarsa sayfa sağa sola oynuyordu.
+           Kendi içinde kaydırılması gereken şeritler (ürün çipleri) zaten kendi
+           overflowX:auto'suna sahip, onlar etkilenmez. */
+        overflowX:"hidden"}},
       bas,
       children,
       cta&&h("button",{onClick:disabled?null:onCta,disabled,style:{width:"100%",padding:16,borderRadius:16,marginTop:20,
@@ -2892,7 +2896,7 @@ function ActionSheet({type,k,d,onClose,onFire}){
     const sirali=ustler.concat(altlar).map(u=>u.id);   // ⏎ sırası: önce üst liste
 
     const cantaListe=()=>h("div",null,
-      h("div",{style:{display:"grid",gap:6}},
+      h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}},
         ustler.length?ustler.map(uSatir)
           :h("div",{style:{padding:"12px 0",textAlign:"center",color:"var(--mut)",fontSize:13}},
             altlar.length?"Hepsi aşağıda — açıp seçebilirsin.":bosMetin)),
@@ -2907,12 +2911,12 @@ function ActionSheet({type,k,d,onClose,onFire}){
           h("button",{onClick:()=>setDuzenAz(v=>!v),title:"Listeyi düzenle",
             style:{flexShrink:0,width:34,height:34,borderRadius:10,background:duzenAz?"#7c46e61a":"var(--surf2)",
               border:"1px solid "+(duzenAz?"#7c46e655":"var(--line)"),fontSize:13,color:duzenAz?"var(--violet)":"var(--mut)"}},"✎")),
-        azAcik?h("div",{style:{display:"grid",gap:6,marginTop:6}},altlar.map(uSatir)):null):null,
+        azAcik?h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6,marginTop:6}},altlar.map(uSatir)):null):null,
       (duzenAz&&!altlar.length)?h("div",{style:{marginTop:8,fontSize:11.5,color:"var(--mut)",textAlign:"center"}},
         "⌄ ile ürünü aşağı indir"):null);
 
     const rafListe=()=>konsList.length
-      ? h("div",{style:{display:"grid",gap:6}},
+      ? h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}},
           konsList.map((c,i)=>satir(c.ad,"",rafKey(c),kmod==="satis",rfOf(c),"","#7c46e6",num(c.adet),null,1000+i)))
       : h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)"}},
           "Bu kalede açık konsinye yok — önce '🏬 Bırak' ile konsinye bırak.");
@@ -2924,8 +2928,14 @@ function ActionSheet({type,k,d,onClose,onFire}){
     return h(Sheet,{ik:"🏬",hex:"#7c46e6",rozet:"Konsinye",baslik:(k?k.ad:""),
       alt:(k?k.acikKons:0)+" adet açık konsinye"+((konsDeger>0.5)?(" · "+tl(konsDeger)):""),
       onClose,cta:bekle?"⏳ İşleniyor…":cta,disabled:!gecerli||bekle,onCta:onOk},
-      h("div",{style:{display:"flex",gap:8,marginBottom:12}},
-        modlar.map(([m,lbl])=>h(Chip,{key:m,on:kmod===m,onClick:()=>setKmod(m)},lbl))),
+      /* 4 sekme eşit sütunda — yan yana çip olarak 348px tutup 330px'lik kutudan
+         taşıyor ve sayfayı yana kaydırıyordu. */
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:12}},
+        modlar.map(([m,lbl])=>h("button",{key:m,onClick:()=>setKmod(m),
+          style:{padding:"9px 1px",borderRadius:11,fontSize:12,fontWeight:800,minWidth:0,
+            whiteSpace:"nowrap",overflow:"hidden",
+            background:kmod===m?"#1b1e25":"var(--surf2)",color:kmod===m?"#fff":"var(--mut)",
+            border:"1px solid "+(kmod===m?"#1b1e25":"var(--line)")}},lbl))),
       h("div",{className:"lbl",style:{marginBottom:6}},listeBaslik),
       (kmod==="birak"||kmod==="hediye")?cantaListe():rafListe(),
       (kmod==="birak"||kmod==="hediye")
