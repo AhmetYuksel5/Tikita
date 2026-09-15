@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v131";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v132";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -1019,11 +1019,15 @@ function KaleSatir({k,onClick,onDuzen}){ const D=k.durum;
 function Kaleler({d,openKale,say,onYeniKale,adaylar,openAday,kesifRedSet,kesifEkle,kesifReddet,onDuzen}){
   const [f,setF]=useState("all");
   const [kesifAcik,setKesifAcik]=useState(false);
+  const [gozAcik,setGozAcik]=useState(false);   // 🔭 gözcü akordiyonu
   const mevcutAdlar=useMemo(()=>new Set([...d.kaleler.map(k=>adNorm(k.ad)),...(adaylar||[]).map(a=>adNorm(a.ad))]),[d.kaleler,adaylar]);
   const gozculer=(adaylar||[]).filter(a=>a.gozcu).map(adayKale);   // kaydedilmiş ama işlemsiz kaleler → gözcü
   const adaylarKesif=(adaylar||[]).filter(a=>!a.gozcu);            // keşif adayları (henüz konum/telefon eksik)
   const filtreler=[["all","Tümü"],["gozcu","🔭 Gözcü"+(gozculer.length?(" "+gozculer.length):"")],["borc","🧾 Borç"],["konsinye","🏬 Konsinye"],["ihmal","⚔️ İhmal"],["saglam","🛡️ Sağlam"],["aday","🧭 Aday"+(adaylarKesif.length?(" "+adaylarKesif.length):"")]];
-  const liste=f==="all"?[...d.kaleler,...gozculer]:f==="gozcu"?gozculer:d.kaleler.filter(k=>f==="konsinye"?k.acikKons>0:k.durum.key===f);
+  /* 🔭 Gözcüler (henüz hiç satış yapılmamış kayıtlar) "Tümü" listesini
+     kalabalıklaştırmasın: en altta KAPALI bir akordiyonda dururlar.
+     "🔭 Gözcü" süzgecine basıldığında yine tam liste olarak çıkarlar. */
+  const liste=f==="all"?d.kaleler:f==="gozcu"?gozculer:d.kaleler.filter(k=>f==="konsinye"?k.acikKons>0:k.durum.key===f);
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0",overflowX:"hidden"}},
     h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:14}},
       h("div",{style:{fontSize:24,fontWeight:800}},"🏰 Kalelerin"),
@@ -1047,9 +1051,20 @@ function Kaleler({d,openKale,say,onYeniKale,adaylar,openAday,kesifRedSet,kesifEk
                 [(a.bolge?("📍 "+a.bolge):""),(a.gozcu?"🔭 gözcün var":(a.kesif?"🧭 keşif adayı":"aday"))].filter(Boolean).join("  ·  "))),
             h("span",{style:{fontSize:20,color:"var(--mut2)",flexShrink:0,fontWeight:400}},"›")))
           :h("div",{className:"card",style:{padding:26,textAlign:"center",color:"var(--mut)"}},"Aday yok — hepsi fethedildi ya da liste boş 🔭"))
-      : h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}},
-          liste.length?liste.map((k,i)=>h(KaleSatir,{key:i,k,onClick:()=>openKale(k),onDuzen})):
-            h("div",{className:"card",style:{padding:26,textAlign:"center",color:"var(--mut)"}},"Bu kategoride kale yok.")));
+      : h("div",null,
+          h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}},
+            liste.length?liste.map((k,i)=>h(KaleSatir,{key:i,k,onClick:()=>openKale(k),onDuzen})):
+              h("div",{className:"card",style:{padding:26,textAlign:"center",color:"var(--mut)"}},
+                (f==="all"&&gozculer.length)?"Henüz satış yapılmış kale yok — gözcüler aşağıda.":"Bu kategoride kale yok.")),
+          (f==="all"&&gozculer.length)?h("div",{style:{marginTop:10,paddingBottom:8}},
+            h("button",{onClick:()=>setGozAcik(v=>!v),
+              style:{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 13px",borderRadius:12,
+                background:"var(--surf2)",border:"1px dashed var(--line)",fontSize:13,fontWeight:800,color:"var(--mut)"}},
+              h("span",null,gozAcik?"⌃":"⌄"),
+              h("span",{style:{flex:1,textAlign:"left"}},"🔭 Gözcüler"),
+              h("span",null,gozculer.length)),
+            gozAcik?h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6,marginTop:6}},
+              gozculer.map((k,i)=>h(KaleSatir,{key:"g"+i,k,onClick:()=>openKale(k),onDuzen}))):null):null));
 }
 
 /* ————— KALE DETAYI ————— */
