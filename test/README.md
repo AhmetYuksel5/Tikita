@@ -1,0 +1,29 @@
+# Tikita testleri
+
+Tarayıcı süitleri gerçek uygulama gövdesini (public/*.html) çevrimdışı koşturur:
+CDN'ler kesilir, React/ReactDOM UMD ve `fbstub.mjs.txt` (Firestore taklidi)
+route araya girmeyle enjekte edilir.
+
+## Koşturma
+
+    cd test
+    npm i --no-audit --no-fund               # playwright + react 18
+    (cd ../public && python3 -m http.server 8799 &)
+    TZ=Europe/Istanbul node kaymaE2E.mjs
+
+Chromium sistemde kurulu: /opt/pw-browsers/chromium-1194/chrome-linux/chrome
+(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 ile indirme atlanır.)
+
+## fbstub.mjs.txt
+
+`window.__TIKITA_VERI` veriyi besler. Test kancaları:
+- `window.__YAZ`        — yazılan kayıtlar [{__coll,__id,...}]
+- `window.__SIL`        — silinenler [{coll,id}]
+- `window.__KAYITLAR(c)` — koleksiyonun güncel hâli
+- `window.__DEGISTIR(c,rows)` — koleksiyonu değiştir + aboneleri uyar
+- `window.__KES(coll,veri)` — yazma sırasında hata fırlatmak için
+
+## Neden repoda
+
+Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
+70 süitin tamamı kayboldu. Regresyon ağı kodun yanında durmalı.

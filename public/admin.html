@@ -112,7 +112,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L96";   // komuta (admin) deneme sürümü
+const SURUM="L97";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -461,6 +461,16 @@ const GC={ navyHdr:"#22305a", card:"#ffffff", line:"#dbe3ec", txt:"#1b1e25", mut
   onayBg:"#fdecc4", onayB:"#e0a200", onayT:"#7a5600",
   bitBg:"#eef1f5", bitB:"#cdd6e1", bitT:"#94a3b8",
   kirmizi:"#f6a99f", kirmiziB:"#ef5350", kirmiziT:"#7f1d1d", mavi:"#3b82f6", sari:"#f5c518" };
+/* 🔤 ÜRÜN ADI STANDARDI — pazarlamacı uygulamasıyla aynı: her kelimenin baş
+   harfi büyük, kalanı küçük. GÖRÜNTÜDE normalize edilir, kayıtlara dokunulmaz.
+   Kısaltma/marka istisnaları elle tutulur; kuralın düz hali "TNT"→"Tnt",
+   "iPhone"→"İphone" yapardı (Türkçede i'nin büyüğü İ). */
+const AD_ISTISNA={tnt:"TNT",iphone:"iPhone",qr:"QR","3d":"3D",tv:"TV",usb:"USB",led:"LED"};
+const urunAdi=s2=>String(s2==null?"":s2).trim().split(/(\s+)/)
+  .map(w=>{ if(/^\s+$/.test(w)) return w;
+    const k=w.toLocaleLowerCase("tr"); if(AD_ISTISNA[k]) return AD_ISTISNA[k];
+    return w.charAt(0).toLocaleUpperCase("tr")+w.slice(1).toLocaleLowerCase("tr"); })
+  .join("");
 const GS={ card:{background:GC.card,border:"1px solid "+GC.line,borderRadius:14,boxShadow:"0 1px 3px rgba(15,23,42,.06)"},
   hdr:{background:GC.navyHdr,color:"#fff",fontWeight:800,letterSpacing:.4,textAlign:"center",padding:"10px",borderRadius:"12px 12px 0 0"},
   ibtn:{padding:"7px 11px",borderRadius:9,border:"1px solid "+GC.line,background:"#fff",color:GC.txt,fontWeight:700,fontSize:13},
@@ -865,7 +875,7 @@ function BaskiBilgiSheet({u,makineler,filamentler,onKaydet,onClose,bekle}){
     style:{flex:1,padding:"11px 8px",borderRadius:12,fontSize:12.5,fontWeight:800,
       background:ayri===v?"#1b1e25":"var(--surf2)",color:ayri===v?"#fff":"var(--mut)",
       border:"1px solid "+(ayri===v?"#1b1e25":GC.line)}},lbl);
-  return h(Sheet,{ik:"🖨",hex:"#0e8fce",baslik:"Baskı bilgisi · "+((u&&u.ad)||""),
+  return h(Sheet,{ik:"🖨",hex:"#0e8fce",rozet:"Baskı bilgisi",baslik:urunAdi((u&&u.ad)||""),
     alt:(PARCALAR.length&&ayri)?(PARCALAR.length+" parça ayrı tablada")
       :("tek tablada "+adet+(PARCALAR.length?" takım":" adet")+" · her makine türü ayrı"),
     onClose,cta:bekle?"⏳…":"Kaydet",onCta:kaydet,disabled:bekle},
@@ -892,35 +902,44 @@ function BaskiBilgiSheet({u,makineler,filamentler,onKaydet,onClose,bekle}){
             borderColor:sekme===k?"#1b1e25":(doluMu(k)?"#0e8fce":GC.line),fontSize:12.5}},
           (doluMu(k)?"✓ ":"")+sekEt(k)+(t?(" · "+t.say):"")); })),
     h("div",{style:{...GS.card,padding:"13px 14px",marginBottom:12}},
-      h("div",{style:{display:"flex",alignItems:"center",gap:9,marginBottom:12}},
-        h("span",{style:{flex:1,fontSize:12.5,fontWeight:800,color:GC.txt}},"Baskı süresi (dk)"),
+      h("div",{style:{display:"flex",alignItems:"center",gap:9,marginBottom:10}},
+        h("span",{style:{flex:1,minWidth:0,fontSize:12.5,fontWeight:800,color:GC.txt,
+          overflow:"hidden",whiteSpace:"nowrap"}},"Baskı süresi (dk)"),
         h("input",{type:"text",inputMode:"numeric",value:K.sure,placeholder:"—",
           onChange:e=>kSet("sure",e.target.value),
           style:{...GS.input,width:96,textAlign:"center",fontWeight:800,fontSize:15}})),
       h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}},
-        h("span",{style:{flex:1,fontSize:12.5,fontWeight:800,color:GC.txt}},"Filamentler · tabla başına"),
-        h("span",{style:{fontSize:12,fontWeight:800,color:"#7c46e6"}},"toplam "+(Math.round(gramTop*10)/10)+" gr")),
-      h("div",{style:{display:"grid",gap:10}},
+        /* etiket kısalabilsin; toplam gram sağda TAM görünsün (kırpılıyordu) */
+        h("span",{style:{flex:1,minWidth:0,fontSize:12.5,fontWeight:800,color:GC.txt,
+          overflow:"hidden",whiteSpace:"nowrap"}},"Filamentler · tabla başına"),
+        h("span",{style:{flexShrink:0,fontSize:12,fontWeight:800,color:"#7c46e6"}},
+          "toplam "+(Math.round(gramTop*10)/10)+" gr")),
+      /* ızgara tek AUTO sütun açar ve max-content'e büyür → sayfa yana kayar.
+         minmax(0,1fr) sütunu kabına sığmaya zorlar. */
+      h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:8}},
         (K.fil||[]).map((f,i)=>{ const dg=!!f.degisken;
           /* değişken yuvanın adı: elle yazılmadıysa kaçıncı renk olduğuna göre */
           const rolSira=(K.fil||[]).slice(0,i).filter(x=>x.degisken).length;
           const rolAd=String(f.rol||"").trim()||("Renk "+(rolSira+1));
-          return h("div",{key:i,style:{padding:"10px 11px",borderRadius:12,
+          return h("div",{key:i,style:{padding:"8px 10px",borderRadius:11,minWidth:0,
             background:dg?"#fff7ed":"var(--surf2)",border:"1px solid "+(dg?"#fed7aa":GC.line)}},
           h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:8}},
             h("span",{style:{fontSize:11,fontWeight:800,color:dg?"#9a3412":GC.mut,flex:1}},
               dg?("🎨 "+rolAd):((i+1)+". filament")),
             num(f.gram)>0?h("span",{style:{fontSize:11.5,fontWeight:800,color:"#7c46e6"}},num(f.gram)+" gr"):null,
-            (K.fil.length>1)?h("button",{onClick:()=>filSil(i),
-              style:{...GS.ibtn,padding:"4px 9px",color:GC.kirmiziB,fontSize:12}},"kaldır"):null),
+            (K.fil.length>1)?h("button",{onClick:()=>filSil(i),title:"Bu filamenti kaldır",
+              style:{...GS.ibtn,flexShrink:0,width:26,height:26,padding:0,display:"flex",
+                alignItems:"center",justifyContent:"center",color:GC.kirmiziB,fontSize:13}},"✕"):null),
           /* sabit mi, ürünün rengini belirleyen değişken yuva mı */
-          h("div",{style:{display:"flex",gap:7,marginBottom:8}},
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:6,marginBottom:8}},
             h("button",{onClick:()=>filSet(i,"degisken",false),
-              style:{...GS.ibtn,flex:1,fontSize:12,fontWeight:800,
+              style:{...GS.ibtn,padding:"8px 2px",fontSize:12,fontWeight:800,minWidth:0,
+                whiteSpace:"nowrap",overflow:"hidden",
                 background:!dg?"#1b1e25":"#fff",color:!dg?"#fff":GC.txt,
                 borderColor:!dg?"#1b1e25":GC.line}},"📌 Sabit"),
             h("button",{onClick:()=>filSet(i,"degisken",true),
-              style:{...GS.ibtn,flex:1,fontSize:12,fontWeight:800,
+              style:{...GS.ibtn,padding:"8px 2px",fontSize:12,fontWeight:800,minWidth:0,
+                whiteSpace:"nowrap",overflow:"hidden",
                 background:dg?"#c2410c":"#fff",color:dg?"#fff":GC.txt,
                 borderColor:dg?"#c2410c":GC.line}},"🎨 Renk seçilir")),
           dg?h("input",{value:f.rol||"",onChange:e=>filSet(i,"rol",e.target.value),
@@ -2497,21 +2516,38 @@ function Toast({msg}){ if(!msg)return null;
   return h("div",{className:"fade",style:{position:"fixed",left:"50%",bottom:108,transform:"translateX(-50%)",zIndex:60,
     background:"#1b1e25",color:"#fff",padding:"12px 18px",borderRadius:14,fontSize:13.5,fontWeight:600,
     boxShadow:"0 12px 40px rgba(0,0,0,.28)",maxWidth:"88%",textAlign:"center"}},msg); }
-function Sheet({ik,hex,baslik,alt,onClose,children,cta,onCta,disabled,basEk}){
+/* rozet verilirse başlık ORTALANIR: üstte bordürlü kutuda büyük harfli işlem
+   adı, altında konu (ürün/mekan). Pazarlamacı uygulamasıyla aynı düzen —
+   uzun adlar başlığı ikiye bölüp karmaşık gösteriyordu. */
+function Sheet({ik,hex,baslik,alt,rozet,onClose,children,cta,onCta,disabled,basEk}){
   useBackClose(onClose);   // 🔙 geri tuşu bu pencereyi kapatsın
-  return h("div",{onClick:onClose,style:{position:"fixed",inset:0,zIndex:70,background:"rgba(10,15,25,.46)",
-      animation:"bdin .22s ease",display:"flex",alignItems:"center",justifyContent:"center",
-      padding:"calc(env(safe-area-inset-top,0px) + 18px) 12px calc(env(safe-area-inset-bottom,0px) + 22px)"}},
-    h("div",{onClick:e=>e.stopPropagation(),style:{width:"100%",maxWidth:520,background:"var(--surf)",borderRadius:24,
-        padding:"16px 18px 24px",animation:"pop .3s cubic-bezier(.2,.8,.2,1)",
-        boxShadow:"0 24px 64px rgba(0,0,0,.3)",maxHeight:"100%",overflowY:"auto"}},
-      h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:18}},
+  const bas=rozet
+    ? h("div",{style:{position:"relative",marginBottom:16}},
+        h("button",{onClick:onClose,style:{position:"absolute",right:0,top:0,width:34,height:34,borderRadius:11,
+          background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,color:"var(--mut)"}},"✕"),
+        h("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"0 40px"}},
+          h("div",{style:{display:"inline-flex",alignItems:"center",gap:7,padding:"7px 16px",borderRadius:12,
+            background:hex+"14",border:"1.5px solid "+hex+"55",color:hex,
+            fontSize:13.5,fontWeight:900,letterSpacing:.6}},ik,String(rozet).toLocaleUpperCase("tr")),
+          h("div",{style:{fontSize:15,fontWeight:800,textAlign:"center",lineHeight:1.2}},baslik),
+          alt?h("div",{style:{fontSize:12,color:"var(--mut)",textAlign:"center"}},alt):null))
+    : h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:18}},
         ik?h("div",{style:{width:46,height:46,borderRadius:14,background:hex+"1a",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0,filter:(TEMALAR[TEMA]||{}).geo?"grayscale(1) opacity(.75)":"none"}},ik):null,
         h("div",{style:{minWidth:0,flex:1}},
           h("div",{style:{fontSize:18,fontWeight:800,lineHeight:1.15}},baslik),
           alt&&h("div",{style:{fontSize:12.5,color:"var(--mut)",marginTop:2}},alt)),
         basEk||null,
-        h("button",{onClick:onClose,style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,color:"var(--mut)",flexShrink:0}},"✕")),
+        h("button",{onClick:onClose,style:{width:34,height:34,borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:16,color:"var(--mut)",flexShrink:0}},"✕"));
+  return h("div",{onClick:onClose,style:{position:"fixed",inset:0,zIndex:70,background:"rgba(10,15,25,.46)",
+      animation:"bdin .22s ease",display:"flex",alignItems:"center",justifyContent:"center",
+      padding:"calc(env(safe-area-inset-top,0px) + 18px) 12px calc(env(safe-area-inset-bottom,0px) + 22px)"}},
+    h("div",{onClick:e=>e.stopPropagation(),style:{width:"100%",maxWidth:520,background:"var(--surf)",borderRadius:24,
+        padding:"16px 18px 24px",animation:"pop .3s cubic-bezier(.2,.8,.2,1)",
+        boxShadow:"0 24px 64px rgba(0,0,0,.3)",maxHeight:"100%",overflowY:"auto",
+        /* ⛔ YATAY KAYMA YOK — içerikten biri taşarsa sayfa sağa sola oynuyordu.
+           Kendi içinde kaydırılması gereken şeritlerin kendi overflowX:auto'su var. */
+        overflowX:"hidden"}},
+      bas,
       children,
       cta&&h("button",{onClick:disabled?null:onCta,disabled,style:{width:"100%",padding:16,borderRadius:16,marginTop:20,
         background:disabled?"var(--line)":"linear-gradient(90deg,"+hex+","+hex+"cc)",color:disabled?"var(--mut2)":"#fff",

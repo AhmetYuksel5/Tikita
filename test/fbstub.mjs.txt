@@ -1,0 +1,65 @@
+/* Firestore stub — testte gerçek uygulama gövdesini çevrimdışı koşturur.
+   Veri window.__TIKITA_VERI'den gelir; yazımlar window.__YAZ'a düşer. */
+const VERI=(typeof window!=="undefined"&&window.__TIKITA_VERI)||{};
+export const initializeApp=()=>({});
+export const getFirestore=()=>({});
+export const initializeFirestore=()=>({});
+export const persistentLocalCache=()=>({});
+export const persistentMultipleTabManager=()=>({});
+export const collection=(db,name)=>({name});
+export const doc=(db,coll,id)=>({coll,id});
+window.__YAZ=[];
+window.__SIL=[];
+const ABONE={};
+const yayinla=coll=>{ (ABONE[coll]||[]).forEach(cb=>{
+  try{ cb({docs:(VERI[coll]||[]).map(r=>({id:r.id,data:()=>r})),metadata:{fromCache:false,hasPendingWrites:false}}); }
+  catch(e){ console.error("snapshot cb",e); } }); };
+/* increment() harita İÇİNDE de kullanılıyor (ör. pazStokK:{uid:increment(20)}),
+   bu yüzden çözüm bir seviye içeri iner. */
+const cozDeger=(esk,v)=>{
+  if(v&&typeof v==="object"&&v.__inc===true){ const t=parseFloat(esk); return (isNaN(t)?0:t)+v.v; }
+  if(v&&typeof v==="object"&&!Array.isArray(v)){
+    const o={...(esk&&typeof esk==="object"?esk:{})};
+    Object.keys(v).forEach(k=>{ o[k]=cozDeger(o[k],v[k]); });
+    return o; }
+  return v; };
+const coz=(eski,yeni)=>{ const o={};
+  Object.keys(yeni).forEach(k=>{ o[k]=cozDeger((eski||{})[k],yeni[k]); });
+  return o; };
+export const setDoc=async(ref,veri,opt)=>{
+  if(typeof window.__KES==="function") window.__KES(ref&&ref.coll,veri);
+  window.__YAZ.push({__coll:ref&&ref.coll,__id:ref&&ref.id,...veri});
+  const coll=ref&&ref.coll, id=ref&&ref.id; if(!coll||!id) return;
+  const L=(VERI[coll]=VERI[coll]||[]); const i=L.findIndex(x=>x&&x.id===id);
+  const eski=i<0?{}:L[i]; const c=coz(eski,veri);
+  if(i<0) L.push({id,...c}); else L[i]=(opt&&opt.merge)?{...eski,...c,id}:{id,...c};
+  yayinla(coll); };
+export const deleteDoc=async ref=>{ const coll=ref&&ref.coll, id=ref&&ref.id;
+  window.__SIL.push({coll,id});
+  if(!coll||!id) return;
+  VERI[coll]=(VERI[coll]||[]).filter(x=>x&&x.id!==id); yayinla(coll); };
+export const getDocs=async ref=>{ const coll=ref&&ref.name;
+  return {docs:(VERI[coll]||[]).map(r=>({id:r.id,data:()=>r,exists:()=>true})),
+          forEach(f){ this.docs.forEach(f); }}; };
+export const getDoc=async ref=>{ const coll=ref&&ref.coll, id=ref&&ref.id;
+  const r=(VERI[coll]||[]).find(x=>x&&x.id===id);
+  return {exists:()=>!!r,id,data:()=>r||{}}; };
+export const updateDoc=async(ref,veri)=>setDoc(ref,veri,{merge:true});
+export const query=(...a)=>a[0];
+export const where=(...a)=>({__where:a});
+export const deleteField=()=>({__deleteField:true});
+export const increment=v=>({__inc:true,v:parseFloat(v)||0});
+export const serverTimestamp=()=>new Date().toISOString();
+export const runTransaction=async(db,fn)=>fn({get:async()=>({exists:()=>false,data:()=>({})}),
+  set:()=>{},update:()=>{},delete:()=>{}});
+/* gerçek SDK iki biçimi de kabul eder: (ref,cb,err) ve (ref,secenek,cb,err) */
+export const onSnapshot=(ref,a,b2,c2)=>{ const coll=ref&&ref.name;
+  const cb=typeof a==="function"?a:b2;
+  if(typeof cb!=="function") return ()=>{};
+  (ABONE[coll]=ABONE[coll]||[]).push(cb);
+  setTimeout(()=>{ try{
+    cb({docs:(VERI[coll]||[]).map(r=>({id:r.id,data:()=>r})),metadata:{fromCache:false,hasPendingWrites:false}});
+  }catch(e){ console.error("snapshot cb",e); } },0);
+  return ()=>{ ABONE[coll]=(ABONE[coll]||[]).filter(x=>x!==cb); }; };
+window.__KAYITLAR=coll=>(VERI[coll]||[]).map(x=>({...x}));
+window.__DEGISTIR=(coll,rows)=>{ VERI[coll]=rows.map(x=>({...x})); yayinla(coll); };
