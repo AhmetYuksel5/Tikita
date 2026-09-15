@@ -7,7 +7,8 @@
      5 Kale ekstresinde artış değil AZALIŞ sütununa düşer, bakiye doğru yürür
      6 Cari özetinde artış/azalış mutlak değerle birikir
      7 Genel özette satış cirosu netlenir
-     8 Değişim YOKSA her rakam KDV öncesiyle birebir aynı (geriye dönük uyum) */
+     8 Değişim YOKSA her rakam KDV öncesiyle birebir aynı (geriye dönük uyum)
+     9 📋 Sayım deftere HİÇ fiş üretmez; sayımdan bırakılan ise normal satıştır */
 import {olayUret,borcAlacak,fisBacaklari,fisOzet,satirAciklama,
         kaleEkstre,kaleBakiyeleri,cariler,genelOzet,HM_SURUM} from "../public/lib/hareket-model.js";
 let hata=0; const ok=(k,c,d)=>{ console.log((c?"✓ ":"✗ ")+k+(d!=null?("   → "+d):"")); if(!c) hata++; };
@@ -98,6 +99,36 @@ const E0=kaleEkstre(R0.rows,"H Kafe");
 ok("değişimsiz ekstre birebir",E0.rows[0].artis===240&&E0.rows[0].azalis===0&&E0.bakiye===240,
   JSON.stringify({a:E0.rows[0].artis,z:E0.rows[0].azalis,b:E0.bakiye}));
 ok("değişimsiz fiş 120 → 600",fisOzet(E0.rows[0])==="120 → 600");
+
+console.log("═══ 9) 📋 SAYIM deftere hiç fiş üretmez ═══");
+/* Sayım gözlem kaydıdır: mal zaten müşterinin ve faturalanmış. Defterde satır
+   çıkarsa ciro/alacak iki kez sayılır. */
+const SAY={id:"y1",tip:"sayim",kapsam:"mulk",kullaniciId:"e1",kullaniciAd:"Ahmet",
+  musteriId:"m1",yer:"H Kafe",adet:7,satilan:13,
+  kalemler:[{urunId:"u1",urunAd:"Penguen",adet:7,beklenen:20,birim:40}],tarih:T2};
+const SAYK={id:"y2",tip:"sayim",kapsam:"konsinye",kullaniciId:"e1",kullaniciAd:"Ahmet",
+  musteriId:"m1",yer:"H Kafe",adet:4,kayma:-2,
+  kalemler:[{urunAd:"Ahtapot",adet:4,beklenen:6}],tarih:T2};
+const RS=uret([SATIS,SAY,SAYK]);
+ok("sayım satırı ÜRETİLMEZ",RS.rows.length===1&&RS.rows[0].ref==="har:s1",
+  RS.rows.map(r=>r.ref+":"+r.tur).join(","));
+ok("sayım uyarı da üretmez",!RS.uyari.length,RS.uyari.join(" | "));
+ok("kale bakiyesi sayımdan etkilenmez",Math.abs(bk(kaleBakiyeleri(RS.rows),"H Kafe")-240)<0.01,
+  String(bk(kaleBakiyeleri(RS.rows),"H Kafe")));
+ok("genel özet sayımdan etkilenmez",Math.abs(num(genelOzet(RS.rows).satis)-240)<0.01,
+  String(genelOzet(RS.rows).satis));
+/* sayım ekranından bırakılan ürün NORMAL doğrudan satıştır — fişi 120 → 600 */
+const SB={id:"y3",tip:"satis",kaynak:"sayim",kullaniciId:"e1",kullaniciAd:"Ahmet",musteriId:"m1",
+  yer:"H Kafe",urunId:"u1",urunAd:"Penguen",adet:10,satisFiyat:40,alisFiyat:25,
+  maliyetBirim:12,tahsil:0,tarih:T2};
+const RB=uret([SATIS,SAY,SB]);
+const sb=RB.rows.find(r=>r.ref==="har:y3");
+ok("sayımdan bırakılan SATIŞ satırı olur",sb&&sb.tur==="SATIS"&&sb.tutar===400,
+  sb?sb.tur+" "+sb.tutar:"YOK");
+ok("peşin DEĞİL (borç yazar)",sb&&!sb.pesin);
+ok("fişi 120 → 600",fisOzet(sb)==="120 → 600",fisOzet(sb));
+ok("bakiye 240 + 400 = 640",Math.abs(bk(kaleBakiyeleri(RB.rows),"H Kafe")-640)<0.01,
+  String(bk(kaleBakiyeleri(RB.rows),"H Kafe")));
 
 function num(x){ const n=parseFloat(x); return isNaN(n)?0:n; }
 console.log(hata?("\n✗ "+hata+" HATA"):"\n✓ DEĞİŞİM DEFTERİ DOĞRULANDI");

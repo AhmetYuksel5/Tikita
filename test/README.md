@@ -36,4 +36,5 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 | `gozcuE2E.mjs` | gözcü statüsündeki kaleler en altta kapalı akordiyonda |
 | `degisimE2E.mjs` | ♻️ değişim: eşit adet zorunluluğu, iki kayıt tek `degisimId`, stok ayağı, borç yalnız fiyat farkı kadar, birlikte geri alma |
 | `degisimDefter.mjs` | ♻️ değişimin muhasebe ayağı (saf model): ters kayıt, borç/alacak yönü, fiş bacakları, cari bakiye |
+| `sayimE2E.mjs` | 📋 sayım: kutular dolu gelir, para doğurmaz, havuzu gerçek adede çeker, aynı ekrandan bırakış doğrudan satış olur, konsinye rafı yalnız sayılır |
 | `rafDonusE2E.mjs` | ↩️ konsinye satışı iptal edilince adet ÇIKTIĞI partiye döner (parti izi + izsiz eski kayıtta LIFO) |
