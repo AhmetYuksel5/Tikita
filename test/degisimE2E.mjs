@@ -155,8 +155,9 @@ ok("ciro 240 → 300 (iade netlenmiş)",/300 ₺ Toplam ciro/.test(t),(t.match(/
 /* müşterinin malı: 6 Penguen'den 4'ü gitti, yerine 4 Kaplumbağa geldi */
 /* hakediş: 6×(40−25)=90 → 2×15 + 4×(55−30) = 130 */
 ok("hakediş de netlendi · 130 ₺",/130 ₺/.test(t),(t.match(/BU KALEDEN KAZANDIĞIN [\d.]+ ₺/i)||t.match(/130 ₺/)||[""])[0]);
-ok("mülk havuzu güncellendi",/Penguen\s*2 adet/.test(t)&&/Kaplumbağa\s*4 adet/.test(t),
-  (t.match(/MÜŞTERİNİN BUGÜNE DEK SATIN ALDIĞI.{0,90}/)||[""])[0]);
+/* 📦 birleşik döküm FİYAT BAZINDA: 2 Penguen @40 + 4 Kaplumbağa @55 */
+ok("mülk havuzu güncellendi",/🛍 Penguen 2 40 ₺/.test(t)&&/🛍 Kaplumbağa 4 55 ₺/.test(t),
+  (t.match(/🛍 \S+ [\d.]+ [\d.]+ ₺/g)||[]).join(" | "));
 
 console.log("═══ 9) tahsilat ayrıntısında kalem ═══");
 ok("tahsilata girildi",(await bas("Tahsil et"))!=="YOK");

@@ -39,4 +39,5 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 | `degisimDefter.mjs` | ♻️ değişimin muhasebe ayağı (saf model): ters kayıt, borç/alacak yönü, fiş bacakları, cari bakiye |
 | `sayimE2E.mjs` | 📋 sayım: kutular dolu gelir, para doğurmaz, havuzu gerçek adede çeker, aynı ekrandan bırakış doğrudan satış olur, konsinye rafı yalnız sayılır |
 | `tahsilatGeriE2E.mjs` | 🧾 tahsilat geri alma idempotent: bayat ekrandan ikinci basış, hızlı çift dokunuş, mahsup izi, KDV tavanı |
+| `ziyaretRaporE2E.mjs` | 🧾 değişim tek satır + geri alma · fiyat bazlı birleşik döküm · ziyaret raporu sırası · tahsil edilecek kalemleri · birleşik reyting |
 | `rafDonusE2E.mjs` | ↩️ konsinye satışı iptal edilince adet ÇIKTIĞI partiye döner (parti izi + izsiz eski kayıtta LIFO) |
