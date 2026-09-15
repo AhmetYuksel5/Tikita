@@ -56,7 +56,7 @@ let db; try{ db=initializeFirestore(__app,{localCache:persistentLocalCache({tabM
 catch(e){ db=getFirestore(__app); }
 const {useState,useEffect,useMemo}=React; const h=React.createElement;
 
-const SURUM="F12";
+const SURUM="F13";
 const SAAT_MALIYET=12;          // ₺/saat — üretim panelindeki standart makine saati
 /* 🗓 HAKEDİŞ KESME TARİHİ — bu tarihten itibaren pazarlamacı hakedişi SATIŞA bağlıdır
    ve haftalık ayrı ödenir. Öncesinde tahsilattan mahsup ediliyordu (önce üretici). */
@@ -357,6 +357,7 @@ function defterUret(D,V){
     else if(x.tip==="konsinye"&&a>0&&mal>0)
       ek(x.tarih,"konsinye","Konsinye bırakma · "+(x.urunAd||"")+" @ "+(x.yer||""),
         [{h:"152.3",b:a*mal},{h:"152.2",a:a*mal}],"har:"+x.id);
+    else if(x.tip==="iade"&&x.kaynak==="degisim"){ /* ♻️ satış iadesi — 4.6b'de işlenir */ }
     else if(x.tip==="iade"&&a>0&&mal>0){
       /* ⚠ 'iade' İKİ ayrı olay için yazılıyor:
          · kaynak="konsinye" → raftan çantaya dönüş     (152.3 → 152.2)
@@ -402,6 +403,29 @@ function defterUret(D,V){
         [{h:"631",b:prim},{h:"335",a:prim}],"har:"+x.id+":p");
     }
     if(mal>0) ek(x.tarih,"smm","SMM · "+(x.urunAd||""),[{h:"620",b:mal},{h:kaynakH,a:mal}],"har:"+x.id+":m");
+  });
+
+  /* ——— 4.6b ♻️ değişim iadesi ———
+     Kaleye satılmış mal geri alındı: satış geri döner (600 borç · 120 alacak),
+     mal pazarlamacının çantasına girer (152.2 borç · 620 alacak), brüt görünümde
+     tahakkuk etmiş pazarlamacı payı da iptal olur. Yerine verilen ürün 4.6'da
+     normal satış olarak durduğu için cariye NET etki fiyat farkı kadardır. */
+  (D.hareketler||[]).forEach(x=>{
+    if(x.tip!=="iade"||x.kaynak!=="degisim") return;
+    const a=num(x.adet); if(a<=0) return;
+    const mus=num(x.satisFiyat)*a;
+    const veris=(num(x.alisFiyat)>0?num(x.alisFiyat):(M[x.urunId]?M[x.urunId].pazFiyat:0))*a;
+    const mal=(num(x.maliyetBirim)>0?num(x.maliyetBirim):bm(x.urunId))*a;
+    const hasilatBrut=brutView?mus:Math.min(veris,mus>0?mus:veris);
+    const prim=(brutView&&!sirketSet[x.kullaniciId])?Math.max(0,mus-veris):0;
+    if(hasilatBrut>0.004)
+      ek(x.tarih,"satis","Değişim iadesi · "+(x.urunAd||"")+" ×"+ad(a)+" @ "+(x.yer||"saha"),
+        [{h:"600",b:hasilatBrut},{h:"120",a:hasilatBrut}],"har:"+x.id);
+    if(prim>0.004)
+      ek(x.tarih,"prim","Pazarlamacı payı iptali · "+(x.kullaniciAd||""),
+        [{h:"335",b:prim},{h:"631",a:prim}],"har:"+x.id+":p");
+    if(mal>0)
+      ek(x.tarih,"smm","SMM iptali · "+(x.urunAd||""),[{h:"152.2",b:mal},{h:"620",a:mal}],"har:"+x.id+":m");
   });
 
   /* ——— 4.7 hediye ——— */
@@ -1130,7 +1154,7 @@ function cakismaRapor(D){
     {olay:"Pazarlamacıya mal verme",a:'pazarlama_hareket · tip="al"',an:say(H,x=>x.tip==="al"),
       b:'stok_hareket · sebep="cikis"',bn:say(S,x=>x.sebep==="cikis"),
       secim:"pazarlama_hareket"},
-    {olay:"Atölyeye dönüş",a:'tip="iade" (kaynak yok)',an:say(H,x=>x.tip==="iade"&&x.kaynak!=="konsinye"),
+    {olay:"Atölyeye dönüş",a:'tip="iade" (kaynak yok)',an:say(H,x=>x.tip==="iade"&&x.kaynak!=="konsinye"&&x.kaynak!=="degisim"),
       b:'sebep="donus" + "iade"',bn:say(S,x=>x.sebep==="donus"||x.sebep==="iade"),
       secim:"pazarlama_hareket"},
     {olay:"Montajdan mal girişi",a:"montaj_gorev · teslimAdet",an:say(M,g=>g.durum==="teslim"),
@@ -1272,6 +1296,10 @@ function hareketAkisi(D){
       ekle(x.tarih,"mal","📤","Satıldı · "+u,ile(n+" adet",y||"⚡ Seyyar"),0,n,r); return; }
     if(x.tip==="tahsilat"){ ekle(x.tarih,"para","🧾",(x.avans?"Sayımsız tahsilat · ":"Tahsilat · ")+(y||"—"),k,num(x.tutar),0,r,{mus,kale:y,tahsil:true}); return; }
     if(x.tip==="konsinye"){ ekle(x.tarih,"mal","🏬","Konsinye bırakıldı · "+u,ile(n+" adet · "+y,k),0,n,r,{mus,kale:y}); return; }
+    /* ♻️ değişim iadesi hem mal hem PARA ayağı taşır — satış geri döner */
+    if(x.tip==="iade"&&x.kaynak==="degisim"){
+      ekle(x.tarih,"para","♻️","Değişim iadesi · "+(y||"—"),ile(n+" × "+u,k),-n*num(x.satisFiyat),0,r,{mus,kale:y});
+      ekle(x.tarih,"mal","♻️","Değişimle geri alındı · "+u,ile(n+" adet · "+(y||"—"),k),0,n,r,{mus,kale:y}); return; }
     if(x.tip==="iade"){ ekle(x.tarih,"mal","↩️","İade alındı · "+u,ile(n+" adet · "+(y||"atölyeye dönüş"),k),0,n,r,{mus,kale:y}); return; }
     if(x.tip==="hediye"){ ekle(x.tarih,"mal","🎁","Hediye · "+u,ile(n+" adet · "+(y||"⚡ Seyyar"),k),0,n,r,ger?{ger:true}:{mus,kale:y}); return; }
     if(x.tip==="al"){ ekle(x.tarih,"mal","🎒","Çantaya alındı · "+u,ile(n+" adet",k),0,n,r); return; }

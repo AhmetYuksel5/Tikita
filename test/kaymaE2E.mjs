@@ -99,6 +99,10 @@ for(const W of [320,390,430]){
   await bas(p,"H Yayınları"); await p.waitForTimeout(700);
   await bas(p,"Konsinye →|🏬 .* adet Konsinye"); await p.waitForTimeout(800);
   await denet(p,"konsinye");
+  await p.keyboard.press("Escape"); await p.waitForTimeout(400);
+  await bas(p,"^♻️ ?Değişim$"); await p.waitForTimeout(800);
+  await denet(p,"değişim");
+  ok("rozet DEĞİŞİM",/DEĞİŞİM/.test(await p.evaluate(()=>document.body.innerText)));
   ok("pazarlamacı konsol temiz",!log.length,log.join(" | ").slice(0,140));
   await c.close();
 }

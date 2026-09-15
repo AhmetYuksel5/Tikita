@@ -16,7 +16,7 @@
    stok_hareket HİÇBİR adapterde mali satır üretmez.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const HM_SURUM = "4";   // 4: tahsilatta KDV (391) bacağı
+export const HM_SURUM = "5";   // 5: değişim iadesi = negatif tutarlı SATIŞ (ters kayıt) · 4: tahsilatta KDV (391) bacağı
 export const HM_TURLER = ["SATIS", "TAHSILAT", "MASRAF", "ODEME"];
 
 /* Hakediş düzeni kesim tarihi — TEK KAYNAK. admin/deneme/finans'taki üç kopya
@@ -172,9 +172,12 @@ export function fisBacaklari(s) {
   const B = (h, v) => ({ h, borc: r2(v), alacak: 0 });
   const A = (h, v) => ({ h, borc: 0, alacak: r2(v) });
 
-  if (tur === "SATIS")
+  if (tur === "SATIS") {
+    // ♻️ negatif tutar = satış iadesi (değişim): gelir geri alınır, kale alacaklanır
+    if (t < 0) return [B("600", -t), A("120", -t)];
     // satış anı: kale borçlanır, gelir doğar. Nakit girişi TAHSİLAT satırındadır.
     return [B("120", t), A("600", t)];
+  }
 
   if (tur === "TAHSILAT") {
     // saha→merkez taşıma: iki nakit hesabı arasında transfer, gelir/alacak YOK
@@ -215,8 +218,11 @@ export function fisBacaklari(s) {
    gerektiğinde fisBacaklari'ndan hesaplanır — sütunlar tek bacaklı kalır. */
 export function borcAlacak(s) {
   if (!s) return { borc: 0, alacak: 0 };
-  return (s.tur === "SATIS") ? { borc: r2(s.tutar), alacak: 0 }
-                             : { borc: 0, alacak: r2(s.tutar) };
+  const t = r2(s.tutar), m = Math.abs(t);
+  /* ♻️ NEGATİF TUTAR = TERS KAYIT (değişim iadesi). Sütun karşı tarafa geçer;
+     eksili rakam yazılmaz. Satır başına TEK BACAK kuralı bozulmaz. */
+  if (s.tur === "SATIS") return t < 0 ? { borc: 0, alacak: m } : { borc: m, alacak: 0 };
+  return t < 0 ? { borc: m, alacak: 0 } : { borc: 0, alacak: m };
 }
 
 /* Bacakların tek satırda okunur hali: "120 → 600" (borç hesabı → alacak hesabı) */
@@ -235,6 +241,8 @@ export function satirAciklama(s) {
   if (s.aciklama) return s.aciklama;
   if (s.tur === "SATIS") {
     if (s.altTur === "stant") return "Stant bedeli";
+    if (s.altTur === "degisimIade")
+      return "Değişim iadesi · " + (s.urunAd || "ürün") + (num(s.adet) ? " × " + num(s.adet) : "");
     return (s.urunAd || "Satış") + (num(s.adet) ? " × " + num(s.adet) : "");
   }
   if (s.tur === "TAHSILAT") {
@@ -387,6 +395,19 @@ export function olayUret(D, opts) {
       if (mal <= 0) uyari.push("hediye maliyeti bilinmiyor: " + (x.urunAd || x.id));
       ekle(satir("har:" + x.id, "MASRAF", "numune", x,
         { ...kale(x), tutar: mal, kaynakKol: "pazarlama_hareket", kaynakId: x.id }));
+      return;
+    }
+
+    /* ♻️ DEĞİŞİM İADESİ — kaleye satılmış malın geri alınması. Mali hareketTİR:
+       satış iadesidir. Geçmiş satış kaydına dokunulmadığı için burada TERS KAYIT
+       olarak (negatif tutarlı SATIŞ satırı) üretilir; defterin borç/alacak
+       sütunları ve fiş bacakları bu işareti görüp yönü çevirir (bkz. borcAlacak,
+       fisBacaklari). Yerine verilen ürün ayrıca normal bir satış satırıdır, yani
+       cariye net etki tam olarak FİYAT FARKI kadar olur. */
+    if (x.tip === "iade" && x.kaynak === "degisim") {
+      const t = a * num(x.satisFiyat); if (!(t > 0)) return;
+      ekle(satir("har:" + x.id, "SATIS", "degisimIade", x,
+        { ...kale(x), tutar: -t, kaynakKol: "pazarlama_hareket", kaynakId: x.id }));
       return;
     }
 
@@ -557,9 +578,12 @@ export function kaleEkstre(rows, kaleAd, tip) {
     // artış = bakiyeyi büyüten yön (+1), azalış = küçülten (−1)
     // 🧾 KDV'li tahsilatta cariden düşen yalnız MATRAHTIR (bkz. cariTutar)
     const cariTut = cariTutar(s);
-    const artis = (cariMi && ce > 0) ? cariTut : 0;
-    const azalis = (cariMi && ce < 0) ? cariTut
-      : ((!cariMi && !avansMi && (s.tur === "TAHSILAT" || s.tur === "MASRAF" || s.tur === "ODEME")) ? cariTut : 0);
+    /* ♻️ TERS KAYIT — negatif tutarlı satır (değişim iadesi) bakiyeyi ters yönde
+       oynatır; sütuna mutlak değer yazılır, eksili "artış" okunmuyordu. */
+    const yon = cariTut < 0 ? -1 : 1, mut = Math.abs(cariTut);
+    const artis = (cariMi && ce * yon > 0) ? mut : 0;
+    const azalis = (cariMi && ce * yon < 0) ? mut
+      : ((!cariMi && !avansMi && (s.tur === "TAHSILAT" || s.tur === "MASRAF" || s.tur === "ODEME")) ? mut : 0);
     if (cariMi) run = r2(run + artis - azalis);
     return { ...s, artis, azalis, borc: artis, alacak: azalis,
       bakiye: run, avansMi, cariDisi: !cariMi && !avansMi };
@@ -584,8 +608,9 @@ export function cariler(rows) {
     if (s.tur === "TAHSILAT" && s.altTur === "avans") { o.avans = r2(o.avans + s.tutar); return; }
     if (s.tur === "ODEME" && s.altTur === "hakedis") { o.hakedisOde = r2(o.hakedisOde + s.tutar); return; }
     const ce = cariEtki(s);
-    if (ce > 0) o.artis = r2(o.artis + s.tutar);
-    else if (ce < 0) o.azalis = r2(o.azalis + s.tutar);
+    const yon = num(s.tutar) < 0 ? -1 : 1, mut = Math.abs(r2(num(s.tutar)));   // ♻️ ters kayıt
+    if (ce * yon > 0) o.artis = r2(o.artis + mut);
+    else if (ce * yon < 0) o.azalis = r2(o.azalis + mut);
   });
   return Object.values(M).map(o => ({ ...o, bakiye: r2(o.artis - o.azalis) }))
     .sort((a, b) => Math.abs(b.bakiye) - Math.abs(a.bakiye) || a.ad.localeCompare(b.ad, "tr"));

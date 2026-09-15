@@ -27,3 +27,12 @@ Chromium sistemde kurulu: /opt/pw-browsers/chromium-1194/chrome-linux/chrome
 
 Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 70 süitin tamamı kayboldu. Regresyon ağı kodun yanında durmalı.
+
+## Süitler
+
+| dosya | ne doğrular |
+|---|---|
+| `kaymaE2E.mjs` | 320/390/430px — baskı bilgisi · konsinye · değişim ekranlarında yatay kayma yok |
+| `gozcuE2E.mjs` | gözcü statüsündeki kaleler en altta kapalı akordiyonda |
+| `degisimE2E.mjs` | ♻️ değişim: eşit adet zorunluluğu, iki kayıt tek `degisimId`, stok ayağı, borç yalnız fiyat farkı kadar, birlikte geri alma |
+| `degisimDefter.mjs` | ♻️ değişimin muhasebe ayağı (saf model): ters kayıt, borç/alacak yönü, fiş bacakları, cari bakiye |
