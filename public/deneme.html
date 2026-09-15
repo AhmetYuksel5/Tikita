@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v133";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v134";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -4191,6 +4191,10 @@ function App(){
         const sonAlis=tuk.length?num(tuk[tuk.length-1].r.alisFiyat):verisOf(urunGuncel,emirId);
         const sonMal=tuk.length?num(tuk[tuk.length-1].r.maliyetBirim):num(urunGuncel.maliyetGuncel);
         const tukAd=tuk.reduce((s2,t2)=>s2+t2.dd,0);
+        /* 📌 PARTİ İZİ — bu çıkışın hangi konsinye bırakışından kaç adet düştüğü.
+           Geri alma bunu okuyup adedi TAM OLARAK çıktığı partiye döndürür; iz
+           yoksa tahmin etmek zorunda kalıyordu (bkz. rafaDondur). */
+        const konsParti=tuk.map(t2=>({id:t2.r.id,adet:t2.dd}));
         const acikta=Math.max(0,num(p2.adet)-tukAd);   // kayda bağlanamayan fazlalık
         const alisTop=tuk.reduce((s2,t2)=>s2+t2.dd*num(t2.r.alisFiyat),0)+acikta*sonAlis;
         const alisOrt=num(p2.adet)>0?Math.round(alisTop/num(p2.adet)*100)/100:0;
@@ -4206,7 +4210,7 @@ function App(){
             const hUrunId=rec.urunId||urunGuncel.id||"";
             // kaynak:"konsinye" → geri alınırsa raftaki "kalan" doğru yere döner (çanta oynamaz)
             await save("pazarlama_hareket",{id:satisId,...kul,tip:"hediye",kaynak:"konsinye",urunId:hUrunId,urunAd:ad,
-              adet:num(p2.adet),alisFiyat:alisOrt,maliyetBirim:malOrt,satisFiyat:0,tahsil:0,...yerB,...girEk,tarih:now});
+              adet:num(p2.adet),alisFiyat:alisOrt,maliyetBirim:malOrt,satisFiyat:0,tahsil:0,konsParti,...yerB,...girEk,tarih:now});
             if(hUrunId&&!p.gecTarih) await save("stok_urun",{id:hUrunId,hediye:increment(num(p2.adet))});
             return {};
           }
@@ -4217,10 +4221,10 @@ function App(){
           await save("pazarlama_hareket",{id:satisId,...kul,tip:"satis",kaynak:"konsinye",urunId:rec.urunId||urunGuncel.id||"",urunAd:ad,
             adet:num(p2.adet),alisFiyat:alisOrt,maliyetBirim:malOrt,
             satisFiyat:birimF,   // GERÇEK satış fiyatı — pazarlamacının girdiği
-            tahsil:0,...yerB,...girEk,tarih:now});
+            tahsil:0,konsParti,...yerB,...girEk,tarih:now});
         }
         else { const iid=rec.urunId||urunGuncel.id||"";
-          await save("pazarlama_hareket",{...kul,tip:"iade",urunId:iid,urunAd:ad,adet:num(p2.adet),kaynak:"konsinye",...yerB,...girEk,tarih:now});
+          await save("pazarlama_hareket",{...kul,tip:"iade",urunId:iid,urunAd:ad,adet:num(p2.adet),kaynak:"konsinye",konsParti,...yerB,...girEk,tarih:now});
           if(iid&&!p.gecTarih) await cantaDelta(iid,ad,+num(p2.adet)); }
       }
     } else { // ziyaret
@@ -4258,15 +4262,31 @@ function App(){
            • iki parti varsa yanlış partiye dönüyordu,
            • sınır olmadığı için yarıda kalan/tekrarlanan geri almada kalan şişiyordu.
          Canlı veride 10'luk bir parti bu yüzden kalan=22 görünmüştü. */
+      /* Adet ÇIKTIĞI PARTİYE döner. İki yol var:
+           1) Kayıtta parti izi (konsParti) varsa birebir oraya — tahmin yok.
+           2) Eski kayıtlarda iz yok. Düşüş FIFO (en eski önce) olduğu için dönüş
+              onun TERSİ, yani EN YENİ boş yerden başlar.
+         Eskiden dönüş de en eskiden başlıyordu ve bu şu karışıklığı doğuruyordu:
+         14'lük parti satılıp kapandıktan sonra bırakılan 5'lik partiden satılan
+         mal, satış iptal edilince 14'lük partiye yazılıyordu. Toplam raf doğru
+         kalıyor ama hangi bırakışın açık olduğu karışıyor, o bırakış artık
+         silinemiyor ("bir kısmı satılmış" uyarısı) ve sonraki FIFO düşüşler de
+         yanlış partiden gidiyordu. Canlıda Temel Süpermarket · Halkalı Kalp
+         anahtarlıkta tam bu oldu (15 Eylül 18:39). */
       const rafaDondur=async(n0)=>{ let n=Math.round(num(n0)); if(!(n>0)) return 0;
-        const partiler=emirHar.filter(h2=>h2.tip==="konsinye"&&h2.id!==x.id
-            &&kkOf(h2)===kkOf(x)&&(h2.urunAd||"?")===(x.urunAd||"?"))
-          .sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));   // en eski önce
-        const bas=n;
-        for(const pt of partiler){ if(n<=0) break;
-          const yer=Math.max(0,num(pt.adet)-num(pt.kalan)); if(yer<=0) continue;
-          const dd=Math.min(yer,n);
-          await save("pazarlama_hareket",{id:pt.id,kalan:increment(dd)}); n-=dd; }
+        const bas=n, ekli={};   // emirHar anlık görüntüsü güncellenmez — eklenen burada tutulur
+        const dondur=async(pt,tavan)=>{
+          const yer=Math.max(0,num(pt.adet)-num(pt.kalan)-num(ekli[pt.id]));
+          const dd=Math.min(yer,Math.round(num(tavan)),n); if(dd<=0) return;
+          await save("pazarlama_hareket",{id:pt.id,kalan:increment(dd)});
+          ekli[pt.id]=num(ekli[pt.id])+dd; n-=dd; };
+        for(const pr of (Array.isArray(x.konsParti)?x.konsParti:[])){ if(n<=0) break;
+          const pt=emirHar.find(h2=>h2&&h2.id===pr.id); if(pt) await dondur(pt,pr.adet); }
+        if(n>0){
+          const partiler=emirHar.filter(h2=>h2.tip==="konsinye"&&h2.id!==x.id
+              &&kkOf(h2)===kkOf(x)&&(h2.urunAd||"?")===(x.urunAd||"?"))
+            .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));   // en YENİ önce (FIFO'nun tersi)
+          for(const pt of partiler){ if(n<=0) break; await dondur(pt,n); } }
         return bas-n; };
       if(x.tip==="konsinye"&&num(x.kalan)!==ad2) return alert("Bu konsinyenin bir kısmı satılmış/iade olmuş.\nÖnce ilgili satış/iadeleri geri al.");
       if(x.tip==="nakitTeslim"&&x.onay!==false) return alert("Bu nakit teslimi komuta onayladı.\nGeri alınması için komutaya haber ver.");
