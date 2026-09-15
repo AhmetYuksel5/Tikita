@@ -21,6 +21,7 @@ Chromium sistemde kurulu: /opt/pw-browsers/chromium-1194/chrome-linux/chrome
 - `window.__SIL`        — silinenler [{coll,id}]
 - `window.__KAYITLAR(c)` — koleksiyonun güncel hâli
 - `window.__DEGISTIR(c,rows)` — koleksiyonu değiştir + aboneleri uyar
+- `window.__SESSIZ(c,rows)` — değiştir ama aboneleri UYARMA (bayat ekran taklidi)
 - `window.__KES(coll,veri)` — yazma sırasında hata fırlatmak için
 
 ## Neden repoda
@@ -37,4 +38,5 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 | `degisimE2E.mjs` | ♻️ değişim: eşit adet zorunluluğu, iki kayıt tek `degisimId`, stok ayağı, borç yalnız fiyat farkı kadar, birlikte geri alma |
 | `degisimDefter.mjs` | ♻️ değişimin muhasebe ayağı (saf model): ters kayıt, borç/alacak yönü, fiş bacakları, cari bakiye |
 | `sayimE2E.mjs` | 📋 sayım: kutular dolu gelir, para doğurmaz, havuzu gerçek adede çeker, aynı ekrandan bırakış doğrudan satış olur, konsinye rafı yalnız sayılır |
+| `tahsilatGeriE2E.mjs` | 🧾 tahsilat geri alma idempotent: bayat ekrandan ikinci basış, hızlı çift dokunuş, mahsup izi, KDV tavanı |
 | `rafDonusE2E.mjs` | ↩️ konsinye satışı iptal edilince adet ÇIKTIĞI partiye döner (parti izi + izsiz eski kayıtta LIFO) |

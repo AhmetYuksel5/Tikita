@@ -92,7 +92,7 @@
 </script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { kurAudit } from "./lib/tikita-audit.js";
 /* 📔 katalog motoru — komuta uygulamasıyla ortak */
 import { urunFotoBilgi, kurKatalogSheet } from "./lib/katalog.js";
@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v135";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v136";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -347,6 +347,15 @@ const kayitMs=x=>{ if(!x) return 0;
 // 'girildi' YALNIZCA geçmişe girilen kayda yazılır — varlığı tek başına işarettir
 const gecmisKayit=x=>!!x&&(!!x.girildi||x.kaynak==="gecmis");
 async function remove(coll,id){ return AUD.remove(coll,id); }
+const r2b=v=>Math.round(num(v)*100)/100;   // kuruş yuvarlaması (mahsup izi)
+/* 🔎 SUNUCUDAKİ GÜNCEL HÂL — ekran onSnapshot ile gecikmeli tazelendiği için
+   silinmiş bir satır bir süre daha görünür ve tekrar tıklanabilir. Geri alma,
+   kaydın hâlâ var olduğunu buradan doğrular. Yok ise hiçbir sayaç oynatılmaz. */
+async function oku(coll,id){
+  if(!id) return null;
+  try{ const sn=await getDoc(doc(db,OV+coll,id)); return sn.exists()?{id,...sn.data()}:null; }
+  catch(e){ console.error("oku",e); return undefined; }   // undefined = bilinmiyor (ağ hatası)
+}
 // bir tahsilatın üretici(önce)/pazarlamacı(sonra) bölüşümü — birebir ana uygulama
 const payBol=(x,d,onceki)=>{ const K=num(x.adet)*num(x.alisFiyat); const o=num(onceki);
   const uOnce=Math.min(o,K), uSonra=Math.min(o+d,K); const u=Math.max(0,uSonra-uOnce); return {u, p:Math.max(0,d-u)}; };
@@ -4299,7 +4308,11 @@ function App(){
          düşürdüyse (borç azalmışsa) vergi de o kadar olsun. */
       const kdvO=num(p.kdvOran), kdvT=kdvO>0?kdvHesap(uyg,kdvO):0;
       const kdvEk=kdvT>0?{kdv:kdvT,kdvOran:kdvO}:{};
+      /* 📌 MAHSUP İZİ — bu tahsilatın hangi satışa kaç ₺ işlendiği. Geri alma
+         bunu okuyup birebir o kadarını geri düşer; iz yoksa tahmin etmek zorunda
+         kalıyor ve başka bir tahsilatın kapattığı borcu da açıyordu. */
       await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:uyg+kdvT,...kdvEk,
+        mahsup:plan.map(it=>({id:it.id,tutar:r2b(it.dd)})),
         ureticiPay:uP,pazPay:pP,...yerB,...gecEk,tarih:now});
       for(const it of plan) await save("pazarlama_hareket",{id:it.id,tahsil:increment(it.dd)});   // atomik — satışın borcu gerçekten kapanır
     } else if(p.type==="satis"){
@@ -4339,7 +4352,8 @@ function App(){
       if(!gerilla&&num(p.alinan)>0){ const alin=Math.min(num(p.alinan),num(p.adet)*num(p.fiyat));
         const b=payBol({adet:p.adet,alisFiyat:num(u.pazFiyat)},alin,0);
         // önce tahsilat kaydı, sonra satırın tahsil'i — yarıda kalırsa para kaybolmasın
-        await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:alin,ureticiPay:b.u,pazPay:b.p,...yerB,...gecEk,tarih:now});
+        await save("pazarlama_hareket",{...kul,tip:"tahsilat",tutar:alin,ureticiPay:b.u,pazPay:b.p,
+          mahsup:[{id:satisId,tutar:r2b(alin)}],...yerB,...gecEk,tarih:now});
         await save("pazarlama_hareket",{id:satisId,tahsil:increment(alin)}); }
     } else if(p.type==="sayim"){
       /* 📋 SAYIM — gözlem kaydı. PARA YOK: borç, ciro, hakediş, stok hareketi
@@ -4523,7 +4537,13 @@ function App(){
     if(p.kalici){ say("✓ "+(p.mesaj||"işlendi")); } else { setSheet(null); setReward({mesaj:p.mesaj,xp:p.xp}); }
     return true; };
   // (toplu silme kaldırıldı — canlı defterde tekil geri alma kullanılır)
-  const geriAlKayit=async(x)=>AUD.op(()=>__geriAlKayit(x),"pazarlama_hareket:delete","↩ Kayıt geri alındı");
+  /* 🔒 tek seferde tek geri alma — hızlı çift dokunuş iki kez çalıştırıyordu */
+  const geriAlMesgul=useRef(false);
+  const geriAlKayit=async(x)=>{
+    if(geriAlMesgul.current) return;
+    geriAlMesgul.current=true;
+    try{ return await AUD.op(()=>__geriAlKayit(x),"pazarlama_hareket:delete","↩ Kayıt geri alındı"); }
+    finally{ geriAlMesgul.current=false; } };
   const __geriAlKayit=async(x)=>{ const o=ovOzet(x);
     /* ♻️ DEĞİŞİM TEK EYLEMDİR — iade ve yerine verilen satış aynı damgayı (degisimId)
        taşır ve BİRLİKTE geri alınır. Yalnız birini silmek borcu ve hakedişi yarım
@@ -4540,7 +4560,39 @@ function App(){
       return; }
     if(!confirm("↩️ Geri alınsın mı?\n"+o.t+(o.v?(" · "+o.v):"")+"\n"+(x.yer||""))) return;
     try{
+      /* ⛔ ÇİFT BASMA — ekrandaki liste onSnapshot ile gecikmeli tazelendiği için
+         silinmiş satır bir süre daha görünüyor ve tekrar basılabiliyor. Bağlı
+         sayaçları ters çevirmek İDEMPOTENT DEĞİL: her basışta yeniden çevriliyordu.
+         Canlıda Temel Süpermarket'te tahsilat geri alındıkça borç her basışta bir
+         tahsilat tutarı kadar artıyordu. Artık kaydın sunucuda hâlâ var olduğu
+         doğrulanmadan hiçbir şey yapılmıyor. */
+      const canli=await oku("pazarlama_hareket",x.id);
+      if(canli===null){ say("↩️ Bu kayıt zaten geri alınmış"); return; }
+      if(canli===undefined){ say("⚠ Bağlantı yok — tekrar dene"); return; }
+      x={...x,...canli};   // para alanları SUNUCUDAKİ hâliyle okunur
       const ad2=num(x.adet); const gecmisMi=x.kaynak==="gecmis";
+      /* 🧾 TAHSİLATIN TERS ÇEVRİLMESİ — satışların tahsil'i geri düşer, borç geri gelir.
+         İki sınır var, ikisi de eskiden yoktu:
+           • Tavan, tahsilatın CARİYE YANSIYAN kısmıdır (KDV hariç). Eskiden
+             tutarın tamamı esas alınıyordu; KDV'li tahsilatta borç vergi kadar
+             fazla açılıyordu.
+           • Kayıtta mahsup izi varsa yalnız o satışlardan, yalnız o kadarı
+             düşülür. İz yoksa en yeniden başlanır ama hiçbir satırdan kendi
+             tahsil'inden fazlası alınmaz. */
+      const tahsilGeriDus=async(t)=>{
+        let kalan=Math.max(0,num(t.tutar)-num(t.kdv));
+        const bul=id=>emirHar.find(h2=>h2&&h2.id===id);
+        if(Array.isArray(t.mahsup)&&t.mahsup.length){
+          for(const m of t.mahsup){ if(kalan<=0.001) break;
+            const sr=bul(m.id); if(!sr) continue;
+            const dd=Math.min(num(m.tutar),num(sr.tahsil),kalan);
+            if(dd>0.001){ await save("pazarlama_hareket",{id:sr.id,tahsil:increment(-dd)}); kalan-=dd; } }
+          return; }
+        const tahsilli=emirHar.filter(sr=>sr.tip==="satis"&&!sr.gerilla&&kkOf(sr)===kkOf(t)&&num(sr.tahsil)>0)
+          .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
+        for(const sr of tahsilli){ if(kalan<=0.001) break;
+          const dd=Math.min(kalan,num(sr.tahsil));
+          await save("pazarlama_hareket",{id:sr.id,tahsil:increment(-dd)}); kalan-=dd; } };
       /* ↩️ RAFA DÖNDÜR — konsinye satışı/hediyesi/iadesi geri alınınca adet rafa döner.
          Satış kaydı hangi PARTİDEN çıktığını saklamaz; düşüş FIFO olduğu için dönüş de
          EN ESKİ boş yeri olan partiden başlar ve HİÇBİR PARTİ KENDİ ADEDİNİ AŞAMAZ.
@@ -4580,18 +4632,17 @@ function App(){
       if(x.tip==="konsinye"&&num(x.kalan)!==ad2) return alert("Bu konsinyenin bir kısmı satılmış/iade olmuş.\nÖnce ilgili satış/iadeleri geri al.");
       if(x.tip==="nakitTeslim"&&x.onay!==false) return alert("Bu nakit teslimi komuta onayladı.\nGeri alınması için komutaya haber ver.");
       if(x.tip==="tahsilat"&&x.avans){
-        if(num(x.acikAvans)<num(x.tutar)-0.001) return alert("Bu tahsilatın bir kısmı satışa mahsup edilmiş.\nÖnce ilgili konsinye satışını geri al.");
+        if(num(x.acikAvans)<num(x.tutar)-num(x.kdv)-0.001) return alert("Bu tahsilatın bir kısmı satışa mahsup edilmiş.\nÖnce ilgili konsinye satışını geri al.");
         await remove("pazarlama_hareket",x.id); say("↩️ Geri alındı · "+o.t); return; }
-      if(x.tip==="tahsilat"){ // satışların tahsil'ini geri düş — borç geri gelir (ana uygulama ile aynı)
-        let kalan=num(x.tutar);
-        const tahsilli=emirHar.filter(s=>s.tip==="satis"&&!s.gerilla&&kkOf(s)===kkOf(x)&&num(s.tahsil)>0).sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
-        for(const s of tahsilli){ if(kalan<=0.001)break; const dd=Math.min(kalan,num(s.tahsil)); await save("pazarlama_hareket",{id:s.id,tahsil:increment(-dd)}); kalan-=dd; } }
+      /* ⚠️ SIRA: HER ŞEYDEN ÖNCE KAYIT SİLİNİR, bağlı sayaçlar SONRA ters çevrilir.
+         Tersi olursa silme adımı hata aldığında sayaçlar çevrilmiş kalır ve
+         kullanıcı tekrar denedikçe her seferinde yeniden çevrilir — canlıda hem
+         rafta (v134) hem tahsilatta tam bu oldu. Bu sırayla yarıda kalırsa kayıt
+         silinmiş, sayaç çevrilmemiş olur: görünür ve düzeltilebilir bir durum. */
+      await remove("pazarlama_hareket",x.id);
+      if(x.tip==="tahsilat") await tahsilGeriDus(x);
       if(x.tip==="tabla"&&x.planId){ try{ await save("plan",{id:x.planId,tablaAlindi:false}); }catch(e){} }
       if(x.tip==="tablaOde"&&x.kaynakTalep){ try{ await save("talep",{id:x.kaynakTalep,durum:"acik",cevap:"",cevapTarih:""}); }catch(e){} }   // ödeme geri alınırsa emir yeniden açılır
-      /* ⚠️ SIRA: önce KAYIT SİLİNİR, sonra raf doldurulur. Tersi olursa (eski hâl)
-         silme adımı hata alıp kullanıcı tekrar denediğinde raf her denemede yeniden
-         şişer ve satış da yerinde durur — canlıda tam bu oldu. */
-      await remove("pazarlama_hareket",x.id);
       // raftan çıkan (konsinye kaynaklı) satış VE hediye geri alınınca "kalan" rafa döner
       if(((x.tip==="satis"||x.tip==="hediye")&&x.kaynak==="konsinye")||x.tip==="iade") await rafaDondur(ad2);
       // çanta etkisini tersine çevir (geçmiş kayıtlar çantayı oynatmamıştı)
