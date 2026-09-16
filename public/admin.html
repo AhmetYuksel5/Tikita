@@ -112,7 +112,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L100";   // komuta (admin) deneme sürümü
+const SURUM="L101";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -4800,13 +4800,15 @@ function KullaniciSheet({u,onKaydet,bekle}){
   const [pin,setPin]=useState("");
   const [sirketPaz,setSirketPaz]=useState(duzen?!!u.sirketPaz:false);   // 🏢 hakediş almaz
   const [bant,setBant]=useState(duzen?!!u.uretimBandi:false);           // 🏭 üretim bandı yetkisi
+  const [cIzin,setCIzin]=useState(duzen?!!u.cephaneIzin:false);          // 🎒 cephane izni (onaysız çanta hareketi)
   const gecerli=!!ad.trim()&&(duzen||pin.trim().length>=4);
   return h(Sheet,{ik:simge,hex:"#1e3a5f",baslik:duzen?("Düzenle · "+(u.ad||"")):"Yeni kullanıcı",
     alt:"",onClose:()=>onKaydet(null),
     cta:bekle?"⏳…":(duzen?"Kaydet":"Kullanıcı ekle"),disabled:!gecerli||bekle,
     onCta:()=>onKaydet({id:duzen?u.id:null,ad:ad.trim(),rol,simge,pin:pin.trim(),
       sirketPaz:rol==="pazarlamaci"?sirketPaz:false,
-      uretimBandi:rol==="pazarlamaci"?bant:false})},
+      uretimBandi:rol==="pazarlamaci"?bant:false,
+      cephaneIzin:rol==="pazarlamaci"?cIzin:false})},
     h("div",{className:"lbl",style:{marginBottom:8}},"Ad *"),
     h("input",{value:ad,onChange:e=>setAd(e.target.value),placeholder:"örn. Emir",style:{...inp,marginBottom:14}}),
     h("div",{className:"lbl",style:{marginBottom:8}},"Rol"),
@@ -4841,7 +4843,22 @@ function KullaniciSheet({u,onKaydet,bekle}){
                 :"Kapalı — yalnız kendi pazarlama ekranını kullanır."))),
       bant?h("div",{style:{padding:"9px 12px",borderRadius:11,marginBottom:14,fontSize:11.5,fontWeight:700,
         lineHeight:1.5,background:"#f0fdf4",border:"1px solid #86efac",color:"#166534"}},
-        "Pazarlama ekranındaki 🏭 Üretim bandı düğmesinden geçer. Rapor, stok, ekip ve finans göremez."):null):null,
+        "Pazarlama ekranındaki 🏭 Üretim bandı düğmesinden geçer. Rapor, stok, ekip ve finans göremez."):null,
+      /* 🎒 cephane izni — açıkken çantasını onay beklemeden doldurup boşaltır.
+         Kapalıyken (ve ayarda onay açıkken) her hareketi komuta kuyruğuna düşer. */
+      h("div",{className:"lbl",style:{marginBottom:8}},"Cephane izni"),
+      h("button",{onClick:()=>setCIzin(v=>!v),
+        style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"11px 12px",
+          borderRadius:12,marginBottom:14,background:cIzin?"#f0fdf4":"var(--surf2)",
+          border:"1px solid "+(cIzin?"#86efac":"var(--line)")}},
+        h("span",{style:{width:22,height:22,borderRadius:7,flexShrink:0,display:"flex",alignItems:"center",
+          justifyContent:"center",fontSize:13,fontWeight:800,color:"#fff",
+          background:cIzin?"#16a34a":"transparent",border:"2px solid "+(cIzin?"#16a34a":"var(--mut2)")}},cIzin?"✓":""),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13.5,fontWeight:800,color:cIzin?"#166534":"var(--txt)"}},
+            "🎒 Onaysız cephane hareketi"),
+          h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:1}},
+            cIzin?"çantasını kendi doldurup boşaltır":"her hareketi onaya düşer")))):null,
     h("div",{className:"lbl",style:{marginBottom:8}},"Simge"),
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
       SIMGELER.map(sm=>h("button",{key:sm,onClick:()=>setSimge(sm),
@@ -7492,7 +7509,7 @@ function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat,anlasmaSay}){
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},tarifsiz.map(kart)))
       :h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},d.stok.map(kart)));
 }
-function Ekip({d,ac,kullanicilar,hareketler,talepler,yinelenenSay}){
+function Ekip({d,ac,kullanicilar,hareketler,talepler,yinelenenSay,cephaneBek,cephaneOnayAcik}){
   const hepsi=(kullanicilar||[]).filter(u=>u&&u.id&&(u.ad||"").trim())
     .slice().sort((a,b)=>(a.ad||"").localeCompare(b.ad||"","tr"));
   const kayit=u=>kulKaydi(u,hareketler,d.ekip);
@@ -7516,6 +7533,15 @@ function Ekip({d,ac,kullanicilar,hareketler,talepler,yinelenenSay}){
         h("button",{onClick:()=>ac({tip:"ayar"}),style:{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:11,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:800}},IK("ayarlar","var(--mut)",15),"Ayarlar"))),
     h("button",{onClick:()=>ac({tip:"kullanici",u:null}),style:{width:"100%",padding:12,borderRadius:14,
       background:"var(--surf)",border:"1.5px dashed var(--cyan)",color:"var(--cyan)",fontSize:14,fontWeight:800}},"Yeni kullanıcı ekle"),
+    /* 🔐 cephane onayları — ayar kapalıysa da geçmiş kararlar için erişilebilir kalır */
+    h("button",{onClick:()=>ac({tip:"cephaneOnay"}),style:{display:"flex",alignItems:"center",gap:10,
+      width:"100%",padding:14,borderRadius:14,marginTop:8,textAlign:"left",
+      background:num(cephaneBek)>0?"#fff7ed":"var(--surf2)",
+      border:"1px solid "+(num(cephaneBek)>0?"#fdba74":"var(--line)"),fontSize:14,fontWeight:800,color:"var(--txt)"}},
+      h("span",{style:{fontSize:19,flexShrink:0}},"🔐"),
+      h("span",{style:{flex:1,minWidth:0}},"Cephane onayları"),
+      h("span",{style:{fontSize:12,fontWeight:700,color:num(cephaneBek)>0?"#9a3412":"var(--mut)"}},
+        (num(cephaneBek)>0?(cephaneBek+" bekliyor"):(cephaneOnayAcik?"kuyruk boş":"kapalı"))+" ›")),
     grup("Yöneticiler",yonetici),
     grup("Pazarlamacılar",pazarlamaci),
     grup("Montaj personeli",montajci),
@@ -7532,6 +7558,79 @@ function Ekip({d,ac,kullanicilar,hareketler,talepler,yinelenenSay}){
     grup("Arşiv",arsiv),
     hepsi.length?null:h("div",{style:{padding:"24px 0",textAlign:"center",color:"var(--mut)"}},"Kayıtlı hesap yok."));
 }
+/* 🔐 CEPHANE ONAYLARI — izinsiz pazarlamacının çanta talepleri.
+   Her satırın adedi düşürülebilir: talep ile onay arası stok azalmış olabilir,
+   komuta o kadarını onaylar. Boşaltmada tavan çanta, doldurmada atölye stoğudur. */
+function CephaneOnaySheet({talepler,urunler,kullanicilar,onKarar,onClose,bekle}){
+  const [adet,setAdet]=useState({});   // "talepId|urunId" -> onaylanan adet
+  const bek=(talepler||[]).filter(t=>t.durum==="bekliyor")
+    .sort((a,b)=>new Date(a.tarih)-new Date(b.tarih));
+  const gecmis=(talepler||[]).filter(t=>t.durum!=="bekliyor")
+    .sort((a,b)=>new Date(b.kararTarih||b.tarih)-new Date(a.kararTarih||a.tarih)).slice(0,8);
+  const uOf=id=>(urunler||[]).find(u=>u.id===id)||{};
+  const kOf=id=>(kullanicilar||[]).find(u=>u.id===id)||{};
+  const tavan=(t,c)=>{ const u=uOf(c.urunId);
+    return t.mod==="bosalt"?Math.max(0,num((u.pazStokK||{})[t.kullaniciId]))
+      :Math.max(0,num(u.stokta)); };
+  const oku=(t,c)=>{ const k=t.id+"|"+c.urunId; const v=adet[k];
+    return v==null?Math.min(Math.round(num(c.adet)),tavan(t,c)):Math.max(0,Math.round(num(v))); };
+  const yaz=(t,c,v)=>{ const k=t.id+"|"+c.urunId;
+    let n2=v===""?0:Math.max(0,Math.round(num(v)));
+    const tv=tavan(t,c); if(n2>tv) n2=tv;
+    setAdet(s=>({...s,[k]:n2})); };
+  const kart=t=>{ const kl=(t.kalemler||[]).filter(c=>c&&c.urunId);
+    const onayTop=kl.reduce((z,c)=>z+oku(t,c),0);
+    const bosalt=t.mod==="bosalt";
+    const ku=kOf(t.kullaniciId);
+    return h("div",{key:t.id,style:{padding:"12px 13px",borderRadius:14,marginBottom:10,
+      background:"var(--surf)",border:"1px solid var(--line)"}},
+      h("div",{style:{display:"flex",alignItems:"center",gap:9,marginBottom:9}},
+        h("span",{style:{fontSize:19,flexShrink:0}},bosalt?"📤":"🎒"),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:14,fontWeight:900,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+            (ku.simge||"")+" "+(t.kullaniciAd||ku.ad||"?")),
+          h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:1}},
+            (bosalt?"çantadan atölyeye":"atölyeden çantaya")+" · "+num(t.adet)+" adet · "
+            +new Date(t.tarih).toLocaleString("tr-TR",{dateStyle:"short",timeStyle:"short"})))),
+      kl.map((c,i)=>{ const tv=tavan(t,c), v=oku(t,c), az=v<Math.round(num(c.adet));
+        return h("div",{key:c.urunId||i,style:{display:"flex",alignItems:"center",gap:9,padding:"8px 0",
+          borderTop:i?"1px solid var(--line)":"none"}},
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:13,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},c.urunAd||"?"),
+            h("div",{style:{fontSize:10.5,fontWeight:700,color:tv<num(c.adet)?"#9a3412":"var(--mut)",marginTop:1}},
+              "istedi "+num(c.adet)+" · "+(bosalt?"çantasında ":"atölyede ")+tv)),
+          h("input",{type:"number",inputMode:"numeric",value:String(v),onChange:e=>yaz(t,c,e.target.value),
+            style:{...inp,width:70,textAlign:"center",padding:"8px 6px",fontSize:14,
+              borderColor:az?"#fdba74":"var(--line)"}})); }),
+      h("div",{style:{display:"flex",gap:8,marginTop:11}},
+        h("button",{onClick:()=>{ const s=prompt("Ret sebebi (boş bırakabilirsin):",""); if(s===null) return;
+            onKarar(t,null,s||"—"); },disabled:bekle,
+          style:{padding:"10px 14px",borderRadius:11,border:"1px solid #f0c8c8",background:"#fdecec",
+            color:"var(--red)",fontSize:13,fontWeight:800,opacity:bekle?.6:1}},"Reddet"),
+        h("button",{onClick:()=>onKarar(t,kl.map(c=>({urunId:c.urunId,urunAd:c.urunAd,adet:oku(t,c)})),null),
+          disabled:bekle||onayTop<=0,
+          style:{flex:1,padding:"10px",borderRadius:11,border:"none",
+            background:(bekle||onayTop<=0)?"var(--line)":"var(--cyan)",
+            color:(bekle||onayTop<=0)?"var(--mut2)":"#fff",fontSize:13.5,fontWeight:900}},
+          bekle?"⏳…":("✓ "+onayTop+" adet onayla")))); };
+  return h(Sheet,{ik:"🔐",hex:"#d97b12",baslik:"Cephane onayları",
+    alt:bek.length?(bek.length+" bekleyen talep"):"",onClose,cta:"Kapat",onCta:onClose},
+    bek.length?bek.map(kart)
+      :h("div",{style:{padding:"20px 0",textAlign:"center",color:"var(--mut)",fontSize:13,fontWeight:700}},"Bekleyen talep yok."),
+    gecmis.length?h("div",{style:{marginTop:16}},
+      h("div",{className:"lbl",style:{marginBottom:8}},"Son kararlar"),
+      gecmis.map(t=>{ const red=t.durum==="reddedildi";
+        const kl=(red?(t.kalemler||[]):(t.onayKalem||t.kalemler||[])).filter(c=>num(c.adet)>0);
+        return h("div",{key:t.id,style:{padding:"9px 12px",borderRadius:11,marginBottom:6,
+          background:red?"#fef2f2":"#f0fdf4",border:"1px solid "+(red?"#fca5a5":"#86efac")}},
+          h("div",{style:{display:"flex",gap:8,fontSize:12,fontWeight:800,color:red?"#991b1b":"#166534"}},
+            h("span",{style:{flexShrink:0}},t.mod==="bosalt"?"📤":"🎒"),
+            h("span",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+              (t.kullaniciAd||"?")+" · "+(red?"reddedildi":(kl.reduce((z,c)=>z+num(c.adet),0)+" adet onaylandı"))),
+            h("span",{style:{flexShrink:0,fontWeight:700,opacity:.75}},t.kararAd||"")),
+          h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:3,lineHeight:1.5}},
+            kl.map(c=>num(c.adet)+" × "+c.urunAd).join(" · ")+(t.red&&t.red!=="—"?(" · ↩ "+t.red):""))); })):null);
+}
 // ⚙️ OYUN AYARLARI — ayar/genel (tabla ücreti, eşikler, görev hedefleri, Google key)
 function AyarSheet({ayar,onKaydet,bekle}){
   const a=ayar||{};
@@ -7547,10 +7646,26 @@ function AyarSheet({ayar,onKaydet,bekle}){
   const [gK,setGK]=useState(a.gorevKurtar!=null?String(a.gorevKurtar):"2");
   const [kdvO,setKdvO]=useState(a.kdvOran!=null?String(a.kdvOran):"20");
   const [gkey,setGkey]=useState(a.googleKey||"");
+  const [cOnay,setCOnay]=useState(!!a.cephaneOnay);   // 🔐 cephane hareketi onaya tabi
   const alan=(lbl,val,set,txt)=>h("div",null,h("div",{className:"lbl",style:{marginBottom:6}},lbl),
     h("input",{type:txt?"text":"number",inputMode:txt?"text":"numeric",value:val,onChange:e=>set(e.target.value),style:{...inp,marginBottom:12}}));
   return h(Sheet,{ik:"⚙️",hex:"#1e3a5f",baslik:"Oyun ayarları",alt:"",onClose:()=>onKaydet(null),
-    cta:bekle?"⏳…":"Kaydet",disabled:bekle,onCta:()=>onKaydet({tablaUcret:num(tabla),uzakKm:num(uzak),tehdit1:num(t1),tehdit2:num(t2),tehdit3:num(t3),terkEsik:num(terk),gorevAkin:num(gA),gorevFetih:num(gF),gorevTahsil:num(gT),gorevKurtar:num(gK),kdvOran:num(kdvO),googleKey:gkey.trim()})},
+    cta:bekle?"⏳…":"Kaydet",disabled:bekle,onCta:()=>onKaydet({tablaUcret:num(tabla),uzakKm:num(uzak),tehdit1:num(t1),tehdit2:num(t2),tehdit3:num(t3),terkEsik:num(terk),gorevAkin:num(gA),gorevFetih:num(gF),gorevTahsil:num(gT),gorevKurtar:num(gK),kdvOran:num(kdvO),googleKey:gkey.trim(),cephaneOnay:cOnay})},
+    /* 🔐 CEPHANE ONAYI — açıkken yalnız izinli pazarlamacı çantasını kendi
+       doldurur/boşaltır; izinsizin hareketi Ekip → Cephane onayları kuyruğuna düşer. */
+    h("div",{className:"lbl",style:{marginBottom:8,color:"var(--mut2)"}},"CEPHANE"),
+    h("button",{onClick:()=>setCOnay(v=>!v),
+      style:{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:"11px 12px",
+        borderRadius:12,marginBottom:14,background:cOnay?"#fff7ed":"var(--surf2)",
+        border:"1px solid "+(cOnay?"#fdba74":"var(--line)")}},
+      h("span",{style:{width:22,height:22,borderRadius:7,flexShrink:0,display:"flex",alignItems:"center",
+        justifyContent:"center",fontSize:13,fontWeight:800,color:"#fff",
+        background:cOnay?"#d97b12":"transparent",border:"2px solid "+(cOnay?"#d97b12":"var(--mut2)")}},cOnay?"✓":""),
+      h("div",{style:{flex:1,minWidth:0}},
+        h("div",{style:{fontSize:13.5,fontWeight:800,color:cOnay?"#9a3412":"var(--txt)"}},
+          "🔐 Cephane hareketi onaya tabi"),
+        h("div",{style:{fontSize:11,fontWeight:700,color:"var(--mut)",marginTop:1}},
+          cOnay?"izinsiz pazarlamacı onay bekler":"herkes serbestçe çanta hareketi yapar"))),
     h("div",{className:"lbl",style:{marginBottom:8,color:"var(--mut2)"}},"KDV"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},alan("KDV oranı (%)",kdvO,setKdvO)),
     h("div",{className:"lbl",style:{marginBottom:8,color:"var(--mut2)"}},"TABLA & MESAFE"),
@@ -9470,6 +9585,7 @@ function App(){
   const talepler=useColl("talep");
   const ayarlar=useColl("ayar");
   const kampanyalar=useColl("kampanya");   // 🎁 pazarlamacı kampanyaları
+  const cephaneTalep=useColl("cephane_talep");   // 🔐 onay bekleyen çanta hareketleri
   const ayar=(ayarlar||[]).find(x=>x.id==="genel")||{};
   const tablaUc=ayar.tablaUcret!=null?num(ayar.tablaUcret):5;
   const gkey=(ayar.googleKey||"").trim();
@@ -9730,7 +9846,7 @@ function App(){
   async function kullaniciKaydet(p2){ if(p2===null){ setModal(null); return; } if(isBekle) return; setIsBekle(true);
     try{ const ekPin=p2.pin?{pin:p2.pin,pinHash:"",pinSalt:""}:{};   // görünür şifre (yönetici görebilsin diye düz metin)
       await save("kullanici",{...(p2.id?{id:p2.id}:{}),ad:p2.ad,rol:p2.rol,simge:p2.simge,renkH:adRenk(p2.ad).H,
-        sirketPaz:!!p2.sirketPaz,uretimBandi:!!p2.uretimBandi,...ekPin});
+        sirketPaz:!!p2.sirketPaz,uretimBandi:!!p2.uretimBandi,cephaneIzin:!!p2.cephaneIzin,...ekPin});
       setModal(null); say((p2.id?"Güncellendi":"Kullanıcı eklendi")+" · "+p2.ad); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
   async function sifreSet(id,pin){ if(!id||!pin||String(pin).trim().length<4||isBekle) return; setIsBekle(true);
@@ -9762,6 +9878,49 @@ function App(){
         n++; }
       setModal(null); say("🎒 "+n+" ürün yazıldı · net "+(top>0?"+":"")+top+" adet"); }
     catch(er){ console.error(er); say(n?("Yarıda kaldı — "+n+" ürün yazıldı"):"Yazılamadı"); }
+    finally{ setIsBekle(false); } }
+  /* 🔐 CEPHANE TALEBİ — izinsiz pazarlamacının çanta hareketi burada işlenir.
+     Onay anında adetler düşürülebilir (talep ile onay arası stok azalmış olabilir):
+     onayKalem, gerçekten işlenen adetlerdir; kalemler talebin kendisi olarak kalır.
+     Stok ve hareket yazımı cantaListeUygula ile BİREBİR aynı yoldan geçer. */
+  async function cephaneKarar(t,onayKalem,red){
+    if(!t||!t.id||isBekle) return;
+    const kul={id:t.kullaniciId,ad:t.kullaniciAd||""};
+    if(red!=null){
+      setIsBekle(true);
+      try{ await save("cephane_talep",{id:t.id,durum:"reddedildi",red:String(red||"").trim(),
+            kararAd:((kullanicilar||[]).find(x=>x.id===BEN_ID)||{}).ad||"Komuta",kararTarih:new Date().toISOString()});
+        setModal(null); say("↩ Talep reddedildi · "+(kul.ad||"")); }
+      catch(e){ console.error(e); say("Reddedilemedi"); } finally{ setIsBekle(false); }
+      return; }
+    const bosalt=t.mod==="bosalt";
+    const kl=(onayKalem||[]).filter(c=>c&&c.urunId&&num(c.adet)>0)
+      .map(c=>({urunId:c.urunId,urunAd:c.urunAd||"",adet:Math.round(num(c.adet))}));
+    if(!kl.length){ say("Onaylanacak adet yok"); return; }
+    if(!kul.id){ say("Talebin sahibi bulunamadı"); return; }
+    const top=kl.reduce((z,c)=>z+c.adet,0);
+    const kismi=top<num(t.adet);
+    if(!confirm((bosalt?"📤 ":"🎒 ")+(kul.ad||"pazarlamacı")+" · "+kl.length+" ürün · "+top+" adet\n"
+      +(bosalt?"Çantasından atölye stoğuna geçecek":"Atölye stoğundan çantasına geçecek")
+      +(kismi?("\n\n⚠ Talep "+num(t.adet)+" adetti, "+top+" adet onaylanıyor"):"")
+      +"\n\nOnaylıyor musun?")) return;
+    setIsBekle(true);
+    const now=new Date().toISOString();
+    let n=0;
+    try{
+      for(const c of kl){
+        const delta=bosalt?-c.adet:c.adet;   // çantaya + · çantadan −
+        await save("stok_urun",{id:c.urunId,pazStokK:{[kul.id]:increment(delta)},stokta:increment(-delta)});
+        await save("pazarlama_hareket",{kullaniciId:kul.id,kullaniciAd:kul.ad,
+          tip:bosalt?"iade":"al",kaynak:"canta",urunId:c.urunId,urunAd:c.urunAd,
+          adet:c.adet,...(t.seferId?{seferId:t.seferId}:{}),tarih:now});
+        n++; }
+      /* izi ANCAK yazımlar bittikten sonra kapat — yarıda kalırsa talep
+         "bekliyor" durur ve aynı kalem iki kez işlenmez. */
+      await save("cephane_talep",{id:t.id,durum:"onaylandi",onayKalem:kl,onayAdet:top,
+        kararAd:((kullanicilar||[]).find(x=>x.id===BEN_ID)||{}).ad||"Komuta",kararTarih:now});
+      setModal(null); say((bosalt?"📤 ":"🎒 ")+n+" ürün · "+top+" adet işlendi"); }
+    catch(e){ console.error(e); say(n?("Yarıda kaldı — "+n+" ürün yazıldı, talep açık"):"İşlenemedi"); }
     finally{ setIsBekle(false); } }
   async function alacakKapat(o){ if(!o||!o.x||!o.x.id||isBekle) return;
     if(!confirm("✓ "+(o.yer||"kale")+" · "+tl(o.acik)+" açık borç kapatılsın mı?\nSatış kaydı ve cirosu korunur; alacak 0 olur.")) return; setIsBekle(true);
@@ -10437,7 +10596,9 @@ function App(){
     onFilAta:async(ids,fid)=>{ for(const id of ids){ await save("plan",{id,filamentId:fid}); }
       say(ids.length+" baskıya filament atandı"); }});
   else if(gorunen==="stok") ekran=h(Stok,{d,ac:setModal,fotoMap,onPlanSil:x=>isSil({p:x.p,durum:"bekliyor"}),bekle:isBekle,onFiyat:fiyatKaydet,anlasmaSay:anlasmalar.length});
-  else if(gorunen==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler,yinelenenSay:yinelenenler.length});
+  else if(gorunen==="ekip") ekran=h(Ekip,{d,ac:setModal,kullanicilar,hareketler,talepler,yinelenenSay:yinelenenler.length,
+    cephaneBek:(cephaneTalep||[]).filter(t=>t&&t.durum==="bekliyor").length,
+    cephaneOnayAcik:!!(ayar&&ayar.cephaneOnay)});
   else if(gorunen==="muhasebe") ekran=h(MuhasebeTab,{hareketler,giderler,sabitGider,montajGorev,hakedisDonem,kullanicilar,say,ayar});
   else ekran=h(RaporA,{d,ac:setModal,giderler,sabitGider,hareketler,ekip:d.ekip,musteriler,kullanicilar,gkey,hedefler,onGorevKaydet:gorevKaydet,onGorevSil:gorevSil,odak:hedefOdak,onHakedisKaydet:hakedisKaydet,onAlacakKapat:alacakKapat,onAlacakSil:alacakSil,talepler,onTablaEmri:tablaOdemeEmri,onTablaIptal:tablaOdemeIptal,
     hakedisDonem,onHakOnay:hakedisOnay,onHakOde:hakedisOde,onHakGeriAl:hakedisGeriAl,
@@ -10486,6 +10647,8 @@ function App(){
           setModal(null); say("Alım işlendi · depo "+a2.makara+" makara arttı"); }
         catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }}),
     modal&&modal.tip==="ayar"&&h(AyarSheet,{ayar,bekle:isBekle,onKaydet:ayarKaydet}),
+    modal&&modal.tip==="cephaneOnay"&&h(CephaneOnaySheet,{talepler:cephaneTalep,urunler,kullanicilar,
+      bekle:isBekle,onKarar:cephaneKarar,onClose:()=>setModal(null)}),
     modal&&modal.tip==="talep"&&h(TalepCevapSheet,{talep:modal.t,bekle:isBekle,onKaydet:talepCevap,onRota:talepRota,onSil:talepSil}),
     modal&&modal.tip==="mesaj"&&h(KomutaMesajSheet,{ekip:d.ekip,bekle:isBekle,onKaydet:talepYaz}),
     modal&&modal.tip==="gider"&&h(GiderYonetimSheet,{giderler,sabitler:sabitGider,filamentler,sarflar,b0:modal.b0!=null?modal.b0:0,b1:modal.b1!=null?modal.b1:Infinity,bekle:isBekle,onClose:()=>setModal(null),
