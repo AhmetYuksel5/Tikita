@@ -41,4 +41,5 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 | `satisCokluE2E.mjs` | 💰 satış çoklu liste: alt alta giriş, alınan kutusu yok, indirim şeridi yalnız gerektiğinde, Tikita payı verilişten düşer, tek kaydetmede çoklu kayıt |
 | `tahsilatGeriE2E.mjs` | 🧾 tahsilat geri alma idempotent: bayat ekrandan ikinci basış, hızlı çift dokunuş, mahsup izi, KDV tavanı |
 | `ziyaretRaporE2E.mjs` | 🧾 değişim tek satır + geri alma · fiyat bazlı birleşik döküm · ziyaret raporu sırası · tahsil edilecek kalemleri · birleşik reyting |
+| `defterSilE2E.mjs` | 🧾 komuta defterinden silme: değişim çifti birlikte gider, mahsup izi geri sarılır (satışın borcu yeniden açılır), izsiz kayıtta hiçbir satışa dokunulmaz |
 | `rafDonusE2E.mjs` | ↩️ konsinye satışı iptal edilince adet ÇIKTIĞI partiye döner (parti izi + izsiz eski kayıtta LIFO) |

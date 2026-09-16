@@ -112,7 +112,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L99";   // komuta (admin) deneme sürümü
+const SURUM="L100";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -8040,7 +8040,7 @@ function hdCsvIndir(sutunlar,satirlar,dosyaAdi){
 /* ═══ 📒 DEFTER — satır satır hareket tablosu (raporların KAYNAĞI) ═══
    Bina HAREKETLER tablosunun Tikita karşılığı: sütunlu tablo, sütun seçici,
    yazı boyutu, dönem/tür süzgeci, arama, CSV çıktı. Satıra dokun → ham kayıt. */
-function HareketDefteri({rows,say,ayar}){
+function HareketDefteri({rows,say,ayar,pazHar}){
   const [q,setQ]=useState("");
   /* Tür süzgeci ARAÇ ÇUBUĞUNDA DEĞİL, TÜR SÜTUN BAŞLIĞINDA (kullanıcı 2026-08-24):
      başlığa dokun → küçük süzgeç penceresi, istenmeyen türün tikini kaldır.
@@ -8166,12 +8166,40 @@ function HareketDefteri({rows,say,ayar}){
     }catch(e){ console.error(e); say&&say("⚠ Kaydedilemedi"); }
     finally{ setBekle(false); }
   }
+  /* 🧾 SİLME, KAYDIN PARA İZİNİ DE GERİ SARAR.
+     Tahsilat ve değişim iadesi, kapattıkları satışların `tahsil` alanına
+     mahsup:[{id,tutar}] izi yazıyor. Eskiden burada yalnız kayıt siliniyordu:
+     iz duruyor, o satışların borcu KALICI olarak kapanmış görünüyordu.
+     Değişim de tek işlemdir — iade ile yerine verilen satış birlikte gider,
+     yoksa yarım değişim kalır. */
   async function sil(){
     if(bekle||!duzen||duzen.yeni||!duzen.r) return;
     const r=duzen.r;
-    if(!confirm("Bu hareket silinsin mi?\n"+hmSatirAciklama(r)+" · "+hrTl(r.tutar))) return;
+    const H=pazHar||[];
+    const kayit=(r.kaynakKol==="pazarlama_hareket")?H.find(x=>x&&x.id===r.kaynakId):null;
+    const cift=(kayit&&kayit.degisimId)?H.filter(x=>x&&x.degisimId===kayit.degisimId):(kayit?[kayit]:[]);
+    /* izlerin toplamı: aynı satışa birden çok kayıttan mahsup gelmiş olabilir */
+    const geri={};
+    cift.forEach(x=>{ if(!Array.isArray(x.mahsup)) return;
+      x.mahsup.forEach(m=>{ if(!m||!m.id) return; geri[m.id]=(geri[m.id]||0)+num(m.tutar); }); });
+    const izSay=Object.keys(geri).length;
+    const soru="Bu hareket silinsin mi?\n"+hmSatirAciklama(r)+" · "+hrTl(r.tutar)
+      +(cift.length>1?("\n\n♻️ Değişim tek işlemdir — "+cift.length+" kayıt birlikte silinir."):"")
+      +(izSay?("\n\n"+izSay+" satışın borcu yeniden açılacak ("
+        +hrTl(Object.values(geri).reduce((z,v)=>z+v,0))+")."):"");
+    if(!confirm(soru)) return;
     setBekle(true);
-    try{ await remove(r.kaynakKol,r.kaynakId); setDuzen(null); say&&say("🗑 Silindi"); }
+    try{
+      if(cift.length){ for(const x of cift) await remove("pazarlama_hareket",x.id); }
+      else await remove(r.kaynakKol,r.kaynakId);
+      /* izi ANCAK silme başarılıysa geri sar — sıra tersse iki kez basışta
+         borç iki kez açılıyordu (pazarlamacı ekranındaki aynı hata). */
+      for(const [sid,tut] of Object.entries(geri)){
+        if(!(tut>0.004)) continue;
+        await save("pazarlama_hareket",{id:sid,tahsil:increment(-Math.round(tut*100)/100)});
+      }
+      setDuzen(null); say&&say("🗑 Silindi");
+    }
     catch(e){ console.error(e); say&&say("⚠ Silinemedi"); }
     finally{ setBekle(false); }
   }
@@ -8471,7 +8499,7 @@ function MuhasebeTab({hareketler,giderler,sabitGider,montajGorev,hakedisDonem,ku
         marginBottom:8,lineHeight:1.5}},
         "Bu ayın sabit giderleri ay bitince deftere düşer: "
         +bekleyenSabit.map(x=>x.tur+" "+hrTl(x.tutar)).join(" · ")):null,
-      h(HareketDefteri,{rows,say,ayar}));
+      h(HareketDefteri,{rows,say,ayar,pazHar:hareketler||[]}));
   } else if(alt==="bakiye"){
     /* CARİ = MÜŞTERİ + PERSONEL (kullanıcı 2026-08-24: "bir ödeme mi yaptım o
        aslında bir caridir, Emir'e tabla ödemesi mi yaptım o da bir cari harekettir").
