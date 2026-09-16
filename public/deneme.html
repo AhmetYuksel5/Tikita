@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v137";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v138";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -3379,145 +3379,69 @@ function ActionSheet({type,k,d,onClose,onFire}){
        "bırak"  → şimdi verilen adet (normal DOĞRUDAN SATIŞ kaydı olur, borç yazar)
      Konsinye rafı ayrı bölümde ve yalnız SAYILIR — orada adet para hareketlerinden
      türetildiği için sayım rafı değiştirmez, sadece kaymayı gösterir. */
+  /* 📋 SAYIM — TEK İŞ: kalede daha önce satılan ürünlerden NELER KALDIĞINI
+     güncellemek. Bilerek sade tutuldu; sipariş/bırakış Satış ekranında,
+     konsinye rafı Konsinye ekranında.
+     Kutular "bizce şu kadar var" değeriyle DOLU gelir — kullanıcı yalnız farklı
+     olanı düzeltir, böylece "yarım sayım havuzu sıfırlar mı" sorusu doğmaz.
+     Satır anahtarı ÜRÜN + FİYAT: aynı ürün farklı fiyattan verilmişse her fiyat
+     kendi satırında sayılır. */
   if(type==="sayim"){
     const HX="#ca8a04";
     const mulkL=(k&&k.mulkKalem)||[];
-    const mKey=c=>"s:"+c.ad+"|"+r2b(c.fiyat), bKey=u=>"b:"+u.id, rKey=c=>"k:"+c.ad;
-    /* kutular "bizce şu kadar var" değeriyle DOLU gelir: submit her zaman tam
-       sayımdır, kullanıcı yalnız farklı olanı düzeltir. Böylece "yarım sayım
-       havuzu sıfırlar mı" belirsizliği hiç doğmaz. */
-    const sayOf=c=>{ const v=lines[mKey(c)]; return (v===undefined||v==="")?Math.round(num(c.adet)):Math.max(0,Math.round(num(v))); };
-    const rafOf=c=>{ const v=lines[rKey(c)]; return (v===undefined||v==="")?Math.round(num(c.adet)):Math.max(0,Math.round(num(v))); };
-    const bfOf2=u=>{ const v=bfiyat[bKey(u)]; if(v!==undefined&&v!=="") return num(v);
-      const a=anlasmaOf(k,u.id); return a?num(a.satis):num(u.fiyat); };
-    const bSec=cantam.filter(u=>num(lines[bKey(u)])>0);
-    const bAdet=bSec.reduce((s2,u)=>s2+num(lines[bKey(u)]),0);
-    const bDeger=bSec.reduce((s2,u)=>s2+num(lines[bKey(u)])*bfOf2(u),0);
-    /* müşterinin sattığı = bizce duran − sayılan (eksilme) */
-    const eriyen=mulkL.reduce((s2,c)=>s2+Math.max(0,Math.round(num(c.adet))-sayOf(c)),0);
-    const mulkDegisti=mulkL.some(c=>sayOf(c)!==Math.round(num(c.adet)));
-    const rafDegisti=konsList.some(c=>rafOf(c)!==Math.round(num(c.adet)));
-    const kayma=konsList.reduce((s2,c)=>s2+(rafOf(c)-Math.round(num(c.adet))),0);
-    const [rafAcik,setRafAcik]=[azAcik,setAzAcik];   // konsinye bölümü akordiyonu
+    const mKey=c=>"s:"+c.ad+"|"+r2b(c.fiyat);
+    const sayOf=c=>{ const v=lines[mKey(c)];
+      return (v===undefined||v==="")?Math.round(num(c.adet)):Math.max(0,Math.round(num(v))); };
+    const sirali=mulkL.slice().sort((a,b)=>
+      urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr")||num(b.fiyat)-num(a.fiyat));
+    const eriyen=sirali.reduce((s2,c)=>s2+Math.max(0,Math.round(num(c.adet))-sayOf(c)),0);
+    const degisti=sirali.some(c=>sayOf(c)!==Math.round(num(c.adet)));
 
-    /* satır — ad · (beklenen rozeti) · sayım kutusu · (varsa) bırak kutusu */
-    const ssatir=(ad,anahtar,beklenen,deger,sim,ekKutu,sira,fiyat)=>{
-      const fark=Math.round(num(deger))!==Math.round(num(beklenen));
-      return h("div",{key:anahtar,style:{display:"flex",alignItems:"center",gap:7,padding:"5px 9px",borderRadius:11,
+    const ssatir=(c,sira)=>{
+      const bek=Math.round(num(c.adet)), deg=sayOf(c), fark=deg!==bek, ah=mKey(c);
+      return h("div",{key:ah,style:{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:11,
         background:fark?HX+"0d":"var(--surf2)",border:"1px solid "+(fark?HX+"55":"var(--line)")}},
         h("div",{style:{flex:1,minWidth:0,display:"flex",alignItems:"baseline",gap:6}},
           h("span",{style:{minWidth:0,fontSize:13.5,fontWeight:700,overflow:"hidden",whiteSpace:"nowrap"}},
-            (sim||"")+urunAdi(ad)),
-          h("span",{style:{flexShrink:0,fontSize:11,fontWeight:700,color:"var(--mut2)"}},
-            Math.round(num(beklenen))+(num(fiyat)>0?(" · "+tl(fiyat)):""))),
-        h("input",{type:"number",inputMode:"numeric",placeholder:String(Math.round(num(beklenen))),
-          value:lines[anahtar]!==undefined?lines[anahtar]:String(Math.round(num(beklenen))),
-          "data-adet":String(sira),
-          onChange:e=>setLines(s2=>({...s2,[anahtar]:e.target.value})),title:"sayılan adet",
+            urunAdi(c.ad)),
+          num(c.fiyat)>0?h("span",{style:{flexShrink:0,fontSize:11,fontWeight:700,color:"var(--mut2)"}},
+            tl(c.fiyat)):null),
+        h("span",{style:{flexShrink:0,fontSize:11.5,fontWeight:700,color:"var(--mut2)",width:34,textAlign:"right"}},bek),
+        h("span",{style:{flexShrink:0,fontSize:12,color:"var(--mut2)"}},"→"),
+        h("input",{type:"number",inputMode:"numeric",placeholder:String(bek),
+          value:lines[ah]!==undefined?lines[ah]:String(bek),"data-adet":String(sira),
+          onChange:e=>setLines(s2=>({...s2,[ah]:e.target.value})),title:"kalan adet",
           onKeyDown:e=>{ if(e.key!=="Enter") return; e.preventDefault();
             const hepsi=Array.from(document.querySelectorAll("input[data-adet]"));
-            const i=hepsi.indexOf(e.target);
-            const sonraki=hepsi[i+1]; if(sonraki){ sonraki.focus(); sonraki.select&&sonraki.select(); }
-            else e.target.blur(); },
-          style:{...inp,width:58,textAlign:"center",padding:"7px 5px",fontSize:15,
-            color:fark?HX:"var(--txt)",fontWeight:fark?800:700}}),
-        ekKutu||null);
+            const i2=hepsi.indexOf(e.target); const sn=hepsi[i2+1];
+            if(sn){ sn.focus(); sn.select&&sn.select(); } else e.target.blur(); },
+          style:{...inp,width:62,textAlign:"center",padding:"7px 5px",fontSize:15,
+            color:fark?HX:"var(--txt)",fontWeight:fark?800:700}}));
     };
-    /* bırak kutusu — mülk satırlarında sayımın yanında durur */
-    const brkKutu=(u,sira)=>h(React.Fragment,null,
-      h("input",{type:"number",inputMode:"numeric",placeholder:"0",value:lines[bKey(u)]||"",
-        "data-adet":String(sira),
-        onChange:e=>setLines(s2=>({...s2,[bKey(u)]:e.target.value})),title:"bırakılan adet",
-        style:{...inp,width:52,textAlign:"center",padding:"7px 4px",fontSize:15,
-          borderColor:num(lines[bKey(u)])>0?"var(--green)":undefined}}),
-      h("input",{type:"number",inputMode:"numeric",placeholder:tl(bfOf2(u)),
-        value:bfiyat[bKey(u)]!==undefined?bfiyat[bKey(u)]:"",
-        onChange:e=>setBfiyat(s2=>({...s2,[bKey(u)]:e.target.value})),title:"birim ₺",
-        style:{...inp,width:66,textAlign:"center",padding:"7px 4px",fontSize:14}}));
 
-    /* Mülk listesi = standda bildiğimiz ürünler; altta çantadaki DİĞER ürünler
-       (ilk kez bırakılacaklar) akordiyonda durur. */
-    const satilan2=(d&&d.satilanUrun)||{};
-    const mSirali=mulkL.slice().sort(sirala==="az"
-      ? (a,b)=>urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr")||num(b.fiyat)-num(a.fiyat)
-      : (a,b)=>(num(b.adet)-num(a.adet))||urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr")||num(b.fiyat)-num(a.fiyat));
-    const mAdSet=new Set(mSirali.map(c=>adNorm(c.ad)));
-    const yeniUrun=cantam.filter(u=>!mAdSet.has(adNorm(u.ad))).sort(sirala==="az"
-      ? (a,b)=>urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr")
-      : (a,b)=>(num(satilan2[b.id])-num(satilan2[a.id]))||urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr"));
-    const uOf=c=>cantam.find(u=>adNorm(u.ad)===adNorm(c.ad))||null;
-    let sr=0; const nx=()=>++sr;
-
-    const sorTog=h("div",{style:{display:"flex",flexShrink:0,borderRadius:8,overflow:"hidden",
-      border:"1px solid var(--line)",background:"var(--surf2)"}},
-      [["cok","🔥","en çok"],["az","A–Z","alfabetik"]].map(([v,et,ti])=>
-        h("button",{key:v,onClick:()=>siralaSec(v),title:ti,
-          style:{padding:"3px 8px",fontSize:10.5,fontWeight:800,border:"none",
-            background:sirala===v?"var(--surf)":"transparent",
-            color:sirala===v?"var(--txt)":"var(--mut2)"}},et)));
-
-    const ctaTxt=bAdet>0
-      ? ("📋 Sayım + "+bAdet+" adet bırak · "+tl(bDeger))
-      : (mulkDegisti||rafDegisti?"📋 Sayımı kaydet":"📋 Sayımı kaydet (değişiklik yok)");
-    const onOk3=()=>fire("📋 Sayım"+(bAdet>0?(" · "+bAdet+" adet bırakıldı"):"")+" · "+(k?k.ad:""),XP.konsinye,{
-      mulk:mSirali.map(c=>({urunId:c.urunId||(uOf(c)||{}).id||"",ad:c.ad,adet:sayOf(c),
+    const onOk3=()=>fire("📋 Sayım · "+(k?k.ad:""),XP.konsinye,{
+      mulk:sirali.map(c=>({urunId:c.urunId||"",ad:c.ad,adet:sayOf(c),
         beklenen:Math.round(num(c.adet)),birim:r2b(c.fiyat)})),
-      raf:rafDegisti?konsList.map(c=>({ad:c.ad,adet:rafOf(c),beklenen:Math.round(num(c.adet))})):[],
-      birak:bSec.map(u=>({urun:u,adet:num(lines[bKey(u)]),fiyat:bfOf2(u)})),
       eriyen});
 
     return h(Sheet,{ik:"📋",hex:HX,rozet:"Sayım",baslik:(k?k.ad:""),
       alt:k&&k.sonSayim?((k.sayimGun===0?"bugün":(k.sayimGun+" gün önce"))+" sayılmıştı"):"ilk sayım",
-      onClose,cta:bekle?"⏳ İşleniyor…":ctaTxt,disabled:bekle,onCta:onOk3},
-      h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:6}},
-        h("div",{className:"lbl",style:{flex:1,minWidth:0}},"🛍 Müşterinin malı · rafta / bırak"),sorTog),
-      mSirali.length
+      onClose,cta:bekle?"⏳ İşleniyor…":(degisti?"📋 Sayımı kaydet":"📋 Değişiklik yok"),
+      disabled:bekle||!sirali.length,onCta:onOk3},
+      h("div",{style:{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}},
+        h("div",{className:"lbl",style:{flex:1,minWidth:0}},"Kalende kalan"),
+        h("div",{style:{flexShrink:0,fontSize:10,fontWeight:800,letterSpacing:.4,color:"var(--mut2)"}},
+          "BİZCE → SAYILAN")),
+      sirali.length
         ? h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}},
-            mSirali.map(c=>{ const u=uOf(c);
-              return ssatir(c.ad,mKey(c),c.adet,sayOf(c),"",u?brkKutu(u,nx()):null,nx(),c.fiyat); }))
+            sirali.map((c,i2)=>ssatir(c,i2)))
         : h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)"}},
-            "Bu mekanda bilinen ürün yok — aşağıdan ekleyebilirsin."),
-      /* ilk kez bırakılacak ürünler — sayılacak bir şey yok, yalnız bırak kutusu */
-      yeniUrun.length?h("div",{style:{marginTop:8}},
-        h("button",{onClick:()=>setDuzenAz(v=>!v),
-          style:{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 11px",borderRadius:11,
-            background:"var(--surf2)",border:"1px dashed var(--line)",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},
-          h("span",null,duzenAz?"⌃":"⌄"),
-          h("span",{style:{flex:1,textAlign:"left"}},"Yeni ürün bırak"),
-          h("span",null,yeniUrun.length)),
-        duzenAz?h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6,marginTop:6}},
-          yeniUrun.map(u=>h("div",{key:u.id,style:{display:"flex",alignItems:"center",gap:7,padding:"5px 9px",borderRadius:11,
-            background:num(lines[bKey(u)])>0?"#16a34a0d":"var(--surf2)",
-            border:"1px solid "+(num(lines[bKey(u)])>0?"#16a34a55":"var(--line)")}},
-            h("div",{style:{flex:1,minWidth:0,display:"flex",alignItems:"baseline",gap:6}},
-              h("span",{style:{minWidth:0,fontSize:13.5,fontWeight:700,overflow:"hidden",whiteSpace:"nowrap"}},
-                (anlasmaOf(k,u.id)?"🤝 ":"")+urunAdi(u.ad)),
-              h("span",{style:{flexShrink:0,fontSize:11,fontWeight:700,color:"var(--mut2)"}},
-                SZ?num(u.stokta):num(u.canta))),
-            brkKutu(u,nx())))):null):null,
-      /* 🏬 konsinye rafı — YALNIZ sayılır, rafı değiştirmez */
-      konsList.length?h("div",{style:{marginTop:12}},
-        h("button",{onClick:()=>setRafAcik(v=>!v),
-          style:{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 11px",borderRadius:11,
-            background:"var(--surf2)",border:"1px dashed var(--line)",fontSize:12.5,fontWeight:800,color:"var(--mut)"}},
-          h("span",null,rafAcik?"⌃":"⌄"),
-          h("span",{style:{flex:1,textAlign:"left"}},"🏬 Konsinye rafını da say"),
-          h("span",null,k?k.acikKons:0)),
-        rafAcik?h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6,marginTop:6}},
-          konsList.map(c=>ssatir(c.ad,rKey(c),c.adet,rafOf(c),"🏬 ",null,nx()))):null):null,
-      /* özet — eriyen · bırakılan · kayma */
-      (eriyen>0||bAdet>0||kayma!==0)?h("div",{style:{marginTop:12,padding:"9px 12px",borderRadius:12,
-        background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800}},
-        eriyen>0?h("div",{style:{display:"flex",justifyContent:"space-between"}},
-          h("span",{style:{color:"var(--mut)"}},"Müşterinin sattığı"),
-          h("span",{style:{color:HX}},eriyen+" adet")):null,
-        bAdet>0?h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:eriyen>0?5:0}},
-          h("span",{style:{color:"var(--mut)"}},"Bırakılan"),
-          h("span",{style:{color:"var(--green)"}},bAdet+" adet · "+tl(bDeger))):null,
-        kayma!==0?h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:5,
-          paddingTop:5,borderTop:"1px solid var(--line)"}},
-          h("span",{style:{color:"var(--mut)"}},"🏬 Konsinye kayması"),
-          h("span",{style:{color:"var(--red)"}},(kayma>0?"+":"")+kayma+" adet")):null):null);
+            "Bu kaleye henüz doğrudan satış yapılmamış."),
+      eriyen>0?h("div",{style:{marginTop:12,padding:"9px 12px",borderRadius:12,
+        background:"var(--surf2)",border:"1px solid "+HX+"55",
+        display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800}},
+        h("span",{style:{color:"var(--mut)"}},"Müşterinin sattığı"),
+        h("span",{style:{color:HX}},eriyen+" adet")):null);
   }
   /* ♻️ DEĞİŞİM — bu kaleye daha önce SATILAN bir ürünü geri alıp yerine başka ürün
      vermek. Üstte geri alınanlar (satılmış ürünler), altta yerine verilenler
@@ -4516,40 +4440,16 @@ function App(){
           mahsup:[{id:satisId,tutar:r2b(alin)}],...yerB,...gecEk,tarih:now});
         await save("pazarlama_hareket",{id:satisId,tahsil:increment(alin)}); }
     } else if(p.type==="sayim"){
-      /* 📋 SAYIM — gözlem kaydı. PARA YOK: borç, ciro, hakediş, stok hareketi
-         doğurmaz. Aynı ekrandan bırakılan ürünler AYRI normal satış kayıtları
-         olur (borcu onlar yazar), sayım kaydı onlara bağlı değildir.
-         Sayım, ziyaretin BAŞINDAKİ fiziki durumdur: ziyaretler() önce havuzu
-         sayılan değere çeker, sonra aynı ziyarette bırakılanı üstüne ekler. */
+      /* 📋 SAYIM — TEK İŞ: kalede kalanı güncellemek. Gözlem kaydıdır, PARA
+         DOĞURMAZ: borç, ciro, hakediş, stok hareketi yok — mal zaten müşterinin
+         ve faturalanmış. Sipariş/bırakış Satış ekranında yapılır. */
       const mulkK=(p.mulk||[]).map(it=>({urunId:it.urunId||"",urunAd:it.ad||"?",
         adet:Math.max(0,Math.round(num(it.adet))),beklenen:Math.round(num(it.beklenen)),
         birim:num(it.birim)}));
-      const rafK=(p.raf||[]).map(it=>({urunAd:it.ad||"?",
-        adet:Math.max(0,Math.round(num(it.adet))),beklenen:Math.round(num(it.beklenen))}));
-      const birak=(p.birak||[]).filter(it=>Math.round(num(it.adet))>0);
-      if(!mulkK.length&&!rafK.length&&!birak.length) return {iptal:"Sayılacak ya da bırakılacak bir şey yok."};
-      if(mulkK.length)
-        await save("pazarlama_hareket",{...kul,tip:"sayim",kapsam:"mulk",kalemler:mulkK,
-          adet:mulkK.reduce((s2,c)=>s2+c.adet,0),satilan:Math.max(0,Math.round(num(p.eriyen))),
-          ...yerB,...gecEk,tarih:now});
-      if(rafK.length)
-        await save("pazarlama_hareket",{...kul,tip:"sayim",kapsam:"konsinye",kalemler:rafK,
-          adet:rafK.reduce((s2,c)=>s2+c.adet,0),
-          kayma:rafK.reduce((s2,c)=>s2+(c.adet-c.beklenen),0),
-          ...yerB,...gecEk,tarih:now});
-      /* Bırakılanlar DOĞRUDAN SATIŞ — mal müşterinin olur, borç doğar (tahsil 0).
-         ⏱ Damga 1 sn SONRA: havuz kronolojik işlendiği için sayımın üstüne
-         eklenmesi gerekir. Aynı milisaniyede olsalar sıra belirsiz kalır ve
-         "2 saydım, 10 bıraktım" bazen 2, bazen 12 gösterirdi. */
-      const nowB=new Date((Date.parse(now)||Date.now())+1000).toISOString();
-      for(const it of birak){ const u=it.urun||{}; const n=Math.round(num(it.adet));
-        const anlS=anlasmaOf(k,u.id);
-        const verisS=anlS?num(anlS.veris):num(u.pazFiyat);
-        await save("pazarlama_hareket",{...kul,tip:"satis",kaynak:"sayim",
-          urunId:u.id||"",urunAd:u.ad||"?",adet:n,
-          alisFiyat:verisS,maliyetBirim:num(u.maliyet),satisFiyat:num(it.fiyat),tahsil:0,
-          ...yerB,...gecEk,tarih:nowB});
-        if(u.id&&!p.gecTarih) await cantaDelta(u.id,u.ad,-n); }
+      if(!mulkK.length) return {iptal:"Sayılacak ürün yok."};
+      await save("pazarlama_hareket",{...kul,tip:"sayim",kapsam:"mulk",kalemler:mulkK,
+        adet:mulkK.reduce((s2,c)=>s2+c.adet,0),satilan:Math.max(0,Math.round(num(p.eriyen))),
+        ...yerB,...gecEk,tarih:now});
     } else if(p.type==="degisim"){
       /* ♻️ DEĞİŞİM — geri alınan + yerine verilen, tek damgada (degisimId) iki kayıt.
          Geçmiş satış kaydına dokunulmaz: iade kaydı kendi bedelini taşır, yeni satış
