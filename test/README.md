@@ -38,6 +38,7 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 | `degisimE2E.mjs` | ♻️ değişim: eşit adet zorunluluğu, iki kayıt tek `degisimId`, stok ayağı, borç yalnız fiyat farkı kadar, birlikte geri alma |
 | `degisimDefter.mjs` | ♻️ değişimin muhasebe ayağı (saf model): ters kayıt, borç/alacak yönü, fiş bacakları, cari bakiye |
 | `sayimE2E.mjs` | 📋 sayım SADE: yalnız kalan güncellenir (bırakış/konsinye/sipariş yok), kutular dolu gelir, fiyat bazında ayrı satır, para ve stok değişmez |
+| `satisCokluE2E.mjs` | 💰 satış çoklu liste: alt alta giriş, alınan kutusu yok, indirim şeridi yalnız gerektiğinde, Tikita payı verilişten düşer, tek kaydetmede çoklu kayıt |
 | `tahsilatGeriE2E.mjs` | 🧾 tahsilat geri alma idempotent: bayat ekrandan ikinci basış, hızlı çift dokunuş, mahsup izi, KDV tavanı |
 | `ziyaretRaporE2E.mjs` | 🧾 değişim tek satır + geri alma · fiyat bazlı birleşik döküm · ziyaret raporu sırası · tahsil edilecek kalemleri · birleşik reyting |
 | `rafDonusE2E.mjs` | ↩️ konsinye satışı iptal edilince adet ÇIKTIĞI partiye döner (parti izi + izsiz eski kayıtta LIFO) |
