@@ -35,7 +35,7 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 |---|---|
 | `kaymaE2E.mjs` | 320/390/430px — baskı bilgisi · konsinye · değişim ekranlarında yatay kayma yok |
 | `gozcuE2E.mjs` | gözcü statüsündeki kaleler en altta kapalı akordiyonda |
-| `degisimE2E.mjs` | ♻️ değişim: eşit adet zorunluluğu, iki kayıt tek `degisimId`, stok ayağı, borç yalnız fiyat farkı kadar, birlikte geri alma |
+| `degisimE2E.mjs` | ♻️ değişim: eşit adet zorunluluğu, iki kayıt tek `degisimId`, stok ayağı, borç yalnız fiyat farkı kadar, **iade kredisi açık satışa işlenir (mahsup izi) → satış başına alacak da kapanır**, birlikte geri alma krediyi geri sarar |
 | `degisimDefter.mjs` | ♻️ değişimin muhasebe ayağı (saf model): ters kayıt, borç/alacak yönü, fiş bacakları, cari bakiye |
 | `sayimE2E.mjs` | 📋 sayım SADE: yalnız kalan güncellenir (bırakış/konsinye/sipariş yok), kutular dolu gelir, fiyat bazında ayrı satır, para ve stok değişmez |
 | `satisCokluE2E.mjs` | 💰 satış çoklu liste: alt alta giriş, alınan kutusu yok, indirim şeridi yalnız gerektiğinde, Tikita payı verilişten düşer, tek kaydetmede çoklu kayıt |

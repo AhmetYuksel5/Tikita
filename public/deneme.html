@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v140";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v141";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -579,6 +579,9 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
   //    SONRASI yeni model (hakediş satış anında doğar, haftalık dönemde ödenir)
   const marjEskiK={},marjYeniK={},ciroEskiK={},borcYeniK={};
   const degK={},degYeniK={};   // ♻️ değişimde geri alınan malın bedeli = kalenin alacağı
+  /* Satış satırlarına İŞLENMİŞ değişim kredisi — borçtan zaten düştüğü için hesaba
+     girmez, yalnız tahsilat dökümünde "hangi rakamdan nereye" yazmaya yarar. */
+  const degIslK={};
   const sayK={};               // 📋 son mülk sayımının zamanı
   (hareketler||[]).forEach(x=>{ if(x.gerilla) return; const k=kk(x); const t=new Date(x.tarih).getTime()||0;
     if(["satis","konsinye","hediye","iade","tahsilat","stant","diplomasi","sayim"].includes(x.tip)) sonK[k]=Math.max(sonK[k]||0,t);
@@ -602,9 +605,16 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
        satışıyla birlikte tam olarak FİYAT FARKI kadardır. */
     else if(degisimIade(x)){ const bek=num(x.adet)*num(x.satisFiyat);
       const mj=(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet);
-      if(bek>0) degK[k]=(degK[k]||0)+bek;
+      /* Kredi açık satışlara İŞLENDİYSE (mahsup izi var) borç orada kapandı;
+         kale seviyesinde ikinci kez düşülmemeli — yoksa borç iki kez siliniyor ve
+         fazlası "kaleye ödenecek" gibi görünüyor. Yalnız işlenemeyen artık
+         (acikAlacak) kalenin alacağı olarak bekler.
+         İz TAŞIMAYAN eski kayıtlar eski kuralla (tam bedel) nettenir. */
+      const kr=Array.isArray(x.mahsup)?Math.max(0,num(x.acikAlacak)):bek;
+      if(kr>0) degK[k]=(degK[k]||0)+kr;
+      degIslK[k]=(degIslK[k]||0)+Math.max(0,bek-kr);
       marjK[k]=(marjK[k]||0)-mj;
-      if(t>=HAKEDIS_BAS_MS){ marjYeniK[k]=(marjYeniK[k]||0)-mj; if(bek>0) degYeniK[k]=(degYeniK[k]||0)+bek; }
+      if(t>=HAKEDIS_BAS_MS){ marjYeniK[k]=(marjYeniK[k]||0)-mj; if(kr>0) degYeniK[k]=(degYeniK[k]||0)+kr; }
       else { marjEskiK[k]=(marjEskiK[k]||0)-mj; ciroEskiK[k]=(ciroEskiK[k]||0)-bek; } }
     else if(x.tip==="satis"){const bek=num(x.adet)*num(x.satisFiyat);const th=x.tahsil==null?bek:num(x.tahsil);const b=Math.max(0,bek-th);if(b>0)borcK[k]=(borcK[k]||0)+b;
       const mj=(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet);
@@ -634,6 +644,11 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
     const degAlacak=Math.max(0,degK[k.key]||0);
     const borcNet=Math.max(0,borcHam-degAlacak);
     k.degAlacak=degAlacak; k.degKalan=Math.max(0,degAlacak-borcHam);   // borcu aşan değişim farkı
+    /* Döküm için BRÜT rakamlar: satış satırlarına işlenen kredi borcu zaten
+       kapattığı için borcHam'da görünmez; "Satış borcu" satırında geri eklenir. */
+    k.degIslenen=Math.max(0,degIslK[k.key]||0);
+    k.degKredi=r2b(k.degIslenen+degAlacak);
+    k.borcBrut=r2b(borcHam+k.degIslenen);
     k.avansKalan=Math.max(0,avansAcik-borcNet);   // borcu aştıysa kalan alacak
     k.acikKons=Math.max(0,(acikK[k.key]||0)-(ovCoz[k.key]||0));
     k.borc=Math.max(0,borcNet-avansAcik); k.son=sonK[k.key]||0; k.gunGecti=k.son?gunFark(k.son):999;
@@ -3110,12 +3125,12 @@ function ActionSheet({type,k,d,onClose,onFire}){
               border:"1px solid "+(tmod===m?"#1b1e25":"var(--line)")}},lbl))),
       /* ♻️ DEĞİŞİM FARKI — geri alınan malın bedeli borçtan düşülmüştür; hangi
          rakamdan nereye gelindiği burada kalem kalem görünür. */
-      (k&&num(k.degAlacak)>0.5)?h("div",{style:{marginBottom:12,padding:"9px 12px",borderRadius:12,
+      (k&&num(k.degKredi)>0.5&&(num(borc)>0.5||num(k.degKalan)>0.5))?h("div",{style:{marginBottom:12,padding:"9px 12px",borderRadius:12,
         background:"var(--surf2)",border:"1px solid var(--line)",fontSize:12.5,fontWeight:700}},
         h("div",{style:{display:"flex",justifyContent:"space-between",color:"var(--mut)"}},
-          h("span",null,"Satış borcu"),h("span",null,tl(k.borcHam))),
+          h("span",null,"Satış borcu"),h("span",null,tl(k.borcBrut))),
         h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:4,color:"#0d9488"}},
-          h("span",null,"♻️ Değişim farkı"),h("span",null,"− "+tl(k.degAlacak))),
+          h("span",null,"♻️ Değişim farkı"),h("span",null,"− "+tl(k.degKredi))),
         (num(k.avansAcik)>0.5)?h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:4,color:"var(--gold)"}},
           h("span",null,"⏳ Bekleyen avans"),h("span",null,"− "+tl(k.avansAcik))):null,
         h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:6,paddingTop:6,
@@ -4435,9 +4450,11 @@ function App(){
          Eskiden tersiydi: satırların tahsil'i artıyor, tahsilat kaydı yazılamazsa
          (bağlantı koparsa) borç kapanmış görünüyor ama para hiçbir raporda çıkmıyordu.
          Bu sırayla yarıda kalırsa para görünür, borç açık kalır — yani düzeltilebilir. */
-      let kalan=Math.min(num(p.tut),k?k.borc:num(p.tut)),uP=0,pP=0,uyg=0; const plan=[];   // kalenin güncel borcunu aşma
-      for(const o of acik){ if(kalan<=0)break; const dd=Math.min(o.borc,kalan);
-        const b=payBol(o.x,dd,o.onceki); uP+=b.u;pP+=b.p; kalan-=dd; uyg+=dd; plan.push({id:o.x.id,dd}); }
+      /* 🪙 KURUŞ YUVARLAMASI — dağıtım yuvarlanmazsa kayan nokta artığı kalıyor
+         ve satış "29.98999999999978 tahsil" ile 0,01 ₺ açık görünüyordu. */
+      let kalan=r2b(Math.min(num(p.tut),k?k.borc:num(p.tut))),uP=0,pP=0,uyg=0; const plan=[];   // kalenin güncel borcunu aşma
+      for(const o of acik){ if(kalan<=0.004)break; const dd=r2b(Math.min(o.borc,kalan));
+        const b=payBol(o.x,dd,o.onceki); uP+=b.u;pP+=b.p; kalan=r2b(kalan-dd); uyg=r2b(uyg+dd); plan.push({id:o.x.id,dd}); }
       if(uyg<=0) return {iptal:"Bu kalede açık borç yok."};
       /* 🧾 KDV borcun ÜSTÜNE eklenir: kayıttaki `tutar` tahsil edilen TOPLAMDIR
          (nakdi okuyan her yer doğru kalsın), `kdv` onun içindeki vergi payıdır.
@@ -4521,14 +4538,40 @@ function App(){
       if(yAd<=0) return {iptal:"Yerine verilecek ürünü seç."};
       if(gAd!==yAd) return {iptal:"Adetler eşit olmalı · "+gAd+" geri, "+yAd+" yeni."};
       const dgId=uid();
+      /* ♻️ İADE KREDİSİ AÇIK SATIŞLARA İŞLENİR — "mal ile ödeme"dir.
+         Eskiden kredi YALNIZ hesap()'ta kale seviyesinde düşülüyordu; satış
+         satırlarının tahsil'i açık kalıyordu. Komuta "Alacak" ekranı satış başına
+         beklenen − tahsil hesapladığı için o satışlar hâlâ alacak görünüyordu
+         (canlıda Temel Süpermarket · Spinner Ball ve İskelet Kuyruklu).
+         Artık tahsilat gibi davranır: FIFO en eski açık satıştan başlanır, hangi
+         satışa kaç ₺ işlendiği (mahsup) kayda yazılır, geri alınabilir.
+         İşlenemeyen artık acikAlacak olarak bekler — kalenin alacağıdır. */
+      const krediTop=r2b(geri.reduce((z,it)=>z+Math.round(num(it.adet))*num(it.birim),0));
+      const acikSat=emirHar.filter(x=>x.tip==="satis"&&!x.gerilla&&kkOf(x)===key)
+        .map(x=>{ const bek=r2b(num(x.adet)*num(x.satisFiyat));
+          const onc=x.tahsil==null?bek:num(x.tahsil);
+          return {x,borc:r2b(bek-onc)}; })
+        .filter(o=>o.borc>0.004)
+        .sort((a,b)=>new Date(a.x.tarih)-new Date(b.x.tarih));
+      let krKalan=krediTop; const krPlan=[];
+      for(const o of acikSat){ if(krKalan<=0.004) break;
+        const dd=r2b(Math.min(o.borc,krKalan));
+        if(dd>0.004){ krPlan.push({id:o.x.id,tutar:dd}); krKalan=r2b(krKalan-dd); } }
+      let ilkIade=true;
       for(const it of geri){ const n=Math.round(num(it.adet)); if(n<=0) continue;
         const ug=(urunler||[]).find(u2=>(it.urunId&&u2.id===it.urunId)||(u2.ad||"")===it.ad)||{};
         const gid=it.urunId||ug.id||"";
+        /* mahsup izi ve işlenemeyen artık, değişimin İLK iade satırında durur;
+           diğer satırlar boş iz taşır (hesap() acikAlacak'ları toplar). */
         await save("pazarlama_hareket",{...kul,tip:"iade",kaynak:"degisim",degisimId:dgId,
           urunId:gid,urunAd:it.ad||"?",adet:n,
           satisFiyat:num(it.birim),alisFiyat:num(it.alis),maliyetBirim:num(ug.maliyetGuncel),
+          mahsup:ilkIade?krPlan:[], acikAlacak:ilkIade?krKalan:0,
           ...yerB,...girEk,tarih:now});
+        ilkIade=false;
         if(gid&&!p.gecTarih) await cantaDelta(gid,it.ad,+n); }
+      /* kredi satış satırlarına atomik olarak işlenir — borç gerçekten kapanır */
+      for(const m of krPlan) await save("pazarlama_hareket",{id:m.id,tahsil:increment(m.tutar)});
       for(const it of yeni){ const n=Math.round(num(it.adet)); if(n<=0) continue;
         const u=it.urun||{}; const anlD=anlasmaOf(k,u.id);
         const verisD=(it.veris!=null&&num(it.veris)>0)?num(it.veris):(anlD?num(anlD.veris):num(u.pazFiyat));
@@ -4671,8 +4714,20 @@ function App(){
       if(!es.length) return;
       const dok=es.map(r=>(r.tip==="iade"?"↩ ":"→ ")+num(r.adet)+" × "+urunAdi(r.urunAd||"?")).join("\n");
       if(!confirm("♻️ Değişim geri alınsın mı?\n"+dok+"\n"+(x.yer||""))) return;
-      try{ for(const r of es){ await remove("pazarlama_hareket",r.id);
-          if(r.urunId) await cantaDelta(r.urunId,r.urunAd,r.tip==="iade"?-num(r.adet):+num(r.adet)); }
+      try{
+        /* ⛔ çift basma: kayıt sunucuda yoksa hiçbir sayaç ters çevrilmez */
+        const c0=await oku("pazarlama_hareket",x.id);
+        if(c0===null){ say("↩️ Bu değişim zaten geri alınmış"); return; }
+        if(c0===undefined){ say("⚠ Bağlantı yok — tekrar dene"); return; }
+        /* ⚠ SIRA: önce kayıtlar silinir, sonra bağlı sayaçlar çevrilir */
+        for(const r of es) await remove("pazarlama_hareket",r.id);
+        for(const r of es){
+          if(r.urunId) await cantaDelta(r.urunId,r.urunAd,r.tip==="iade"?-num(r.adet):+num(r.adet));
+          /* ♻️ iade kredisi satışlara işlenmişse geri düşülür — borç geri gelir */
+          for(const m of (Array.isArray(r.mahsup)?r.mahsup:[])){
+            const sr=emirHar.find(h2=>h2&&h2.id===m.id); if(!sr) continue;
+            const dd=Math.min(num(m.tutar),num(sr.tahsil));
+            if(dd>0.004) await save("pazarlama_hareket",{id:sr.id,tahsil:increment(-dd)}); } }
         say("↩️ Değişim geri alındı"); }
       catch(e){ console.error(e); say("⚠ Geri alınamadı — tekrar dene"); }
       return; }

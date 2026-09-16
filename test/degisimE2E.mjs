@@ -137,9 +137,22 @@ ok("satış Kaplumbağa 4 × 55 ₺",sa[0]&&sa[0].urunAd==="Kaplumbağa"&&sa[0].
 ok("satışın tahsili 0 (borç yazar)",sa[0]&&Number(sa[0].tahsil)===0,sa[0]&&String(sa[0].tahsil));
 ok("ikisi aynı degisimId",ia[0]&&sa[0]&&ia[0].degisimId&&ia[0].degisimId===sa[0].degisimId,
   (ia[0]||{}).degisimId+" / "+(sa[0]||{}).degisimId);
-ok("geçmiş satış kaydına dokunulmadı",
-  (har.find(x=>x.id==="s1")||{}).adet===6&&Number((har.find(x=>x.id==="s1")||{}).tahsil)===0,
-  JSON.stringify(har.find(x=>x.id==="s1")||{}).slice(0,90));
+/* ♻️ İADE KREDİSİ AÇIK SATIŞA İŞLENİR — komuta "Pazarlama Takip · Alacak" ekranı
+   alacağı satış başına (beklenen − tahsil) hesaplıyor; kredi yalnız kale
+   seviyesinde netlenirse o satırlar sonsuza kadar alacak görünüyordu. */
+const s1=()=>har.find(x=>x.id==="s1")||{};
+ok("geçmiş satışın adedi bozulmadı",s1().adet===6,String(s1().adet));
+ok("kredi açık satışa işlendi (tahsil 0 → 160)",Number(s1().tahsil)===160,String(s1().tahsil));
+ok("iade kaydında mahsup izi var",
+  Array.isArray(ia[0]&&ia[0].mahsup)&&ia[0].mahsup.length===1
+    &&ia[0].mahsup[0].id==="s1"&&Number(ia[0].mahsup[0].tutar)===160,
+  JSON.stringify((ia[0]||{}).mahsup));
+ok("işlenemeyen artık yok (acikAlacak 0)",Number((ia[0]||{}).acikAlacak)===0,
+  String((ia[0]||{}).acikAlacak));
+/* komuta ekranının hesabını birebir taklit et: Σ max(0, adet×fiyat − tahsil) */
+const alacak=rows=>rows.filter(x=>x.tip==="satis"&&x.yer==="H Kafe")
+  .reduce((z,x)=>z+Math.max(0,Number(x.adet)*Number(x.satisFiyat)-(x.tahsil==null?0:Number(x.tahsil))),0);
+ok("satış başına alacak toplamı 300 (kale borcuyla aynı)",alacak(har)===300,String(alacak(har)));
 
 console.log("═══ 7) stok ayağı ═══");
 const U=await kay("stok_urun");
@@ -166,7 +179,8 @@ t=await metin();
 ok("değişim farkı kalemi var",/Değişim farkı/.test(t),(t.match(/Değişim farkı[^A-ZÇĞİÖŞÜ]{0,22}/)||[""])[0]);
 ok("satış borcu kalemi var",/Satış borcu/.test(t));
 ok("kalan borç kalemi var",/Kalan borç/.test(t));
-/* satış borcu 6×40 + 4×55 = 460 · değişim kredisi 160 · kalan 300 */
+/* BRÜT satış borcu 6×40 + 4×55 = 460 · değişim kredisi 160 · kalan 300
+   (kredi satış satırına işlendiği için brüt rakam geri eklenerek yazılır) */
 ok("satış borcu 460 ₺",/Satış borcu 460 ₺/.test(t),(t.match(/Satış borcu [\d.]+ ₺/)||[""])[0]);
 ok("değişim kredisi −160 ₺",/Değişim farkı − 160 ₺/.test(t),(t.match(/Değişim farkı − [\d.]+ ₺/)||[""])[0]);
 ok("kalan borç 300 ₺",/Kalan borç 300 ₺/.test(t),(t.match(/Kalan borç [\d.]+ ₺/)||[""])[0]);
@@ -188,6 +202,12 @@ const U2=await kay("stok_urun");
 const pz2=id=>((U2.find(x=>x.id===id)||{}).pazStokK||{}).e1;
 ok("Penguen çantası eski hâle döndü",pz2("u1")===10,String(pz2("u1")));
 ok("Kaplumbağa çantası eski hâle döndü",pz2("u2")===12,String(pz2("u2")));
+/* mahsup izi geri sarılır — yoksa borç kalıcı olarak kapanmış görünür */
+const s1b=har2.find(x=>x.id==="s1")||{};
+ok("kredi geri alındı (tahsil 160 → 0)",Number(s1b.tahsil)===0,String(s1b.tahsil));
+ok("satış başına alacak 240'a döndü",alacak(har2)===240,String(alacak(har2)));
+t=await metin();
+ok("borç 240 ₺'ye döndü",/240 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
 
 ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,220));
 await b.close();
