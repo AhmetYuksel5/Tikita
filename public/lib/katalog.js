@@ -243,7 +243,7 @@ export function kurKatalogSheet({h,useState,useMemo,Sheet,inp}){
   const [onizle,setOnizle]=useState("");
   const [fotoAc,setFotoAc]=useState("");     // katalog görseli seçilen ürün
   const L=useMemo(()=>{ const a=q.trim().toLocaleLowerCase("tr");
-    return (urunler||[]).filter(u=>u&&u.id&&(!a||String(u.ad||"").toLocaleLowerCase("tr").indexOf(a)>=0));
+    return (urunler||[]).filter(u=>u&&u.id&&!u.arsiv&&(!a||String(u.ad||"").toLocaleLowerCase("tr").indexOf(a)>=0));
   },[urunler,q]);
   const secili=useMemo(()=>(urunler||[]).filter(u=>u&&sec[u.id]),[urunler,sec]);
   const secenek={baslik,sutun,fiyat};
