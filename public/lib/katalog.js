@@ -230,7 +230,7 @@ function pngIndir(cv,ad,belge){
    komuta ve pazarlamacı aynı ekranı kullanır, kopyası çıkmaz.
    İşleyici verilmeyen yetenek ekranda hiç görünmez. */
 export function kurKatalogSheet({h,useState,useMemo,Sheet,inp}){
- return function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFiyat,logo,onLogo,onClose,say}){
+ return function KatalogSheet({urunler,fotoBilgi,onFotoSec,onFotoSil,onFiyat,logo,onLogo,onClose,say}){
   const fotoMap={}; Object.keys(fotoBilgi||{}).forEach(id=>{
     const k=fotoBilgi[id]&&fotoBilgi[id].katalog; if(k) fotoMap[id]=k; });
   const [q,setQ]=useState("");
@@ -310,15 +310,33 @@ export function kurKatalogSheet({h,useState,useMemo,Sheet,inp}){
   if(fotoAc){ const u=(urunler||[]).find(x=>x&&x.id===fotoAc)||{};
     const B=(fotoBilgi||{})[fotoAc]||{liste:[]};
     const secId=B.katalog&&B.katalog.id;
+    const L=B.liste||[];
+    /* Görsele dokunmak katalog fotoğrafını SEÇER; sağ üstteki 🗑 SİLER.
+       Üç kaynağın (yüklenen · gömülü · hazır) hepsi silinebilir — eskiden bu
+       ekranda hiç silme düğmesi yoktu, görsel yalnız ürün kartından silinebiliyordu. */
     return h(Sheet,{ik:"📔",hex:"#0e8fce",baslik:"Katalog fotoğrafı",alt:u.ad||"",
         onClose:()=>setFotoAc("")},
-      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-        (B.liste||[]).map(f=>h("button",{key:f.id,
-          onClick:()=>{ onFotoSec&&onFotoSec(fotoAc,f.id,"katalog"); setFotoAc(""); },
-          style:{padding:0,borderRadius:14,lineHeight:0,background:"none",
-            border:"3px solid "+(f.id===secId?"#0e8fce":"var(--line)")}},
-          h("img",{src:f.data,alt:"",style:{width:"100%",height:130,objectFit:"cover",
-            borderRadius:11,display:"block",background:"var(--surf2)"}})))));
+      L.length?h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10}},
+        L.map(f=>h("div",{key:f.id,style:{position:"relative",minWidth:0}},
+          h("button",{
+            onClick:()=>{ onFotoSec&&onFotoSec(fotoAc,f.id,"katalog"); setFotoAc(""); },
+            style:{display:"block",width:"100%",padding:0,borderRadius:14,lineHeight:0,background:"none",
+              border:"3px solid "+(f.id===secId?"#0e8fce":"var(--line)")}},
+            h("img",{src:f.data,alt:"",style:{width:"100%",height:130,objectFit:"cover",
+              borderRadius:11,display:"block",background:"var(--surf2)"}})),
+          f.id===secId?h("span",{style:{position:"absolute",left:8,bottom:8,fontSize:9.5,
+            fontWeight:800,color:"#fff",background:"rgba(14,143,206,.92)",borderRadius:5,
+            padding:"2px 6px"}},"katalog"):null,
+          fotoKaynakAd(f.kaynak)?h("span",{style:{position:"absolute",left:8,top:8,fontSize:9,
+            fontWeight:800,color:"#fff",background:"rgba(27,30,37,.8)",borderRadius:5,
+            padding:"2px 6px"}},fotoKaynakAd(f.kaynak)):null,
+          (onFotoSil&&f.silinir!==false)?h("button",{
+            onClick:e=>{ e.stopPropagation(); onFotoSil(fotoAc,f.id); },
+            style:{position:"absolute",right:6,top:6,width:30,height:30,borderRadius:9,
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,
+              background:"rgba(224,72,60,.94)",color:"#fff",border:"none",lineHeight:1}},"🗑"):null)))
+        :h("div",{style:{padding:"22px 0",textAlign:"center",color:"var(--mut)",fontSize:13,
+          fontWeight:700}},"Bu üründe görsel yok."));
   }
   if(onizle) return h(Sheet,{ik:"📔",hex:"#0e8fce",baslik:"Önizleme",
       alt:"1. sayfa · "+duzen.sayfa+" sayfa",onClose:()=>setOnizle("")},
@@ -368,15 +386,21 @@ export function kurKatalogSheet({h,useState,useMemo,Sheet,inp}){
           h("div",{style:{width:19,height:19,borderRadius:6,flexShrink:0,display:"flex",
             alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:"#fff",
             background:s?"#3b82f6":"transparent",border:"2px solid "+(s?"#3b82f6":"var(--mut2)")}},s?"✓":""),
-          f?h("img",{src:f.data,alt:"",style:{width:30,height:30,borderRadius:7,objectFit:"cover",flexShrink:0,display:"block",background:"var(--surf2)"}}):h("div",{style:{width:30,height:30,borderRadius:7,
+          /* küçük görselin kendisi de görsel ekranını açar — tek fotoğrafı olan
+             ürüne oradan ulaşılamıyordu, dolayısıyla o görsel hiç silinemiyordu */
+          f?h("span",{onClick:e=>{ e.stopPropagation(); setFotoAc(u.id); },
+            style:{flexShrink:0,lineHeight:0,display:"block"}},
+            h("img",{src:f.data,alt:"",style:{width:30,height:30,borderRadius:7,objectFit:"cover",display:"block",background:"var(--surf2)"}}))
+          :h("div",{style:{width:30,height:30,borderRadius:7,
             flexShrink:0,background:"var(--surf2)",display:"flex",alignItems:"center",
             justifyContent:"center",fontSize:13,color:"var(--mut2)"}},"—"),
-          /* birden çok görseli olan üründe: hangisi kataloga girecek */
-          (((fotoBilgi||{})[u.id]||{}).liste||[]).length>1
+          /* görsel ekranı: hangisi kataloga girecek · silme de orada */
+          (((fotoBilgi||{})[u.id]||{}).liste||[]).length>0
             ?h("span",{onClick:e=>{ e.stopPropagation(); setFotoAc(u.id); },
               style:{flexShrink:0,fontSize:11,fontWeight:800,color:"var(--cyan)",
                 padding:"4px 7px",borderRadius:8,background:"var(--surf2)",
-                border:"1px solid var(--line)"}},"değiştir")
+                border:"1px solid var(--line)"}},
+              (((fotoBilgi||{})[u.id]||{}).liste||[]).length>1?"değiştir":"görsel")
             :null,
           h("div",{style:{flex:1,minWidth:0,fontSize:13.5,fontWeight:700,overflow:"hidden",
             textOverflow:"ellipsis",whiteSpace:"nowrap"}},u.ad||"—"),

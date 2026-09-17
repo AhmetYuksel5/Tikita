@@ -112,7 +112,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L102";   // komuta (admin) deneme sürümü
+const SURUM="L103";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -2507,7 +2507,15 @@ function hesapA(plan,makineler,urunler,hareketler,kullanicilar,musteriler,filame
     if(vf<=0&&top>0) sd.verissizUrun++; });
   const stokDeger=sd.depo+sd.canta+sd.kons+sd.montaj;
   const sarfDeger=(sarflar||[]).reduce((s2,x)=>s2+num(x.stokta)*num(x.birimFiyat),0);
-  return {bugun,hafta,makDurum,aktifBaski,tablaBek,ekip,alacakTop,stok,dusuk,stokDeger,stokDetay:sd,sarfDeger,
+  /* 🙈 GİZLENENLER — listeden düşmüş ama kaydı duran ürünler. Stok ekranının
+     en altındaki akordiyonda çıkar; oradan açılıp tekrar gösterilebilir.
+     Sayaçları hâlâ okunur: gizli bir üründe stok ya da çanta kalmışsa görünür. */
+  const stokGizli=(urunler||[]).filter(u=>u&&u.arsiv&&(u.ad||"").trim())
+    .map(u=>({id:u.id,ad:u.ad||"",raw:u,arsiv:true,birlestiAd:u.birlestiAd||"",
+      stokta:num(u.stokta),canta:Object.values(u.pazStokK||{}).reduce((s2,v)=>s2+num(v),0),
+      fiyat:num(u.satisFiyat),alis:num(u.pazFiyat),seri:u.seri||"",seriler:u.seriler||[]}))
+    .sort((a,b)=>String(a.ad).localeCompare(String(b.ad),"tr"));
+  return {bugun,hafta,makDurum,aktifBaski,tablaBek,ekip,alacakTop,stok,stokGizli,dusuk,stokDeger,stokDetay:sd,sarfDeger,
     planAdet,planDeger,gecikSay,gecikAdet,gecikDeger,ileriAdet,planListe,hafUretim,oluPlan:olu,sarfSay:(sarflar||[]).length};
 }
 
@@ -3151,12 +3159,13 @@ function EkipSheet({e,urunler,onClose,onDuzen,onSil,onArsiv,onArsivGeri,onSifre,
 }
 
 /* ————— STOK ————— */
-function StokSheet({u,kullanicilar,hareketler,makineler,filamentler,montajGorev,onClose,onDuzen,onGecmis,onKomut,onParca,onMaliyet,onBaski,foto,fotoBilgi,onFoto,onFotoSec,onFotoSil}){
+function StokSheet({u,kullanicilar,hareketler,makineler,filamentler,montajGorev,onClose,onDuzen,onGecmis,onKomut,onParca,onMaliyet,onBaski,foto,fotoBilgi,onFoto,onFotoSec,onFotoSil,onGizle}){
   const kad={}; (kullanicilar||[]).forEach(k=>kad[k.id]=k.ad||"?");
   const cantalar=Object.entries(u.pazStokK||{}).map(([id,v])=>({ad:kad[id]||id,adet:num(v)})).filter(x=>x.adet>0).sort((a,b)=>b.adet-a.adet);
   const parcali=(u.parcalar||[]).length>0;
   const [nav,setNav]=useState(null);   // konsinye/satış detay gezinme
   const [fotoSec,setFotoSec]=useState(null);   // 🖼 dokunulan görsel — nereye konacak
+  const gizli=!!(u.arsiv||(u.raw&&u.raw.arsiv));   // 🙈 bu ürün listelerden gizli mi
   const gunKisa=ms=>new Date(ms).toLocaleDateString("tr-TR",{day:"numeric",month:"short"});
   const fmtT=t=>{const d2=new Date(t);return isNaN(+d2)?"":d2.toLocaleDateString("tr-TR",{day:"2-digit",month:"short",year:"2-digit"});};
   const byDate=(a,b)=>new Date(b.tarih)-new Date(a.tarih);
@@ -3359,9 +3368,16 @@ function StokSheet({u,kullanicilar,hareketler,makineler,filamentler,montajGorev,
           onFoto?h("label",{style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--violet)",textAlign:"center",cursor:"pointer"}},
             L.length?"Fotoğraf ekle":"Fotoğraf ekle",
             h("input",{type:"file",accept:"image/*",style:{display:"none"},onChange:e=>{const f=e.target.files&&e.target.files[0]; if(f) onFoto(f); e.target.value="";}})):null)); })(),
-    h("div",{style:{display:"flex",gap:8,marginBottom:14}},
+    h("div",{style:{display:"flex",gap:8,marginBottom:8}},
       onDuzen?h("button",{onClick:onDuzen,style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--cyan)"}},"Düzenle"):null,
       onGecmis?h("button",{onClick:()=>onGecmis(u),style:{flex:1,padding:12,borderRadius:13,background:"var(--surf2)",border:"1px solid var(--line)",fontSize:13,fontWeight:800,color:"var(--txt)"}},"Geçmiş"):null),
+    /* 🙈 GİZLE — ürün listelerden düşer (kaydı ve geçmişi durur), Stok ekranının
+       en altındaki "Gizlenenler" akordiyonundan geri getirilir. */
+    onGizle?h("button",{onClick:()=>onGizle(u,!gizli),
+      style:{width:"100%",padding:12,borderRadius:13,marginBottom:14,fontSize:13,fontWeight:800,
+        background:gizli?"#f0fdf4":"var(--surf2)",border:"1px solid "+(gizli?"#86efac":"var(--line)"),
+        color:gizli?"#166534":"var(--mut)"}},
+      gizli?"👁 Göster — listelere geri getir":"🙈 Gizle — listelerden kaldır"):null,
     h("div",{style:{marginBottom:8}},
       /* 🖨 tek tabla tarifi — planlama ve iş açma bunu otomatik çağırır */
       onBaski?detSatir("🖨 Baskı bilgisi",baskiOzet(baskiOku(u.raw||u)),()=>onBaski(u)):null,
@@ -7433,6 +7449,7 @@ function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat,anlasmaSay}){
   // ⚠️ eksi stok — doğrudan stoktan satış yapan pazarlamacı stoğu aşmış olabilir
   const eksiStok=useMemo(()=>d.stok.filter(u=>num(u.stokta)<0).sort((a,b)=>num(a.stokta)-num(b.stokta)),[d.stok]);
   const [eksiAcik,setEksiAcik]=useState(false);
+  const [gizliAcik,setGizliAcik]=useState(false);   // 🙈 gizlenen ürünler akordiyonu
   const [degerAcik,setDegerAcik]=useState(false);
   const [planAcik,setPlanAcik]=useState(false);
   const [fiyatAcik,setFiyatAcik]=useState(false);
@@ -7507,7 +7524,27 @@ function Stok({d,ac,fotoMap,onPlanSil,bekle,onFiyat,anlasmaSay}){
         h("div",{className:"lbl",style:{margin:"20px 0 8px"}},
           "Baskı tarifi yok · "+tarifsiz.length),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},tarifsiz.map(kart)))
-      :h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},d.stok.map(kart)));
+      :h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},d.stok.map(kart)),
+    /* 🙈 GİZLENENLER — en altta, kapalı akordiyon. Ürün kartındaki "Gizle" ile
+       buraya düşer; buradan açıp "Göster"e basınca listeye geri gelir. */
+    (d.stokGizli||[]).length?h("div",{style:{marginTop:22}},
+      h("button",{onClick:()=>setGizliAcik(v=>!v),style:{display:"flex",alignItems:"center",gap:10,
+        width:"100%",padding:14,borderRadius:14,background:"var(--surf2)",
+        border:"1px solid var(--line)",fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
+        h("span",{style:{fontSize:19,flexShrink:0}},"🙈"),
+        h("span",{style:{flex:1,minWidth:0}},"Gizlenenler"),
+        h("span",{style:{fontSize:12,color:"var(--mut)",fontWeight:700}},
+          d.stokGizli.length+" ürün "+(gizliAcik?"▾":"›"))),
+      gizliAcik?h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:8,marginTop:8}},
+        d.stokGizli.map(g=>h("button",{key:g.id,onClick:()=>ac({tip:"stok",u:g}),
+          style:{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 13px",
+            borderRadius:12,background:"var(--surf)",border:"1px solid var(--line)",textAlign:"left"}},
+          ((fotoMap||{})[g.id]?h(Foto,{src:fotoMap[g.id].data,s:30,r:8}):h("span",{style:{fontSize:17,flexShrink:0}},"📦")),
+          h("div",{style:{flex:1,minWidth:0}},
+            h("div",{style:{fontSize:13.5,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},g.ad),
+            h("div",{style:{fontSize:10.5,fontWeight:700,color:"var(--mut)",marginTop:1}},
+              (g.birlestiAd?("→ "+g.birlestiAd):("stok "+g.stokta+(g.canta?(" · 🎒 "+g.canta):""))))),
+          h("span",{style:{flexShrink:0,fontSize:12,color:"var(--mut)",fontWeight:700}},"›")))):null):null);
 }
 function Ekip({d,ac,kullanicilar,hareketler,talepler,yinelenenSay,cephaneBek,cephaneOnayAcik}){
   const hepsi=(kullanicilar||[]).filter(u=>u&&u.id&&(u.ad||"").trim())
@@ -9754,6 +9791,27 @@ function App(){
       say(v>0?("📔 "+(L.length>1?(L.length+" ürün · "):"")+tl(v)+" yazılacak")
         :("📔 "+(L.length>1?(L.length+" üründe "):"")+"kendi fiyatına dönüldü")); }
     catch(e){ console.error(e); say("Kaydedilemedi"); } finally{ setIsBekle(false); } }
+  /* 🙈 ÜRÜNÜ GİZLE / GÖSTER — kayıt ve geçmiş DURUR, yalnız listelerden düşer.
+     Gizli üründe hâlâ stok ya da pazarlamacı çantası varsa uyarılır: sahadaki
+     mal satılamaz hâle gelmesin. (Pazarlamacı tarafında çantasında olanı gizli
+     ürün olsa da görmeye devam eder; bkz. deneme.html cephane süzgeci.) */
+  async function urunGizle(u,gizle){
+    if(!u||!u.id||isBekle) return;
+    const k=(urunler||[]).find(x=>x&&x.id===u.id)||{};
+    const st=num(k.stokta), ct=Object.values(k.pazStokK||{}).reduce((s,v)=>s+num(v),0);
+    if(gizle){
+      const uyari=[];
+      if(st>0) uyari.push("atölyede "+st+" adet");
+      if(ct>0) uyari.push("pazarlamacı çantasında "+ct+" adet");
+      if(!confirm("🙈 «"+(k.ad||u.ad||"ürün")+"» gizlensin mi?\n\n"
+        +"Kayıt ve geçmiş silinmez, yalnız listelerden düşer.\n"
+        +"Stok ekranının altındaki Gizlenenler'den geri getirilir."
+        +(uyari.length?("\n\n⚠ "+uyari.join(" · ")+" — çantasında olan pazarlamacı satmaya devam edebilir."):""))) return; }
+    setIsBekle(true);
+    try{ await save("stok_urun",{id:u.id,arsiv:!!gizle});
+      setModal(null); say(gizle?("🙈 Gizlendi · "+(k.ad||"")):("👁 Listeye döndü · "+(k.ad||""))); }
+    catch(e){ console.error(e); say(gizle?"Gizlenemedi":"Gösterilemedi"); }
+    finally{ setIsBekle(false); } }
   /* hangi görsel nerede görünsün — nerede: "ana" | "katalog" */
   async function urunFotoSec(urunId,fotoId,nerede){ if(!urunId||!fotoId) return;
     try{ await save("stok_urun",nerede==="katalog"
@@ -10728,7 +10786,8 @@ function App(){
     modal&&modal.tip==="stok"&&(()=>{ const s=(d.stok.find(x=>x.id===modal.u.id)||modal.u);
       return h(StokSheet,{u:s,kullanicilar,hareketler,makineler,filamentler,montajGorev,onBaski:uu=>setModal({tip:"baskiBilgi",u:uu}),foto:(fotoMap[s.id]||{}).data,fotoBilgi:fotoBilgi[s.id],onFoto:f=>urunFotoEkle(s.id,f),
         onFotoSec:(fid,nerede)=>urunFotoSec(s.id,fid,nerede),onFotoSil:fid=>urunFotoSil(s.id,fid),onClose:()=>setModal(null),onDuzen:()=>setModal({tip:"urunDuzen",u:s}),
-        onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v),onMaliyet:(uu)=>setModal({tip:"maliyetGec",u:uu,uid:s.id})}); })(),
+        onGecmis:(uu)=>setModal({tip:"stokGec",u:uu}),onKomut:stage=>setModal({tip:"stokKomut",cfg:uretimAksiyonlariCfg(s,stage),uid:s.id}),onParca:(p,v)=>uretimParcaAyarla(s,p,v),onMaliyet:(uu)=>setModal({tip:"maliyetGec",u:uu,uid:s.id}),
+        onGizle:(uu,g)=>urunGizle(uu,g)}); })(),
     modal&&modal.tip==="maliyetGec"&&h(MaliyetGecmisSheet,{u:modal.u,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stokKomut"&&h(StokKomutSheet,{cfg:modal.cfg,onClose:()=>setModal(null)}),
     modal&&modal.tip==="stokGec"&&h(StokGecmisSheet,{u:modal.u,stokHareket,onClose:()=>setModal(null)}),
@@ -10737,6 +10796,7 @@ function App(){
     modal&&modal.tip==="kayit"&&h(KayitSheet,{say,onClose:()=>setModal(null)}),
     modal&&modal.tip==="katalog"&&h(KatalogSheet,{urunler,fotoBilgi,say,
       onFotoSec:(uid,fid,nerede)=>urunFotoSec(uid,fid,nerede),
+      onFotoSil:(uid,fid)=>urunFotoSil(uid,fid),
       onFiyat:(id,v)=>katalogFiyatYaz(id,v),
       logo:katalogLogo,onLogo:katalogLogoYaz,onClose:()=>setModal(null)}),
     modal&&modal.tip==="tablaKasa"&&h(TablaKasaSheet,{L:modal.L,kasalar,bekle:isBekle,

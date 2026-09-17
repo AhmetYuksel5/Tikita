@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v143";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v144";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -762,11 +762,16 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
     if(!sayilanKale.has(kk(x))) satilanUrun[x.urunId]=(satilanUrun[x.urunId]||0)+num(x.adet); });
   // cephane — ürünler kaynak gibi
   const eid=emir.id;
-  /* 🗄 arsiv:true olan ürün listelerde çıkmaz. İki ürün birleştirildiğinde
-     KAPANAN kart silinmez; arsiv işaretlenir ve birlesti alanı hangi ürüne
-     katıldığını söyler. Süzgeç map'TEN ÖNCE olmalı — map'lenen nesnede arsiv yok. */
-  const cephane=(urunler||[]).filter(u=>u&&!u.arsiv)
-    .map(u=>({id:u.id,ad:u.ad||"?",eklendi:u.eklendi||"",seriler:seriListe(u),stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),odul:num((u.odulStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
+  /* 🗄 arsiv:true olan ürün listelerde çıkmaz. Komuta "Gizle" dediğinde ya da iki
+     ürün birleştiğinde kapanan kart silinmez; arsiv işaretlenir, birlesti alanı
+     hangi ürüne katıldığını söyler. Süzgeç map'TEN ÖNCE olmalı — map'lenen
+     nesnede arsiv yok.
+     ⚠ İSTİSNA: pazarlamacının ÇANTASINDA (ya da ödül stoğunda) duran gizli ürün
+     listede kalır. Yoksa sahadaki mal satılamaz hâle gelir ve çantada mahsur
+     kalır; 🙈 işaretiyle gösterilir, yeni alınamaz ama elindeki satılır. */
+  const cephane=(urunler||[]).filter(u=>u&&(!u.arsiv
+      ||num((u.pazStokK||{})[eid])>0||num((u.odulStokK||{})[eid])>0))
+    .map(u=>({id:u.id,ad:u.ad||"?",gizli:!!u.arsiv,eklendi:u.eklendi||"",seriler:seriListe(u),stokta:num(u.stokta),canta:num((u.pazStokK||{})[eid]),odul:num((u.odulStokK||{})[eid]),fiyat:num(u.satisFiyat),pazFiyat:verisOf(u,eid),pazOzel:num((u.pazFiyatK||{})[eid])>0,maliyet:num(u.maliyetGuncel),tanitim:u.tanitim||""}))
     .filter(u=>u.ad!=="?").sort((a,b)=>(b.canta-a.canta)||(b.stokta-a.stokta));
   const cantaTop=cephane.reduce((s,u)=>s+u.canta,0);
   // rozetler (kazanılan başarımlar)
@@ -2203,8 +2208,10 @@ function Cephane({d,say,cantaAc,openUrun,onStokDuzelt,bekle,onKatalog,fotoSay,ta
         (!SZ&&u.canta>0)&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"var(--gold)",background:"#d97b1218",padding:"2px 8px",borderRadius:8}},"🎒 "+u.canta),
         (SZ&&u.stokta<0)&&h("span",{style:{position:"absolute",top:10,right:10,fontSize:10.5,fontWeight:800,color:"#b91c1c",background:"#fee2e2",padding:"2px 8px",borderRadius:8}},"⚠️ eksi"),
         num(u.odul)>0&&h("span",{style:{position:"absolute",top:((!SZ&&u.canta>0)||(SZ&&u.stokta<0))?32:10,right:10,fontSize:10.5,fontWeight:800,color:"#7c2d12",background:"#d97b1230",padding:"2px 8px",borderRadius:8}},"🎁 "+num(u.odul)),
-        h("div",{style:{fontSize:26,marginBottom:8}},"📦"),
+        h("div",{style:{fontSize:26,marginBottom:8}},u.gizli?"🙈":"📦"),
         h("div",{style:{fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},urunAdi(u.ad)),
+        /* 🙈 komuta bu ürünü kaldırdı; çantanda kaldığı için listede duruyor */
+        u.gizli?h("div",{style:{fontSize:10,fontWeight:800,color:"#9a3412",marginTop:2}},"kaldırıldı · elindeki satılabilir"):null,
         (!seri&&seriMetin(u))?h("div",{style:{fontSize:10,color:"var(--mut2)",fontWeight:700,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"🗂 "+seriMetin(u)):null,
         h("div",{style:{display:"flex",gap:10,marginTop:8,fontSize:12,color:"var(--mut)"}},
           h("span",null,h("b",{style:{color:u.stokta<0?"#b91c1c":"var(--txt)",fontSize:15}},u.stokta)," atölye"),
@@ -2851,7 +2858,8 @@ function CantaSheet({d,onClose,onConfirm,bekle,talepler}){
   const [mod,setMod]=useState(SZ?"bosalt":"doldur");   // doldur = atölye→çanta · bosalt = çanta→atölye (iade)
   const [lines,setLines]=useState({});
   const bosalt=mod==="bosalt";
-  const liste=bosalt?d.cephane.filter(u=>num(u.canta)>0):d.cephane;
+  /* gizli ürün yalnız BOŞALTMADA çıkar — yenisi alınamaz, eldeki iade edilebilir */
+  const liste=bosalt?d.cephane.filter(u=>num(u.canta)>0):d.cephane.filter(u=>!u.gizli);
   const secili=liste.filter(u=>num(lines[u.id])>0);
   const toplam=secili.reduce((s,u)=>s+num(lines[u.id]),0);
   const [toplu,setToplu]=useState("");        // 📦 hepsine uygulanacak adet
