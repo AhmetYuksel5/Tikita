@@ -112,7 +112,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="L103";   // komuta (admin) deneme sürümü
+const SURUM="L104";   // komuta (admin) deneme sürümü
 
 /* 🗂 SERİ — bir ürün birden fazla seride bulunabilir. Kalıcı alan: seriler[] (dizi).
    Eski kayıtlarda tek metinlik "seri" alanı vardı; okurken ona da bakılır.
@@ -7931,7 +7931,9 @@ function SahaNakitSheet({SN,bildirimler,onOnay,onGeriAl,onClose}){
    sembolik (≤1 ₺) satış hakediş doğurmaz, tahsil edilen nakit ayrı gösterilir.
    Gönderilmemiş haftalar da hesaplanır — komuta neyin beklediğini görsün. */
 const HAK_ESIK_A=1;
-function haftaOzetA(hareketler,ts){
+/* haric: hafta kapatması BEKLENMEYEN kullanıcı id'leri (yönetici pazarlamacılar).
+   Verilmezse davranış birebir eskisi gibi — herkes listeye girer. */
+function haftaOzetA(hareketler,ts,haric){
   const b0=haftaBasMs(ts), b1=haftaBitMs(ts);
   const ic=x=>{ const t=new Date(x.tarih).getTime(); return t>=b0&&t<=b1; };
   const K={};
@@ -7960,6 +7962,7 @@ function haftaOzetA(hareketler,ts){
   return {b0,b1,kod:haftaKod(ts),etiket:haftaEtiket(ts),
     kisiler:Object.keys(K).map(k=>({...K[k],
       satirlar:Object.keys(K[k].satirlar).map(g=>K[k].satirlar[g]).sort((a,b)=>b.gun-a.gun||b.ciro-a.ciro)}))
+      .filter(x=>!(haric&&haric.has&&haric.has(x.kullaniciId)))
       .filter(x=>x.adet>0||x.nakit>0.5)
       .sort((a,b)=>b.hakedis-a.hakedis)};
 }
@@ -7967,17 +7970,17 @@ function haftaListesiA(hareketler,simdi){
   const L=[]; let t=haftaBasMs(simdi||Date.now());
   while(t>=HAKEDIS_BAS_MS&&L.length<60){ L.push(t); t-=7*864e5; }
   return L; }
-function HakedisDonemSheet({list,onOnay,onOde,onGeriAl,onClose,hareketler,simdi,ilkFiltre}){
+function HakedisDonemSheet({list,onOnay,onOde,onGeriAl,onClose,hareketler,simdi,ilkFiltre,yonSet}){
   const [filtre,setFiltre]=useState(ilkFiltre||"acik");
   const [hafta,setHafta]=useState(null);   // 🗄 arşivde açılan hafta
   const [kisi,setKisi]=useState(null);     // o haftada açılan pazarlamacı
   const NOW=simdi||Date.now();
-  const arsiv=useMemo(()=>haftaListesiA(hareketler,NOW).map(t=>{ const o=haftaOzetA(hareketler,t);
+  const arsiv=useMemo(()=>haftaListesiA(hareketler,NOW).map(t=>{ const o=haftaOzetA(hareketler,t,yonSet);
     const kay=(list||[]).filter(x=>x.hafta===o.kod);
     return {...o,kayitlar:kay,suren:haftaBitMs(t)>=NOW,   // içinde bulunulan hafta henüz kapanmadı
 
       hakTop:o.kisiler.reduce((s2,x)=>s2+x.hakedis,0),
-      ciroTop:o.kisiler.reduce((s2,x)=>s2+x.ciro,0)}; }),[hareketler,list,NOW]);
+      ciroTop:o.kisiler.reduce((s2,x)=>s2+x.ciro,0)}; }),[hareketler,list,NOW,yonSet]);
   const L=(list||[]).filter(x=>filtre==="acik"?(x.durum==="bildirildi"||x.durum==="onaylandi"):true);
   const bekTop=(list||[]).filter(x=>x.durum==="bildirildi"||x.durum==="onaylandi").reduce((s,x)=>s+num(x.hakedis),0);
   const odenTop=(list||[]).filter(x=>x.durum==="odendi").reduce((s,x)=>s+num(x.odenenTutar||x.hakedis),0);
@@ -8847,6 +8850,13 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
   const RT=useMemo(()=>(hareketler||[]).filter(x=>{ const t=new Date(x.tarih).getTime()||0; return t>=b0 && t<b1; }),[hareketler,b0,b1]);
   let ciro=0,adet=0; R.forEach(x=>{ if(x.tip==="satis"&&!x.gerilla){ciro+=num(x.adet)*num(x.satisFiyat);adet+=num(x.adet);} });
   // 🏢 şirket pazarlamacıları: hakediş almaz, sattığının tamamı şirkete
+  /* 👑 YÖNETİCİ PAZARLAMACI — komutanın kendi saha işlemleri (komuta panelinden
+     girilen satış/tahsilat ya da 👁 görüntüle ile yapılan işlem). İşlem zaten
+     komutada yapılmış sayılır: hakediş doğmaz, hafta kapatılmaz, nakit teslimi
+     beklenmez — para da mal da zaten komutada.
+     Performans tablosu bunu görmez: ekip listesi (rol!=="admin") yöneticiyi
+     baştan dışlıyor. Sızdığı yerler saha nakdi ve hafta kapatma sayımıydı. */
+  const yonSet=new Set((kullanicilar||[]).filter(k=>k&&k.rol==="admin").map(k=>k.id));
   const sirketSet=new Set((kullanicilar||[]).filter(k=>k.sirketPaz).map(k=>k.id));
   // pazarlamacı performansı (dönem) — önce üretici modeli
   const perf=(EK||[]).map(e=>{ const mine=R.filter(x=>(x.kullaniciId||"")===e.u.id);
@@ -8897,7 +8907,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
   /* 🗄 arşiv rozeti — kaç hafta var, kaçında herkes göndermemiş.
      Gönderilmemiş haftayı komuta ekranda görsün diye ayrı kutu. */
   const arsivOzet=useMemo(()=>{ const NOW2=Date.now(); const L=haftaListesiA(HH); let dolu=0,eksik=0,suren=0;
-    L.forEach(t=>{ const o=haftaOzetA(HH,t); if(!o.kisiler.length) return; dolu++;
+    L.forEach(t=>{ const o=haftaOzetA(HH,t,yonSet); if(!o.kisiler.length) return; dolu++;
       /* 🗓 Hafta Cuma 23:59'da kapanır; kapanmadan "gönderilmedi" denmez —
          pazarlamacı zaten cuma akşamı gönderiyor. Süren hafta eksik sayılmaz. */
       if(haftaBitMs(t)>=NOW2){ suren++; return; }
@@ -8912,6 +8922,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
      hafta cuma akşamı kapanınca teslim edilecek tutara geçer. */
   const sahaNakit=(()=>{ const m={}; const SIMDI=Date.now();
     (HH||[]).forEach(x=>{ const uid2=x.kullaniciId||"?"; const t=new Date(x.tarih).getTime();
+      if(yonSet.has(uid2)) return;   // 👑 yöneticinin topladığı para zaten komutada
       m[uid2]=m[uid2]||{uid:uid2,ad:x.kullaniciAd||"?",toplanan:0,teslim:0,bekleyen:0,acikHafta:0};
       if(x.tip==="nakitTeslim"){ if(x.onay===false) m[uid2].bekleyen+=num(x.tutar); else m[uid2].teslim+=num(x.tutar); return; }
       if(t<HAKEDIS_BAS_MS) return;
@@ -9396,7 +9407,7 @@ function RaporA({d,ac,giderler,sabitGider,hareketler,ekip,musteriler,kullanicila
     alisDuzen?h(HakedisDuzenSheet,{sales:alisDuzen,baslik:"Veriliş fiyatını düzelt",onClose:()=>setAlisDuzen(null),
       onKaydet:async(ch)=>{ if(onHakedisKaydet) await onHakedisKaydet(ch); setAlisDuzen(null); }}):null,
     odemeAcik?h(TablaOdemeSheet,{ekip:EK,tablaBak,acikOdeme,odemeList:tablaOdemeList,onEmir:(u,k)=>onTablaEmri&&onTablaEmri(u,k),onIptal:t=>onTablaIptal&&onTablaIptal(t),onClose:()=>setOdemeAcik(false)}):null,
-    hakDonemAcik?h(HakedisDonemSheet,{list:hakList,hareketler:HH,ilkFiltre:hakDonemAcik==="arsiv"?"arsiv":"acik",
+    hakDonemAcik?h(HakedisDonemSheet,{list:hakList,hareketler:HH,yonSet,ilkFiltre:hakDonemAcik==="arsiv"?"arsiv":"acik",
       onOnay:onHakOnay,onOde:onHakOde,onGeriAl:onHakGeriAl,onClose:()=>setHakDonemAcik(false)}):null,
     nakitAcik?h(SahaNakitSheet,{SN:sahaNakit,bildirimler:nakitBildirim,onOnay:onNakitOnay,onGeriAl:onNakitGeriAl,onClose:()=>setNakitAcik(false)}):null);
 }

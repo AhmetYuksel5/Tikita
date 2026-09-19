@@ -42,6 +42,7 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 | `tahsilatGeriE2E.mjs` | 🧾 tahsilat geri alma idempotent: bayat ekrandan ikinci basış, hızlı çift dokunuş, mahsup izi, KDV tavanı |
 | `ziyaretRaporE2E.mjs` | 🧾 değişim tek satır + geri alma · fiyat bazlı birleşik döküm · ziyaret raporu sırası · tahsil edilecek kalemleri · birleşik reyting |
 | `cephaneOnayE2E.mjs` | 🔐 cephane onayı: ayar kapalıyken eski davranış, açıkken izinsizde hareket yerine talep (stok/çanta hiç oynamaz), izinlide doğrudan, boşaltma da onaya tabi; komuta onayında adet düşürülebilir, rette hiç yazım olmaz; izin ve ayar anahtarları |
+| `yoneticiPazE2E.mjs` | 👑 yönetici pazarlamacı: hakediş kartı · kapatılmamış dönemler · haftalık arşiv · nakit teslim blokları hiç çıkmaz, yazma yolları da kapalı; normal pazarlamacı ve Paşa rütbesi etkilenmez (ölçüt rütbe değil rol); komutada saha nakdine ve hafta sayımına girmez |
 | `urunGizleE2E.mjs` | 🙈 ürün gizle: kartta Gizle/Göster, en altta kapalı akordiyon, stok/çanta uyarısı · 🗑 katalog görseli silme (üç kaynak: yüklenen·gömülü·hazır), tek görselli ürüne de ulaşılır · pazarlamacıda gizli ürün çantasında kalmışsa görünür, yenisi alınamaz |
 | `urunBirlesE2E.mjs` | 🔗 ürün birleştirme: arşivli ürün hiçbir listede çıkmaz (süzgeç map'ten ÖNCE), kapanan kart silinmez (birlesti + birlestiOnce okunur), sayaç toplamı ve hareket geçmişi korunur |
 | `defterSilE2E.mjs` | 🧾 komuta defterinden silme: değişim çifti birlikte gider, mahsup izi geri sarılır (satışın borcu yeniden açılır), izsiz kayıtta hiçbir satışa dokunulmaz |

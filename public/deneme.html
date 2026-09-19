@@ -107,7 +107,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v144";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v145";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🗂 ÜRÜN SERİSİ — komuta panelinden atanır, burada yalnız okunur.
    Kalıcı alan seriler[] dizisidir; eski kayıtlarda tek metinlik "seri" alanı olabilir.
@@ -810,6 +810,11 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
      emir=kendisi olduğu için yetki yine açıktır. */
   const etkinKul=(kullanicilar||[]).find(u=>u.id===emir.id)||{};
   const sinirsiz=etkinKul.rol==="admin"||!!etkinKul.sirketPaz||toplamGuc>=PASA_GUC;
+  /* 👑 YÖNETİCİ PAZARLAMACI — komutanın kendisi saha işlemi yapıyor demektir.
+     İşlem zaten komutada yapılmış sayılır: kendine hakediş göndermez, hafta
+     kapatmaz, kendine nakit teslim etmez. Ölçüt RÜTBE DEĞİL ROL: Paşa rütbesine
+     çıkmış pazarlamacı da sınırsızdır ama hakedişini almaya devam eder. */
+  const yonetici=etkinKul.rol==="admin";
   /* elde = sahada işlenebilecek ürünler.
      Sınırsızda TÜM ürünler listede: montajı biten ama programa henüz girmemiş bir
      ürün sıfır görünürken satılmış olabilir — engellemek yerine stok eksiye düşer,
@@ -825,7 +830,7 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
   return {emir,kaleler,adaylar,toplamGuc,komutan,sonraki,gerillaGanimet,hafGanimet,streak,satisGun,hafCiro,hafKar,gorevler,cephane,cantaTop,
     kdvOran:kdvOraniOku(opt&&opt.ayar),   // 🧾 tahsilatta eklenecek KDV oranı (ayar/genel)
     kullanilanUrun, satilanUrun,
-    sinirsiz,elde,eksiStok,cephaneOnay,cephaneIzinli,cephaneOnayGerek,
+    sinirsiz,yonetici,elde,eksiStok,cephaneOnay,cephaneIzinli,cephaneOnayGerek,
     gorevHaf,rozetler,lider,emirSira,toplamCiro,hakedisTop,tablaKazTop,tablaOdenenTop,tablaKalanTop,bugunSat,bugunCiro,bugunTah,vurkac,
     konsToplam:Object.values(acikK).reduce((s,v)=>s+v,0),
     borcTop:kaleler.reduce((s,k)=>s+k.borc,0)};
@@ -2250,6 +2255,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
     return {ciroRows,hakRows2,ganimetRows,alacakRows,tablaRows}; },[hareketler,d]);
   // 🫰 bu dönemin hakedişi — Cumartesi 00:00 → Cuma 23:59
   const sirketPaz=!!(d&&d.emir&&d.emir.sirketPaz);
+  const YON=!!(d&&d.yonetici);   // 👑 yönetici pazarlamacı — işlem komutada yapılmış sayılır
   const HD=useMemo(()=>hakedisHesap(hareketler,NOW,BEDAVA_ESIK,sirketPaz),[hareketler,sirketPaz]);
   const ND=useMemo(()=>nakitDurum(hareketler,NOW),[hareketler,NOW]);
   const kayitBul=kod=>(hakDonemler||[]).find(x=>x.hafta===kod&&x.kullaniciId===benId)||null;
@@ -2268,7 +2274,10 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
   const tumDonem=useMemo(()=>[{...HD,kayit:buKayit},...gecmisD],[HD,buKayit,gecmisD]);   // 🗄 arşiv: bu hafta + geçmiş
   return h("div",{style:{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0"}},
     h("div",{style:{fontSize:24,fontWeight:800,marginBottom:14}},"📊 Rapor"),
-    HD.gecerli?h("button",{onClick:()=>setHakAcik("bu"),className:"card",style:{width:"100%",padding:"15px 16px",marginBottom:12,
+    /* 👑 YÖNETİCİ: hakediş kartı, kapatılmamış dönemler, arşiv ve nakit teslim
+       blokları hiç çıkmaz — komutanın kendine hakediş göndermesi, hafta
+       kapatması ya da kendine nakit teslim etmesi anlamsız. */
+    (!YON&&HD.gecerli)?h("button",{onClick:()=>setHakAcik("bu"),className:"card",style:{width:"100%",padding:"15px 16px",marginBottom:12,
         textAlign:"left",boxShadow:"none",border:"1px solid "+(buKayit?"#86efac":"#d9b25a"),
         background:buKayit?"linear-gradient(120deg,#f0fdf4,#fff)":"linear-gradient(120deg,#fffaf0,#fff)"}},
       h("div",{style:{display:"flex",alignItems:"center",gap:11}},
@@ -2288,7 +2297,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
                :"Cuma akşamı kapat ve komutaya gönder")),
       bekleyen.length?h("div",{style:{marginTop:7,padding:"8px 11px",borderRadius:10,fontSize:11.5,fontWeight:800,
         background:"#ffe4e6",color:"#9f1239"}},"⬇️ "+bekleyen.length+" kapatılmamış dönem aşağıda"):null):null,
-    acikDonemler.length?h("div",{style:{marginBottom:12}},
+    (!YON&&acikDonemler.length)?h("div",{style:{marginBottom:12}},
       h("div",{style:{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:7}},
         h("div",{className:"lbl"},"KAPATILMAMIŞ DÖNEMLER"),
         h("div",{style:{fontSize:11,fontWeight:800,color:"var(--red)"}},acikDonemler.length+" hafta")),
@@ -2307,7 +2316,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
           h("span",{style:{fontSize:17,color:"var(--mut2)",flexShrink:0}},"›")))),
       h("div",{style:{fontSize:11,color:"var(--mut)",fontWeight:700,lineHeight:1.5,padding:"0 2px"}},
         "Cuma akşamı kapatılmayan haftalar burada birikir. Her birine dokun, dökümünü gör, komutaya gönder.")):null,
-    h("button",{onClick:()=>setArsivAcik(true),style:{display:"flex",alignItems:"center",gap:10,width:"100%",
+    YON?null:h("button",{onClick:()=>setArsivAcik(true),style:{display:"flex",alignItems:"center",gap:10,width:"100%",
       padding:"13px 15px",borderRadius:14,marginBottom:12,background:"var(--surf2)",border:"1px solid var(--line)",
       fontSize:14,fontWeight:800,color:"var(--txt)",textAlign:"left"}},
       h("span",{style:{fontSize:19,flexShrink:0}},"🗄"),
@@ -2317,7 +2326,7 @@ function Rapor({d,say,raporVer,hareketler,ovList,geriAl,odemeEmirleri,onOdemeAl,
       onSec:t=>{ setArsivAcik(false); setHakAcik(t===HD.b0?"bu":t); }}):null,
     acikHD?h(HakedisSheet,{HD:acikHD,buKayit:acikKayit,gecmisD,onGonder:onHakGonder,
       onSec:t=>setHakAcik(t),onClose:()=>setHakAcik(null),say,simdi:NOW}):null,
-    (ND.toplanan>0||ND.teslim>0)?h("button",{onClick:()=>setNakitAcik(true),className:"card",
+    (!YON&&(ND.toplanan>0||ND.teslim>0))?h("button",{onClick:()=>setNakitAcik(true),className:"card",
         style:{width:"100%",padding:"14px 16px",marginBottom:12,textAlign:"left",boxShadow:"none",
           border:"1px solid "+(ND.kalan>0.5?"#7dd3fc":"var(--line)"),
           background:ND.kalan>0.5?"linear-gradient(120deg,#f0f9ff,#fff)":"var(--surf)"}},
@@ -4403,6 +4412,9 @@ function App(){
   // 🫰 haftalık hakediş dönemini komutaya gönder — tutar DONAR, sonradan değişmez
   async function hakedisGonder(HD){
     if(!HD||!emirId) throw new Error("kullanıcı yok");
+    /* 👑 yönetici kendine hakediş göndermez — ekranda düğme zaten yok,
+       bu satır bayat ekrandan ya da eski sekmeden gelen çağrıyı da keser. */
+    if(d&&d.yonetici) throw new Error("Yönetici hesabında hakediş dönemi açılmaz");
     const ad=(d&&d.emir&&d.emir.ad)||"Pazarlamacı";
     await save("hakedis_donem",{
       id:emirId+"_"+HD.kod,
@@ -4423,6 +4435,7 @@ function App(){
   // 💵 nakit teslim bildirimi — komuta onaylayınca saha kasasından Tikita kasasına geçer
   async function nakitTeslimEt(tutar,not){
     if(!emirId||num(tutar)<=0) throw new Error("geçersiz");
+    if(d&&d.yonetici) throw new Error("Yönetici hesabında nakit teslimi olmaz");   // 👑 para zaten komutada
     await save("pazarlama_hareket",{
       tip:"nakitTeslim", kullaniciId:emirId, kullaniciAd:(d&&d.emir&&d.emir.ad)||"Pazarlamacı",
       tutar:Math.round(num(tutar)*100)/100, not:not||"",
