@@ -116,8 +116,12 @@ console.log("\n═══ 5) NORMAL PAZARLAMACI — hepsi eskisi gibi ═══")
 
 console.log("\n═══ 6) PAŞA RÜTBESİ — sınırsız ama yönetici DEĞİL ═══");
 { const {c,p,log}=await ac("p1","deneme.html");
+  /* Sınırsız yetkinin gerçek işareti Cephane ekranındadır: çanta değil atölye
+     sayılır. (Eskiden Üs ekranındaki 🏭 emojisine bakılıyordu; o emoji bir
+     bilgi kartının süsüydü, yetkiyle ilgisi yoktu.) */
+  await basBtn(p,"Cephane$"); await p.waitForTimeout(900);
   const t0=await metin(p);
-  ok("sınırsız yetkide (🏭 Cephane)",/🏭/.test(t0)||/atölyede/.test(t0),t0.slice(0,60));
+  ok("sınırsız yetkide (atölye cephanesi)",/atölyede/.test(t0),t0.slice(0,70));
   await raporAc(p);
   const t=await metin(p);
   ok("hakediş kartı VAR (rütbe hakedişi kaldırmaz)",/hakediş · \d+\. hafta/.test(t),

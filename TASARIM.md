@@ -9,26 +9,27 @@ buna çekilir.
 
 ---
 
-## Bugünkü hâl (ölçüm)
+## Ölçüm — önce / sonra
 
 | | pazarlamacı | komuta |
 |---|---|---|
-| `fontWeight:800` kullanımı | **204** | **575** |
-| `fontWeight:600` kullanımı | 26 | 35 |
-| `fontWeight:400` kullanımı | 2 | 0 |
-| farklı punto değeri | **31** | **25** |
-| sabit hex renk (farklı) | **79** | **153** |
-| farklı köşe yarıçapı | 15 | 17 |
-| emoji geçen metin | 262 | 230 |
-| farklı emoji | 69 | 60 |
-| pastel zeminli kutu | 27 | 70 |
-| gölge (`boxShadow`) | 50 | 40 |
-| büyük harf etiket (`.lbl`) | 44 | 146 |
+| `800` ağırlık | 204 → **62** | 575 → **220** |
+| `700` ağırlık | 26 → 31 | 35 → 31 |
+| `600` ağırlık | — → 134 | — → 414 |
+| `500` ağırlık | 2 → **127** | 0 → **220** |
+| `900` ağırlık | 4 → **0** | 26 → **0** |
+| farklı punto değeri | 31 → **5** | 25 → **5** |
+| yarım piksel punto | 154 → **0** | 426 → **0** |
+| `--violet` kullanımı | 14 → **0** | 50 → **0** |
+| gölge (`boxShadow:"0…`) | 50 → 15 | 40 → 11 |
 
-Okunuşu: **800 ağırlık varsayılan olmuş.** Vurgu için ayrılmış bir araç, sayfanın
-gövde yazısı hâline gelince vurgu diye bir şey kalmıyor. Aynı şey pastel kutu,
-emoji ve büyük harf için de geçerli — hepsi "dikkat çek" araçlarıydı, hepsi
-sıradanlaştı.
+Okunuşu (önce): **800 ağırlık varsayılan olmuştu.** Vurgu için ayrılmış bir araç,
+sayfanın gövde yazısı hâline gelince vurgu diye bir şey kalmıyor. Aynı şey pastel
+kutu, emoji ve büyük harf için de geçerliydi — hepsi "dikkat çek" araçlarıydı,
+hepsi sıradanlaşmıştı.
+
+Sonrası: 800 artık ekran başına birkaç yerde; punto beş basamağa indi; 11 ve 13
+puntodaki her yazı 500/600'e geri çekildi.
 
 ---
 
@@ -198,18 +199,32 @@ Aynı bilgi, tek renk, sıfır pastel kutu, bir emoji.
 
 ---
 
-## Uygulama sırası
+## Uygulama sırası — durum
 
-Hepsini bir seferde değiştirmek riskli; ekran ekran gidilir ve her adım
-testten geçer.
+1. ✅ **Token katmanı** — `PT` / `AG` (JS) ve `--p1..--p5` / `--w1..--w4` (CSS)
+   iki uygulamada da tanımlı; `.lbl` yeniden yazıldı.
+2. ✅ **Kale ekranı** — kahraman borç; liste satırında borç ilk kez görünüyor.
+3. ✅ **Cephane** (kahraman: çantadaki adet) ve **Rapor** (kahraman: hakediş).
+4. ✅ **Komuta · Stok** — dört pastel uyarı tek kutuya indi; ürün kartının
+   kahramanı stok adedi.
+5. ✅ **Komuta · Panel ve Muhasebe** — HUD ve bölüm başlıkları geri çekildi,
+   sekmeler cümle düzenine indi.
+6. ◑ **Sabit hex → token** — tokenla birebir eşleşen renkler çekildi; geri kalan
+   (pastel zeminler, muhasebe rozet renkleri) duruyor.
+7. ✅ **Üs ekranı** — numaralı büyük harf bölüm başlıkları, süs ikonları ve altı
+   ayrı renk kalktı.
+8. ✅ **Genel süpürme** — bütün puntolar merdivene oturtuldu (yarım piksel sıfır),
+   `900` ağırlık kalmadı, 11 ve 13 puntodaki her yazı 500/600'e çekildi.
 
-1. **Token katmanı** — punto merdiveni ve ağırlık sabitleri tek yerde tanımlanır,
-   `.lbl` yeniden yazılır. (Görsel etki: her ekranda etiketler geri çekilir.)
-2. **Kale ekranı** — en çok bakılan ekran, örneği yukarıda.
-3. **Cephane** ve **Rapor**.
-4. **Komuta · Stok** — dört pastel uyarının tekleştirilmesi.
-5. **Komuta · Panel ve Muhasebe**.
-6. Kalan sabit hex renklerin tokena çekilmesi.
+### Bilerek bırakılanlar
+
+- **Muhasebe defteri rozetleri** (SATIŞ · TAHSİL · MASRAF · ÖDEME · TRANSFER)
+  renkli kaldı: bir muhasebe tablosunda tür ayrımı tarama eksenidir, süs değil.
+- **Aksiyon ikonları** (Satış yap · Değişim · Sayım · Ziyaret, Hızlı vuruş)
+  kaldı: kullanıcı bu düğmelere metinden önce ikonla ulaşıyor (R7 "kimlik").
+- Komutanın **Üretim, Ekip ve Rapor** ekranları ile sayfa içi sheet'lerin çoğu
+  yalnız genel süpürmeden geçti; ekran ekran kahraman/destek düzeni henüz
+  kurulmadı. Dokunuldukça buraya çekilecek.
 
 ---
 

@@ -82,8 +82,10 @@ const kartAc=(p,ad)=>p.evaluate(a=>{ const L=Array.from(document.querySelectorAl
 const kay=(p,n)=>p.evaluate(n2=>window.__KAYITLAR(n2),n);
 const urun=async(p,id)=>((await kay(p,"stok_urun")).find(x=>x.id===id)||{});
 /* Stok ızgarasındaki ürün kartlarının adları */
+/* Kart metninin tamamı alınır: ilk satır artık ürün adı değil stok sayısı
+   (TASARIM.md R10 — sayı büyük, ad altında). */
 const kartlar=p=>p.evaluate(()=>Array.from(document.querySelectorAll("button.card"))
-  .map(x=>((x.innerText||"").split("\n")[0]||"").trim()).filter(Boolean));
+  .map(x=>(x.innerText||"").replace(/\s+/g," ").trim()).filter(Boolean));
 
 console.log("═══ 1) GİZLE — ürün kartından ═══");
 { const {c,p,log,sor}=await ac("a1","admin.html");

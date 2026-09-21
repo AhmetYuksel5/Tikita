@@ -84,10 +84,10 @@ console.log("═══ 0) deftere gir ═══");
 ok("Muhasebe sekmesi",(await bas("^Muhasebe$"))!=="YOK",await p.evaluate(()=>
   (document.body.innerText||"").replace(/\s+/g," ").slice(0,90)));
 await p.waitForTimeout(1200);
-ok("HAREKET sekmesi",(await bas("^HAREKET$"))!=="YOK");
+ok("Hareket sekmesi",(await bas("^Hareket$"))!=="YOK");
 await p.waitForTimeout(1200);
 let t=await p.evaluate(()=>(document.body.innerText||"").replace(/\s+/g," ").trim());
-ok("defter tablosu açıldı",/TÜR/.test(t)&&/BORÇ/.test(t),(t.match(/TARİH[^a-zçğıöşü]{0,60}/)||[""])[0]);
+ok("defter tablosu açıldı",/tür/.test(t)&&/borç/.test(t),(t.match(/tarih[\s\S]{0,60}/)||[""])[0]);
 
 console.log("═══ 1) değişim iadesi satırı ═══");
 const s1=await satirAc("Değişim iadesi");
