@@ -68,7 +68,7 @@ const adetYaz=(p,ad,v)=>p.evaluate(([a,val])=>{
   set.call(h2.i,String(val)); h2.i.dispatchEvent(new Event("input",{bubbles:true}));
   return h2.t.slice(0,44); },[ad,v]);
 const cantaAc=async p=>{ await bas(p,"Cephane$|🎒 Cephane$"); await p.waitForTimeout(500);
-  await bas(p,"^🎒 Cephane ekle$"); await p.waitForTimeout(600); };
+  await bas(p,"^Cephane ekle$"); await p.waitForTimeout(600); };
 const stokOku=async p=>{ const U=await kay(p,"stok_urun");
   const g=id=>{ const u=U.find(x=>x.id===id)||{}; return {st:Number(u.stokta),cz:Number((u.pazStokK||{}).e1)}; };
   return {u1:g("u1"),u2:g("u2")}; };
@@ -122,8 +122,8 @@ let talepId=null;
   /* 5) ekran geri bildirimi */
   await p.keyboard.press("Escape"); await p.waitForTimeout(600);
   t=await metin(p);
-  ok("Cephane ekranında onay şeridi",/🔐 CEPHANE ONAYI/.test(t)&&/onay bekliyor/.test(t),
-    (t.match(/🔐 CEPHANE ONAYI[^🎒📤]{0,40}/)||[""])[0]);
+  ok("Cephane ekranında onay şeridi",/🔐 Cephane onayı/.test(t)&&/onay bekliyor/.test(t),
+    (t.match(/🔐 Cephane onayı[^🎒📤]{0,40}/)||[""])[0]);
   ok("şeritte kalemler yazıyor",/5 × Penguen/.test(t)&&/2 × Kaplumbağa/.test(t));
   const rz=await p.evaluate(()=>{ const B=Array.from(document.querySelectorAll("button"))
     .filter(x=>/Cephane/.test(x.innerText||"")); return B.map(x=>(x.innerText||"").replace(/\s+/g," ").trim()).join(" | "); });
@@ -250,7 +250,7 @@ console.log("\n═══ 8) İZİN ANAHTARI komuta ekranında ═══");
   await p.waitForTimeout(700);
   let t=await metin(p);
   ok("cephane izni anahtarı var",/Onaysız cephane hareketi/.test(t),
-    (t.match(/CEPHANE İZNİ[\s\S]{0,60}/)||t.match(/Onaysız cephane hareketi[^A-ZÇĞİÖŞÜ]{0,40}/)||[""])[0]);
+    (t.match(/Cephane izni[\s\S]{0,60}/)||t.match(/Onaysız cephane hareketi[^A-ZÇĞİÖŞÜ]{0,40}/)||[""])[0]);
   ok("kapalı hâlde 'onaya düşer' yazıyor",/her hareketi onaya düşer/.test(t));
   ok("anahtar açıldı",(await bas(p,"Onaysız cephane hareketi"))!=="YOK");
   await p.waitForTimeout(500);

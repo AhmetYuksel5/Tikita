@@ -95,7 +95,7 @@ console.log("═══ 1) PAZARLAMACI · Cephane listesi ═══");
   ok("arşivli «Bukalemun» kartı listede YOK",yalin.length===0,JSON.stringify(yalin).slice(0,140));
   ok("stok −71 tek satırda",/-71/.test(t),(t.match(/-?\d+ atölye/g)||[]).join(" | ").slice(0,90));
   /* çantayı doldur ekranı: arşivli ürün orada da olmamalı */
-  ok("Cephane ekle açıldı",(await bas(p,"^🎒 Cephane ekle$"))!=="YOK");
+  ok("Cephane ekle açıldı",(await bas(p,"^Cephane ekle$"))!=="YOK");
   await p.waitForTimeout(700);
   const kut=await cephaneAd(p);
   ok("çanta ekranında Sevimli Bukalemun var",/Sevimli Bukalemun/.test(kut));
@@ -113,8 +113,8 @@ console.log("\n═══ 2) PAZARLAMACI · kale konsinye dökümü tek satır �
   ok("konsinye 33 adet tek satırda",/33/.test(t),(t.match(/🏬 [^·]{0,26}/g)||[]).join(" | ").slice(0,110));
   const iki=(t.match(/Bukalemun/g)||[]).length;
   ok("kale kartında Bukalemun adı tek geçiyor",iki<=2,iki+" kez");
-  ok("ciro 240 ₺ (6 × 40)",/240 ₺ Toplam ciro/.test(t),(t.match(/[\d.]+ ₺ Toplam ciro/)||[""])[0]);
-  ok("borç 240 ₺",/240 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
+  ok("ciro 240 ₺ (6 × 40)",/240 ₺ ciro/.test(t),(t.match(/[\d.]+ ₺ ciro/)||[""])[0]);
+  ok("borç 240 ₺",/240 ₺ tahsil edilecek/.test(t),(t.match(/[\d.]+ ₺ tahsil edilecek/)||[""])[0]);
   ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,160));
   await c.close(); }
 

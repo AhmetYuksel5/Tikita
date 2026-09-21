@@ -87,14 +87,14 @@ await bas("Nazar Büfe"); await p.waitForTimeout(900);
 let t=await metin();
 
 console.log("═══ 2) kale sayfası · birleşik ve FİYAT BAZINDA döküm ═══");
-ok("döküm kartı var",/KALEDE ŞU AN BULUNANLAR/.test(t));
+ok("döküm kartı var",/Kalede bulunanlar/.test(t));
 /* 20 satıldı − 12 eridi(sayım 8) − 4 değişim iadesi + 10 yeni = 14 @ 40 ₺ */
 ok("Penguen 14 × 40 ₺",/🛍 Penguen 14 40 ₺/.test(t),(t.match(/🛍 \S+ [\d.]+ [\d.]+ ₺/g)||[]).join(" | "));
 ok("Kaplumbağa 4 × 55 ₺",/🛍 Kaplumbağa 4 55 ₺/.test(t));
 ok("sayım rozeti var",/sayıldı/.test(t),(t.match(/(bugün|\d+ gün önce) sayıldı/)||[""])[0]);
 
 console.log("═══ 1) değişim hareket listesinde TEK satır ═══");
-ok("geçmişe girildi",(await bas("Toplam ciro"))!=="YOK");
+ok("geçmişe girildi",(await bas("₺ ciro"))!=="YOK");
 await p.waitForTimeout(900);
 let sh=await sheet();
 ok("tek satırda ♻️ Değişim",/♻️ Değişim/.test(sh),(sh.match(/♻️ [^↩]{0,40}/)||[""])[0]);
@@ -128,16 +128,16 @@ ok("ziyaret raporuna girildi",(await bas("Ziyaret raporu"))!=="YOK");
 await p.waitForTimeout(900);
 sh=await sheet();
 if(/Ziyaret raporları/.test(sh)){ await bas("14 Eyl|Eyl"); await p.waitForTimeout(800); sh=await sheet(); }
-const sira=["1 · ZİYARETE GELİNDİĞİNDE STANTTA OLAN","2 · MÜŞTERİNİN SATTIĞI",
-  "3 · İADE ALINAN VE YERİNE VERİLEN","4 · BU ZİYARETTE KALEYE SATILAN",
-  "5 · ZİYARET SONUNDA STANTTA KALAN","6 · TAHSİL EDİLECEK TUTAR"];
+const sira=["1 · Ziyarete gelindiğinde stantta olan","2 · Müşterinin sattığı",
+  "3 · İade alınan ve yerine verilen","4 · Bu ziyarette kaleye satılan",
+  "5 · Ziyaret sonunda stantta kalan","6 · Tahsil edilecek tutar"];
 const yer=sira.map(x=>sh.indexOf(x));
 ok("altı bölüm de var",yer.every(i=>i>=0),sira.map((x,i)=>x+"="+yer[i]).join(" | "));
 ok("sıra doğru",yer.every((v,i)=>i===0||v>yer[i-1]),yer.join(" < "));
-ok("sayımda 8 adet",/8 × Penguen/.test(sh),(sh.match(/1 · ZİYARETE[^0-9]{0,60}[\d]+ × \S+/)||[""])[0]);
-ok("'müşterinin malı' ibaresi kalktı",!/MÜŞTERİNİN MALI/.test(sh)&&!/müşterinin malı/.test(sh),
+ok("sayımda 8 adet",/8 × Penguen/.test(sh),(sh.match(/1 · Ziyarete[^0-9]{0,60}[\d]+ × \S+/)||[""])[0]);
+ok("'müşterinin malı' ibaresi kalktı",!/[Mm]üşterinin malı/.test(sh),
   (sh.match(/[Mm]üşterinin malı/)||[""])[0]);
-ok("'satın aldıkları' ifadesi var",/SATIN ALDIKLARI/.test(sh));
+ok("'satın aldıkları' ifadesi var",/satın aldıkları/.test(sh));
 ok("müşterinin sattığı 12 adet",/12 × Penguen/.test(sh)&&/Toplam · 12 adet/.test(sh));
 /* iki kolon: solda iade alınan, sağda yerine verilen */
 ok("kolon başlıkları var",/↩ İADE ALINAN/.test(sh)&&/→ YERİNE VERİLEN/.test(sh),
@@ -146,9 +146,9 @@ ok("çift yan yana okunuyor",/4 × Penguen 40 ₺ · 160 ₺ → 4 × Kaplumbağ
   (sh.match(/4 × Penguen[^\n]{0,44}/)||[""])[0]);
 ok("çiftin fiyat farkı +60",/Fiyat farkı \+ ?60/.test(sh),(sh.match(/Fiyat farkı [^ ]+ ?[\d.]+ ₺/)||[""])[0]);
 ok("satılan yeni ürünler toplamı 10 adet",/Toplam · 10 adet/.test(sh),
-  (sh.match(/4 · BU ZİYARETTE KALEYE SATILAN[\s\S]{0,80}Toplam · \d+ adet/)||[""])[0].slice(-22));
+  (sh.match(/4 · Bu ziyarette kaleye satılan[\s\S]{0,80}Toplam · \d+ adet/)||[""])[0].slice(-22));
 ok("stantta kalan 14 + 4",/Toplam · 18 adet/.test(sh),
-  (sh.match(/5 · ZİYARET SONUNDA STANTTA KALAN[\s\S]{0,120}/)||[""])[0].slice(0,110));
+  (sh.match(/5 · Ziyaret sonunda stantta kalan[\s\S]{0,120}/)||[""])[0].slice(0,110));
 /* tahsil edilecek: 400 (yeni satış) + 60 (değişim farkı) = 460 */
 ok("değişim farkı KALEM olarak var",/Değişim fiyat farkı/.test(sh));
 ok("tahsil edilecek 460 ₺",/Tahsil edilecek 460 ₺/.test(sh),(sh.match(/Tahsil edilecek [\d.]+ ₺/)||[""])[0]);
@@ -163,7 +163,7 @@ await p.keyboard.press("Escape"); await p.waitForTimeout(500);
 const sirali=await p.evaluate(()=>{
   const d=window.__D||null; return null; });
 /* konsinye "Bırak" sekmesindeki çanta listesi 🔥 sırasıyla çizilir */
-ok("konsinye ekranı açıldı",(await bas("adet Konsinye|Konsinye →"))!=="YOK");
+ok("konsinye ekranı açıldı",(await bas("adet konsinye"))!=="YOK");
 await p.waitForTimeout(900);
 await bas("🏬 Bırak"); await p.waitForTimeout(500);
 /* az kullanılanlar akordiyonu varsa aç — üçü de listede olsun */

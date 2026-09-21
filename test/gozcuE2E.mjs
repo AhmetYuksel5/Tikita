@@ -55,32 +55,36 @@ let t=await metin();
 ok("satış yapılmış kaleler listede",/Satan Market/.test(t)&&/Satan Bakkal/.test(t));
 ok("gözcüler listede GÖRÜNMÜYOR",!/Gözcü Biri/.test(t)&&!/Gözcü İki/.test(t),
   (t.match(/Gözcü \S+/g)||[]).join(","));
-ok("akordiyon başlığı en altta",/🔭 Gözcüler 3/.test(t),(t.match(/🔭 Gözcüler \d+/)||[""])[0]);
+ok("akordiyon başlığı en altta",/Gözcüler 3/.test(t),(t.match(/Gözcüler \d+/)||[""])[0]);
 /* akordiyon, kale satırlarının ALTINDA olmalı */
 const sira=await p.evaluate(()=>{
   const hepsi=Array.from(document.querySelectorAll("button,div"));
-  const y=re=>{ const e=hepsi.find(x=>new RegExp(re).test((x.innerText||"").replace(/\s+/g," ").trim())
-    &&(x.innerText||"").trim().length<80); return e?Math.round(e.getBoundingClientRect().y):-1; };
-  return {kale:y("Satan Bakkal"),akord:y("🔭 Gözcüler")}; });
+  /* en İÇTEKİ eşleşme alınır: dıştaki sarmalayıcı da metni içerdiği için
+     "en kısa metinli eşleşme" kuralı olmadan yanlış öğe seçilebiliyor */
+  const y=re=>{ const d=x=>(x.innerText||"").replace(/\s+/g," ").trim();
+    const L=hepsi.filter(x=>new RegExp(re).test(d(x))&&d(x).length<80)
+      .sort((p,q)=>d(p).length-d(q).length);
+    return L[0]?Math.round(L[0].getBoundingClientRect().y):-1; };
+  return {kale:y("Satan Bakkal"),akord:y("[⌃⌄] Gözcüler \\d+")}; });
 ok("akordiyon kalelerin ALTINDA",sira.akord>sira.kale,"kale y="+sira.kale+" akordiyon y="+sira.akord);
 
 console.log("═══ 2) akordiyonu aç ═══");
-ok("akordiyona basıldı",(await bas("🔭 Gözcüler"))!=="YOK");
+ok("akordiyona basıldı",(await bas("[⌃⌄] Gözcüler \\d+"))!=="YOK");
 await p.waitForTimeout(500);
 t=await metin();
 ok("üç gözcü de göründü",/Gözcü Biri/.test(t)&&/Gözcü İki/.test(t)&&/Gözcü Üç/.test(t));
 ok("kaleler hâlâ yukarıda",/Satan Market/.test(t));
 
 console.log("═══ 3) kapat ═══");
-await bas("🔭 Gözcüler"); await p.waitForTimeout(500);
+await bas("[⌃⌄] Gözcüler \\d+"); await p.waitForTimeout(500);
 t=await metin();
 ok("tekrar kapandı",!/Gözcü Biri/.test(t));
 
 console.log("═══ 4) 🔭 Gözcü süzgeci tam liste veriyor ═══");
-await bas("🔭 Gözcü 3"); await p.waitForTimeout(600);
+await bas("^Gözcü 3$"); await p.waitForTimeout(600);
 t=await metin();
 ok("süzgeçte üçü de var",/Gözcü Biri/.test(t)&&/Gözcü İki/.test(t)&&/Gözcü Üç/.test(t));
-ok("süzgeçte akordiyon yok",!/🔭 Gözcüler \d/.test(t));
+ok("süzgeçte akordiyon yok",!/Gözcüler \d/.test(t));
 ok("süzgeçte gerçek kaleler yok",!/Satan Market/.test(t));
 
 console.log("═══ 5) gözcü açılabiliyor ═══");

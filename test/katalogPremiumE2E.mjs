@@ -150,7 +150,7 @@ await p.waitForTimeout(700);
 t=await metin(p);
 ok("bölüm çipleri geldi",/otomatik/.test(t)&&/Deniz Serisi/.test(t),
   (t.match(/KATALOG BÖLÜMÜ[\s\S]{0,60}/)||[""])[0].replace(/\s+/g," "));
-ok("tanıtım yazısı alanı var",/TANITIM YAZISI/.test(t));   // .lbl büyük harfe çevirir
+ok("tanıtım yazısı alanı var",/Tanıtım yazısı/.test(t));
 ok("Kafe bölümü seçildi",(await basBtn(p,"^Kafe & Tatlı$"))!=="YOK");
 await p.waitForTimeout(1200);
 const U2=(await kay(p,"stok_urun")).find(x=>x.id==="u2")||{};

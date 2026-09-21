@@ -204,7 +204,7 @@ console.log("\n═══ 8) PAZARLAMACI — çantada kalan gizli ürün mahsur k
   ok("işaretlenmiş (kaldırıldı · elindeki satılabilir)",/elindeki satılabilir/.test(t));
   ok("elinde olmayan gizli ürün GÖRÜNMÜYOR",!/Bitmiş Kalamar/.test(t));
   /* çantaya YENİ alınamaz */
-  ok("Cephane ekle açıldı",(await basBtn(p,"^🎒 Cephane ekle$"))!=="YOK");
+  ok("Cephane ekle açıldı",(await basBtn(p,"^Cephane ekle$"))!=="YOK");
   await p.waitForTimeout(800);
   const kutu=async()=>p.evaluate(()=>Array.from(document.querySelectorAll("input[type=number]"))
     .map(i=>{ const w=i.closest("div"); return ((w&&w.innerText)||"").replace(/\s+/g," ").trim(); }).join(" ¦ "));

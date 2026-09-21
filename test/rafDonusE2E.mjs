@@ -98,7 +98,7 @@ ok("B partisi açık (5/5)",(await kalan("B"))===5,String(await kalan("B")));
 ok("açık konsinye 5",(await acikTop())===5,String(await acikTop()));
 
 console.log("═══ 1) B'den 5 adet konsinye satışı ═══");
-ok("konsinyeye girildi",(await bas("Konsinye →|🏬 .* adet Konsinye"))!=="YOK");
+ok("konsinyeye girildi",(await bas("adet konsinye"))!=="YOK");
 await p.waitForTimeout(800);
 await bas("💰 Satış"); await p.waitForTimeout(500);
 ok("raf satırına adet yazıldı",(await adetYaz("Halkalı Kalp",5))!=="YOK",await adetYaz("Halkalı Kalp",5));

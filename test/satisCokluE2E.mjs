@@ -93,8 +93,8 @@ ok("rozet SATIŞ",/SATIŞ/.test(sh));
 ok("az kullanılanlar akordiyonu var",/Az kullanılanlar/i.test(sh),(sh.match(/Az kullanılanlar \d+/i)||[""])[0]);
 await bas("Az kullanılanlar"); await p.waitForTimeout(500);
 sh=await sheet();
-ok("ürün listesi başlığı",/ÜRÜNLER · ÇANTANDAKİ ADET/.test(sh)||/ÜRÜNLER · ATÖLYEDEKİ ADET/.test(sh),
-  (sh.match(/ÜRÜNLER[^A-Z]{0,24}/)||[""])[0]);
+ok("ürün listesi başlığı",/Ürünler · çantandaki adet/.test(sh)||/Ürünler · atölyedeki adet/.test(sh),
+  (sh.match(/Ürünler[\s\S]{0,24}/)||[""])[0]);
 ok("üç ürün de alt alta",/Penguen/.test(sh)&&/Kaplumbağa/.test(sh)&&/Ahtapot/.test(sh));
 ok("her satırda 2 kutu (adet + birim ₺)",(await kutuSay("Penguen"))===2,String(await kutuSay("Penguen")));
 ok("sıralama toggle var",/🔥/.test(sh));
@@ -186,7 +186,7 @@ console.log("═══ 8) kale ekranı ═══");
 await p.keyboard.press("Escape"); await p.waitForTimeout(900);
 const t=await metin();
 /* borç: eski 0 + 3×40 + 2×50 = 220 */
-ok("borç 220 ₺",/220 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
+ok("borç 220 ₺",/220 ₺ tahsil edilecek/.test(t),(t.match(/[\d.]+ ₺ tahsil edilecek/)||[""])[0]);
 
 ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,220));
 await b.close();

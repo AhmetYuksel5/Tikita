@@ -103,13 +103,14 @@ console.log("═══ 1) kale ekranı ═══");
 ok("📋 Sayım aksiyonu var",/Sayım/.test(t));
 ok("dört aksiyon da var",/Satış yap/.test(t)&&/Değişim/.test(t)&&/Sayım/.test(t)&&/Ziyaret/.test(t));
 /* 📦 birleşik döküm kartı: konsinye + müşterinin malı, FİYAT BAZINDA */
-ok("birleşik döküm kartı var",/KALEDE ŞU AN BULUNANLAR/.test(t));
+ok("birleşik döküm kartı var",/Kalede bulunanlar/.test(t));
 ok("henüz sayım rozeti yok",!/sayıldı/.test(t),(t.match(/\S+ sayıldı/)||[""])[0]);
-ok("uyarı: alım toplamı",/alım toplamı/.test(t));
+/* TASARIM.md R11 — açıklama cümlesi kalktı; geriye yalnız iki simgenin kısa künyesi kalır */
+ok("kısa künye var, açıklama cümlesi yok",/🏬 konsinye · 🛍 kalenin malı/.test(t)&&!/alım toplamı/.test(t));
 ok("20 Penguen · 40 ₺ satırı",/🛍 Penguen 20 40 ₺/.test(t),(t.match(/🛍 Penguen [\d.]+ [\d.]+ ₺/g)||[]).join(" | "));
 ok("5 Penguen · 50 ₺ AYRI satır",/🛍 Penguen 5 50 ₺/.test(t));
 ok("konsinye Ahtapot satırı",/🏬 Ahtapot 6 30 ₺/.test(t),(t.match(/🏬 \S+ [\d.]+ [\d.]+ ₺/)||[""])[0]);
-ok("borç 200 ₺ (5×50 − 50)",/200 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
+ok("borç 200 ₺ (5×50 − 50)",/200 ₺ tahsil edilecek/.test(t),(t.match(/[\d.]+ ₺ tahsil edilecek/)||[""])[0]);
 
 console.log("═══ 2) sayım ekranı SADE ═══");
 ok("sayıma girildi",(await bas("^📋 ?Sayım$"))!=="YOK");
@@ -117,13 +118,13 @@ await p.waitForTimeout(800);
 t=await metin();
 ok("rozet SAYIM",/SAYIM/.test(t));
 ok("ilk sayım yazıyor",/ilk sayım/.test(t));
-ok("başlık: Kalende kalan",/KALENDE KALAN/.test(t));
+ok("başlık: Kalende kalan",/Kalende kalan/.test(t));
 ok("bizce → sayılan sütun başlığı",/BİZCE → SAYILAN/.test(t));
 /* ⛔ bu sekmede OLMAMASI gerekenler */
-ok("bırakış/sipariş kutusu YOK",!/Yeni ürün bırak/.test(t)&&!/bırak/i.test(t.split("KALENDE KALAN")[1]||""),
+ok("bırakış/sipariş kutusu YOK",!/Yeni ürün bırak/.test(t)&&!/bırak/i.test(t.split("Kalende kalan")[1]||""),
   (t.match(/Yeni ürün bırak|Bırakılan/)||[""])[0]);
 ok("konsinye sayım bölümü YOK",!/Konsinye rafını da say/.test(t));
-ok("sıralama toggle YOK",!/🔥/.test(t.split("KALENDE KALAN")[1]||""));
+ok("sıralama toggle YOK",!/🔥/.test(t.split("Kalende kalan")[1]||""));
 ok("satır başına TEK kutu",(await p.evaluate(()=>{
   const rows=Array.from(document.querySelectorAll("input[data-adet]"));
   return rows.length; }))===2,String(await p.evaluate(()=>document.querySelectorAll("input[data-adet]").length)));
@@ -173,7 +174,7 @@ await p.waitForTimeout(800); t=await metin();
 ok("sayım rozeti var",/bugün sayıldı/.test(t),(t.match(/(bugün|\d+ gün önce) sayıldı/)||[""])[0]);
 ok("40 ₺ havuzu 7'ye çekildi",/🛍 Penguen 7 40 ₺/.test(t),(t.match(/🛍 Penguen [\d.]+ [\d.]+ ₺/g)||[]).join(" | "));
 ok("50 ₺ havuzu 5 kaldı",/🛍 Penguen 5 50 ₺/.test(t));
-ok("borç değişmedi (200 ₺)",/200 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
+ok("borç değişmedi (200 ₺)",/200 ₺ tahsil edilecek/.test(t),(t.match(/[\d.]+ ₺ tahsil edilecek/)||[""])[0]);
 
 console.log("═══ 7) sayım geri alınınca havuz eski hâline döner ═══");
 ok("sayım geri alındı",(await geriAl("Sayım"))!=="YOK");
@@ -184,7 +185,7 @@ ok("sayım kaydı silindi",!H.some(x=>x.tip==="sayim"),
 t=await metin();
 /* sayım yok → havuz alım toplamına döner: 20 @ 40 ₺ */
 ok("havuz 20'ye döndü",/🛍 Penguen 20 40 ₺/.test(t),(t.match(/🛍 Penguen [\d.]+ [\d.]+ ₺/g)||[]).join(" | "));
-ok("borç yine 200 ₺",/200 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
+ok("borç yine 200 ₺",/200 ₺ tahsil edilecek/.test(t),(t.match(/[\d.]+ ₺ tahsil edilecek/)||[""])[0]);
 
 ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,220));
 await b.close();

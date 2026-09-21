@@ -97,7 +97,7 @@ for(const W of [320,390,430]){
   ({c,p,log}=await ac(W,"e1","deneme.html"));
   await bas(p,"Kaleler"); await p.waitForTimeout(500);
   await bas(p,"H Yayınları"); await p.waitForTimeout(700);
-  await bas(p,"Konsinye →|🏬 .* adet Konsinye"); await p.waitForTimeout(800);
+  await bas(p,"adet konsinye"); await p.waitForTimeout(800);
   await denet(p,"konsinye");
   await p.keyboard.press("Escape"); await p.waitForTimeout(400);
   await bas(p,"^♻️ ?Değişim$"); await p.waitForTimeout(800);

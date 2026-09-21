@@ -82,8 +82,8 @@ await p.waitForTimeout(700);
 t=await metin();
 ok("rozet başlığı büyük harfli",/DEĞİŞİM/.test(t));
 ok("kale adı başlıkta",/H Kafe/.test(t));
-/* ⚠ .lbl sınıfı etiketleri BÜYÜK HARFE çevirir — innerText de öyle görür */
-ok("iki bölüm de var",/GERİ ALINAN/.test(t)&&/YERİNE VERİLEN/.test(t),t.slice(0,300));
+/* .lbl artık büyük harfe çevirmez (TASARIM.md R8) — metin yazıldığı gibi görünür */
+ok("iki bölüm de var",/Geri alınan/.test(t)&&/Yerine verilen/.test(t),t.slice(0,300));
 const kay1=await p.evaluate(()=>{ const s=document.querySelector("div[style*='border-radius: 24px']")
   ||document.querySelector("div[style*='borderRadius: 24px']");
   return {sw:document.documentElement.scrollWidth,cw:document.documentElement.clientWidth}; });
@@ -163,17 +163,17 @@ ok("Kaplumbağa çantadan düştü 12 → 8",pz("u2")===8,String(pz("u2")));
 console.log("═══ 8) borç yalnız FARK kadar arttı ═══");
 await p.waitForTimeout(600);
 t=await metin();
-ok("borç 240 → 300 (fark 60)",/300 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
-ok("ciro 240 → 300 (iade netlenmiş)",/300 ₺ Toplam ciro/.test(t),(t.match(/[\d.]+ ₺ Toplam ciro/)||[""])[0]);
+ok("borç 240 → 300 (fark 60)",/300 ₺ tahsil edilecek/.test(t),(t.match(/[\d.]+ ₺ tahsil edilecek/)||[""])[0]);
+ok("ciro 240 → 300 (iade netlenmiş)",/300 ₺ ciro/.test(t),(t.match(/[\d.]+ ₺ ciro/)||[""])[0]);
 /* müşterinin malı: 6 Penguen'den 4'ü gitti, yerine 4 Kaplumbağa geldi */
 /* hakediş: 6×(40−25)=90 → 2×15 + 4×(55−30) = 130 */
-ok("hakediş de netlendi · 130 ₺",/130 ₺/.test(t),(t.match(/BU KALEDEN KAZANDIĞIN [\d.]+ ₺/i)||t.match(/130 ₺/)||[""])[0]);
+ok("hakediş de netlendi · 130 ₺",/130 ₺/.test(t),(t.match(/bu kaleden kazandığın · [\d.]+ ₺/i)||t.match(/130 ₺/)||[""])[0]);
 /* 📦 birleşik döküm FİYAT BAZINDA: 2 Penguen @40 + 4 Kaplumbağa @55 */
 ok("mülk havuzu güncellendi",/🛍 Penguen 2 40 ₺/.test(t)&&/🛍 Kaplumbağa 4 55 ₺/.test(t),
   (t.match(/🛍 \S+ [\d.]+ [\d.]+ ₺/g)||[]).join(" | "));
 
 console.log("═══ 9) tahsilat ayrıntısında kalem ═══");
-ok("tahsilata girildi",(await bas("Tahsil et"))!=="YOK");
+ok("tahsilata girildi",(await bas("₺ tahsil edilecek"))!=="YOK");
 await p.waitForTimeout(700);
 t=await metin();
 ok("değişim farkı kalemi var",/Değişim farkı/.test(t),(t.match(/Değişim farkı[^A-ZÇĞİÖŞÜ]{0,22}/)||[""])[0]);
@@ -207,7 +207,7 @@ const s1b=har2.find(x=>x.id==="s1")||{};
 ok("kredi geri alındı (tahsil 160 → 0)",Number(s1b.tahsil)===0,String(s1b.tahsil));
 ok("satış başına alacak 240'a döndü",alacak(har2)===240,String(alacak(har2)));
 t=await metin();
-ok("borç 240 ₺'ye döndü",/240 ₺ Tahsil et/.test(t),(t.match(/[\d.]+ ₺ Tahsil et/)||[""])[0]);
+ok("borç 240 ₺'ye döndü",/240 ₺ tahsil edilecek/.test(t),(t.match(/[\d.]+ ₺ tahsil edilecek/)||[""])[0]);
 
 ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,220));
 await b.close();

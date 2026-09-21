@@ -80,10 +80,10 @@ console.log("═══ 1-3) YÖNETİCİ — hakediş/hafta/nakit blokları yok �
   await raporAc(p);
   const t=await metin(p);
   ok("Rapor ekranı açıldı",/📊 Rapor/.test(t),t.slice(0,50));
-  ok("hakediş kartı YOK",!/HAKEDİŞ · \d+\. HAFTA/.test(t),
-    (t.match(/HAKEDİŞ · [^·]{0,22}/)||[""])[0]);
+  ok("hakediş kartı YOK",!/hakediş · \d+\. hafta/.test(t),
+    (t.match(/hakediş · [^·]{0,22}/)||[""])[0]);
   ok("'Cuma akşamı kapat' ibaresi YOK",!/Cuma akşamı kapat/.test(t));
-  ok("kapatılmamış dönemler YOK",!/KAPATILMAMIŞ DÖNEMLER/.test(t));
+  ok("kapatılmamış dönemler YOK",!/Kapatılmamış dönemler/.test(t));
   ok("haftalık arşiv düğmesi YOK",!/Haftalık arşiv/.test(t));
   ok("teslim edilecek nakit kartı YOK",!/Teslim edilecek nakit/.test(t),
     (t.match(/Teslim edilecek nakit[^A-ZÇĞİÖŞÜ]{0,20}/)||[""])[0]);
@@ -105,11 +105,11 @@ console.log("\n═══ 5) NORMAL PAZARLAMACI — hepsi eskisi gibi ═══")
 { const {c,p,log}=await ac("e1","deneme.html");
   await raporAc(p);
   const t=await metin(p);
-  ok("hakediş kartı VAR",/HAKEDİŞ · \d+\. HAFTA/.test(t),
-    (t.match(/HAKEDİŞ · \d+\. HAFTA[^·]{0,14}/)||[""])[0]);
+  ok("hakediş kartı VAR",/hakediş · \d+\. hafta/.test(t),
+    (t.match(/hakediş · \d+\. hafta[^·]{0,14}/)||[""])[0]);
   ok("haftalık arşiv düğmesi VAR",/Haftalık arşiv/.test(t));
-  ok("kapatılmamış dönem uyarısı VAR",/KAPATILMAMIŞ DÖNEMLER|kapatılmamış dönem/i.test(t),
-    (t.match(/KAPATILMAMIŞ DÖNEMLER[^A-ZÇĞİÖŞÜ]{0,16}/)||[""])[0]);
+  ok("kapatılmamış dönem uyarısı VAR",/Kapatılmamış dönemler/.test(t),
+    (t.match(/Kapatılmamış dönemler[\s\S]{0,16}/)||[""])[0]);
   ok("teslim edilecek nakit kartı VAR",/Teslim edilecek nakit/.test(t));
   ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,200));
   await c.close(); }
@@ -120,8 +120,8 @@ console.log("\n═══ 6) PAŞA RÜTBESİ — sınırsız ama yönetici DEĞİ
   ok("sınırsız yetkide (🏭 Cephane)",/🏭/.test(t0)||/atölyede/.test(t0),t0.slice(0,60));
   await raporAc(p);
   const t=await metin(p);
-  ok("hakediş kartı VAR (rütbe hakedişi kaldırmaz)",/HAKEDİŞ · \d+\. HAFTA/.test(t),
-    (t.match(/HAKEDİŞ · \d+\. HAFTA[^·]{0,14}/)||[""])[0]);
+  ok("hakediş kartı VAR (rütbe hakedişi kaldırmaz)",/hakediş · \d+\. hafta/.test(t),
+    (t.match(/hakediş · \d+\. hafta[^·]{0,14}/)||[""])[0]);
   ok("haftalık arşiv düğmesi VAR",/Haftalık arşiv/.test(t));
   ok("teslim edilecek nakit kartı VAR",/Teslim edilecek nakit/.test(t));
   ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,200));

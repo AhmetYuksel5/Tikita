@@ -76,7 +76,7 @@ const tahsilOf=async id=>{ const H=await kay("pazarlama_hareket");
   const r=H.find(x=>x.id===id); return r?Number(r.tahsil):null; };
 const varMi=async id=>(await kay("pazarlama_hareket")).some(x=>x.id===id);
 const borcEkran=async()=>{ const t=await metin();
-  const m=t.match(/([\d.]+) ₺ Tahsil et/); return m?Number(m[1].replace(/\./g,"")):0; };
+  const m=t.match(/([\d.]+) ₺ tahsil edilecek/); return m?Number(m[1].replace(/\./g,"")):0; };
 /* ⚠ Kapsayıcı TAM BİR ↩️ içermeli — üst seviyede tüm kart eşleşir, yanlış satır silinir */
 const geriAlBtn=re=>p.evaluate(s=>{
   const B=Array.from(document.querySelectorAll("button")).filter(x=>(x.innerText||"").trim()==="↩️");
@@ -196,7 +196,7 @@ await p.evaluate(()=>{
     tarih:new Date(Date.now()-30*36e5).toISOString()}];
   window.__DEGISTIR("pazarlama_hareket",H); });
 await p.waitForTimeout(900);
-ok("tahsilata girildi",(await bas("Tahsil et"))!=="YOK");
+ok("tahsilata girildi",(await bas("₺ tahsil edilecek"))!=="YOK");
 await p.waitForTimeout(800);
 await p.evaluate(()=>{ const B=Array.from(document.querySelectorAll("button"))
   .filter(x=>/tahsil et$/i.test((x.innerText||"").trim())); if(B.length) B[B.length-1].click(); });
