@@ -110,7 +110,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v148";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v149";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🔤 TASARIM BELİRTEÇLERİ — TASARIM.md (punto merdiveni R3, ağırlık R2).
    Beş punto, dört ağırlık; ara değer yoktur. Satır içi stiller bunları kullanır,
@@ -2017,8 +2017,23 @@ function HareketPanel({k,kaleHar,onClose,geriAl,onFiyatDuzelt}){
 }
 // bu kaleden hakediş dökümü — ürün / gün geçişli
 function HakedisPanel({k,kaleHar,onClose}){
-  const [mod,setMod]=useState("urun");
+  const [mod,setMod]=useState("kalem");
   const sat=(kaleHar||[]).filter(x=>x.tip==="satis");
+  /* 🧮 KALEM KALEM — hakedişin nereden geldiğini rakamıyla gösterir:
+     kaç adet, kaçtan satıldı, kaçtan verilmiş, adet başına ne kaldı.
+     Veriliş satışın KENDİ kaydından okunur (alisFiyat). Konsinyede bu, malın
+     rafa bırakıldığı gündeki veriliştir — ürünün bugünkü fiyatı değil. Veriliş
+     zamanla değiştiği için aynı ürün farklı partilerden farklı hakediş doğurur;
+     o yüzden satırlar ürün + satış + veriliş üçlüsüne göre ayrılır, tek toplama
+     indirilmez. */
+  const km={}; sat.forEach(x=>{
+    const sf=num(x.satisFiyat), af=num(x.alisFiyat), a=num(x.adet);
+    const kn=x.kaynak==="konsinye"?"k":((x.gerilla||x.kaynak==="gerilla")?"g":"c");
+    const ky=(x.urunAd||"?")+"|"+sf+"|"+af+"|"+kn;
+    const o=km[ky]||(km[ky]={ad:x.urunAd||"?",satis:sf,alis:af,kaynak:kn,adet:0,marj:0,son:0});
+    o.adet+=a; o.marj+=(sf-af)*a;
+    const t2=new Date(x.tarih).getTime(); if(t2>o.son) o.son=t2; });
+  const kalemList=Object.keys(km).map(ky=>km[ky]).sort((a,b)=>b.marj-a.marj||b.son-a.son);
   const um={}; sat.forEach(x=>{const a=x.urunAd||"?";const m=(num(x.satisFiyat)-num(x.alisFiyat))*num(x.adet);
     (um[a]||(um[a]={adet:0,marj:0}));um[a].adet+=num(x.adet);um[a].marj+=m;});
   const urunList=Object.entries(um).map(([ad,o])=>({ad,...o})).sort((a,b)=>b.marj-a.marj);
@@ -2041,12 +2056,35 @@ function HakedisPanel({k,kaleHar,onClose}){
       background:"var(--surf2)",border:"1px solid var(--line)",fontSize:11,fontWeight:500,color:"var(--mut)",lineHeight:1.5}},
       "⏳ "+tl(k.eskiBekleyen)+" · "+gunKisa(HAKEDIS_BAS_MS)+" öncesi satışlardan. O dönemde hakediş tahsilata bağlıydı; "
       +"bu tutar ancak tahsil edilirse hakedişine eklenir."):null,
-    h("div",{style:{display:"flex",gap:8,marginBottom:6}},
-      h(Chip,{on:mod==="urun",onClick:()=>setMod("urun")},"📦 Ürüne göre"),
-      h(Chip,{on:mod==="gun",onClick:()=>setMod("gun")},"📅 Güne göre")),
-    (mod==="urun"?urunList:gunList).length
-      ? (mod==="urun"?urunList.map((u,i)=>satir(u.ad,u.adet+" adet",u.marj)):gunList.map((g,i)=>satir(fmtGun(g.g),g.adet+" adet",g.marj)))
-      : h("div",{style:{padding:"12px 0",color:"var(--mut)",fontSize:13}},"Henüz satış yok."));
+    h("div",{style:{display:"flex",gap:8,marginBottom:6,overflowX:"auto"}},
+      h(Chip,{on:mod==="kalem",onClick:()=>setMod("kalem")},"Kalem kalem"),
+      h(Chip,{on:mod==="urun",onClick:()=>setMod("urun")},"Ürüne göre"),
+      h(Chip,{on:mod==="gun",onClick:()=>setMod("gun")},"Güne göre")),
+    mod==="kalem"
+      ? (kalemList.length
+          ? h("div",null,
+              kalemList.map((c,i)=>{ const birim=c.satis-c.alis;
+                return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:9,
+                  padding:"10px 0",borderTop:i?"1px solid var(--line)":"none"}},
+                  h("div",{style:{flex:1,minWidth:0}},
+                    h("div",{style:{fontSize:PT.destek,fontWeight:AG.destek,overflow:"hidden",
+                      textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                      (c.kaynak==="k"?"🏬 ":(c.kaynak==="g"?"⚡ ":"🎒 "))+urunAdi(c.ad)),
+                    h("div",{style:{fontSize:PT.arka,fontWeight:AG.arka,color:"var(--mut)",marginTop:2}},
+                      c.adet+" adet · satış "+num(c.satis)+" · veriliş "+num(c.alis))),
+                  h("div",{style:{textAlign:"right",flexShrink:0}},
+                    h("div",{style:{fontSize:PT.destek,fontWeight:AG.destek,
+                      color:c.marj<0?"var(--red)":"var(--gold)"}},tl(c.marj)),
+                    h("div",{style:{fontSize:PT.arka,fontWeight:AG.arka,
+                      color:birim<0?"var(--red)":"var(--mut2)",marginTop:1}},
+                      tl(birim)+"/adet"))); }),
+              h("div",{style:{fontSize:PT.ufak,fontWeight:AG.arka,color:"var(--mut2)",
+                marginTop:8,paddingTop:8,borderTop:"1px solid var(--line)",lineHeight:1.5}},
+                "🏬 konsinye · veriliş rafa bırakıldığı günden   🎒 çantadan   ⚡ gerilla"))
+          : h("div",{style:{padding:"12px 0",color:"var(--mut)",fontSize:PT.arka}},"Henüz satış yok."))
+      : ((mod==="urun"?urunList:gunList).length
+          ? (mod==="urun"?urunList.map((u,i)=>satir(u.ad,u.adet+" adet",u.marj)):gunList.map((g,i)=>satir(fmtGun(g.g),g.adet+" adet",g.marj)))
+          : h("div",{style:{padding:"12px 0",color:"var(--mut)",fontSize:PT.arka}},"Henüz satış yok.")));
 }
 
 /* ————— HARİTA ————— */
