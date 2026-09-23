@@ -122,7 +122,33 @@ console.log("═══ 8) diğer sekmeler duruyor ═══");
 ok("Ürüne göre sekmesi",(await bas("^Ürüne göre$"))!=="YOK");
 await p.waitForTimeout(400); t=await metin();
 ok("ürün toplamı Ahtapot 168 ₺ (120+48)",/168 ₺/.test(t),(t.match(/Ahtapot[\s\S]{0,30}/)||[""])[0]);
+
+console.log("═══ 9) GÜNE GÖRE — tarihe dokununca ürün ürün açılıyor ═══");
 ok("Güne göre sekmesi",(await bas("^Güne göre$"))!=="YOK");
+await p.waitForTimeout(500); t=await metin();
+ok("gün satırları var",/05\.09\.26/.test(t)&&/14\.09\.26/.test(t),
+  (t.match(/\d\d\.\d\d\.\d\d/g)||[]).join(" "));
+ok("kapalıyken ürün dökümü YOK",!/satış 50 · veriliş 30/.test(t),
+  (t.match(/satış \d+ · veriliş \d+/g)||[]).join(" | "));
+/* 5 Eylül: 6 Ahtapot · veriliş 30 → 120 ₺ */
+ok("05.09 satırına dokunuldu",(await bas("^05\\.09\\.26"))!=="YOK");
+await p.waitForTimeout(450); t=await metin();
+ok("o günün ürün dökümü açıldı",/6 adet · satış 50 · veriliş 30/.test(t),
+  (t.match(/satış \d+ · veriliş \d+/g)||[]).join(" | "));
+ok("açılan günde 🏬 Ahtapot var",/🏬 Ahtapot/.test(t));
+ok("BAŞKA günün kalemi açılmadı",!/satış 50 · veriliş 38/.test(t),
+  (t.match(/satış \d+ · veriliş \d+/g)||[]).join(" | "));
+/* ikinci güne dokunulunca birincisi kapanır */
+ok("14.09 satırına dokunuldu",(await bas("^14\\.09\\.26"))!=="YOK");
+await p.waitForTimeout(450); t=await metin();
+ok("14.09 açıldı (veriliş 38)",/4 adet · satış 50 · veriliş 38/.test(t));
+ok("05.09 kapandı (veriliş 30 yok)",!/satış 50 · veriliş 30/.test(t),
+  (t.match(/satış \d+ · veriliş \d+/g)||[]).join(" | "));
+/* aynı satıra ikinci dokunuş kapatır */
+ok("14.09 tekrar dokunuldu",(await bas("^14\\.09\\.26"))!=="YOK");
+await p.waitForTimeout(450); t=await metin();
+ok("hepsi kapandı",!/satış \d+ · veriliş \d+/.test(t),
+  (t.match(/satış \d+ · veriliş \d+/g)||[]).join(" | "));
 
 ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,200));
 console.log(hata?("\n✗ "+hata+" HATA"):"\n✓ KALEM BAŞI HAKEDİŞ DOĞRULANDI");
