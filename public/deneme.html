@@ -110,7 +110,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v147";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v148";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🔤 TASARIM BELİRTEÇLERİ — TASARIM.md (punto merdiveni R3, ağırlık R2).
    Beş punto, dört ağırlık; ara değer yoktur. Satır içi stiller bunları kullanır,
@@ -3361,8 +3361,13 @@ function ActionSheet({type,k,d,onClose,onFire}){
     // 🤝 anlaşmalı fiyat varsa bırakış fiyatı da oradan gelir (raf fiyatı bırakışta donuyor)
     const bfOf=u=>{ if(bfiyat[u.id]!==undefined&&bfiyat[u.id]!=="") return num(bfiyat[u.id]);
       const a=anlasmaOf(k,u.id); return a?num(a.satis):num(u.fiyat); };
+    /* 🏭 VERİLİŞ — ürünü üreticiden kaça aldığımız. Bırakış fiyatı buna bakılarak
+       veriliyor; kayda yazılan alisFiyat da bu (anlaşmalı veriliş varsa o). */
+    const verOf=u=>{ const a=anlasmaOf(k,u.id); return a?num(a.veris):num(u.pazFiyat); };
     const topAdet=secili.reduce((s,u)=>s+num(lines[u.id]),0);
     const topDeger=secili.reduce((s,u)=>s+num(lines[u.id])*bfOf(u),0);
+    const topMarj=secili.reduce((s,u)=>s+num(lines[u.id])*Math.max(0,bfOf(u)-verOf(u)),0);
+    const topMaliyet=secili.reduce((s,u)=>s+num(lines[u.id])*verOf(u),0);
     /* raftaki kalemler için satır anahtarı ürün ADIDIR (konsList ad bazlı) */
     const rafKey=c=>"r:"+c.ad;
     const rafSecili=konsList.filter(c=>num(lines[rafKey(c)])>0);
@@ -3372,6 +3377,8 @@ function ActionSheet({type,k,d,onClose,onFire}){
       return num(c.birim)||num((d.cephane.find(u2=>u2.ad===c.ad)||{}).fiyat)||0; };
     const rafAdet=rafSecili.reduce((s,c)=>s+num(lines[rafKey(c)]),0);
     const rafDeger=rafSecili.reduce((s,c)=>s+num(lines[rafKey(c)])*rfOf(c),0);
+    /* raftaki kalemin verilişi bırakışta donmuştu (konsKalem.alis) */
+    const rafHak=rafSecili.reduce((s,c)=>s+num(lines[rafKey(c)])*Math.max(0,rfOf(c)-num(c.alis)),0);
 
     const cta=kmod==="birak"?("🏬 "+topAdet+" adet konsinye bırak")
       :kmod==="hediye"?("🎁 "+topAdet+" adet hediye et")
@@ -3440,8 +3447,17 @@ function ActionSheet({type,k,d,onClose,onFire}){
         color:"var(--mut)",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}},az?"⌄":"⌃");
 
     const uSatir=u=>{ const anl=anlasmaOf(k,u.id);
-      return satir(u.ad, kmod==="hediye"?"":(anl?("anlaşmalı "+tl(anl.satis)):("liste "+tl(u.fiyat))),
-        u.id, kmod!=="hediye", bfOf(u), anl?"🤝 ":"",
+      const ver=verOf(u), fiy=bfOf(u);
+      /* Hediyede satış yok: yalnız elden çıkan malın maliyeti yazılır. */
+      /* Birim bir kez, sonda: "liste 40 · veriliş 25 · marj 15 ₺" tek satıra sığar,
+         üç kez ₺ yazınca 390px'te üç satıra taşıyordu. */
+      const alt=kmod==="hediye"
+        ? (ver>0?("veriliş "+tl(ver)):"")
+        : [anl?("anlaşmalı "+anl.satis):("liste "+num(u.fiyat)),
+           ver>0?("veriliş "+ver):"",
+           ver>0?("marj "+tl(Math.max(0,fiy-ver))):""].filter(Boolean).join(" · ");
+      return satir(u.ad, alt,
+        u.id, kmod!=="hediye", fiy, anl?"🤝 ":"",
         "#7c46e6", SZ?num(u.stokta):num(u.canta),
         duzenAz?tasiBtn(u,!azMi(u)):null, sirali.indexOf(u.id)); };
 
@@ -3478,9 +3494,15 @@ function ActionSheet({type,k,d,onClose,onFire}){
     const rafSirali=konsList.slice().sort(sirala==="az"
       ? (a,b)=>urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr")
       : (a,b)=>(num(b.adet)-num(a.adet))||urunAdi(a.ad).localeCompare(urunAdi(b.ad),"tr"));
+    /* Satışta rafın kendi fiyatı ve bırakışta donmuş veriliş yan yana durur —
+       hakediş satışı yaparken görünsün. İadede para hareketi yok, satır sade kalır. */
+    const rafAlt=c=>{ if(kmod!=="satis") return "";
+      const f=rfOf(c), a=num(c.alis);
+      return [num(c.birim)>0?("raf "+num(c.birim)):"", a>0?("veriliş "+a):"",
+        a>0?("hakediş "+tl(Math.max(0,f-a))):""].filter(Boolean).join(" · "); };
     const rafListe=()=>rafSirali.length
       ? h("div",{style:{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}},
-          rafSirali.map((c,i)=>satir(c.ad,"",rafKey(c),kmod==="satis",rfOf(c),"","#7c46e6",num(c.adet),null,1000+i)))
+          rafSirali.map((c,i)=>satir(c.ad,rafAlt(c),rafKey(c),kmod==="satis",rfOf(c),"","#7c46e6",num(c.adet),null,1000+i)))
       : h("div",{style:{padding:"12px 14px",borderRadius:12,background:"var(--surf2)",fontSize:13,color:"var(--mut)"}},
           "Bu kalede açık konsinye yok — önce '🏬 Bırak' ile konsinye bırak.");
 
@@ -3512,9 +3534,13 @@ function ActionSheet({type,k,d,onClose,onFire}){
       (kmod==="birak"||kmod==="hediye")?cantaListe():rafListe(),
       (kmod==="birak"||kmod==="hediye")
         ? (secili.length?h("div",{style:{textAlign:"center",marginTop:10,fontSize:13,fontWeight:500,color:"var(--txt)"}},
-            topAdet+" adet"+(kmod==="hediye"?" · hediye":(" · toplam "+tl(topDeger)))):null)
+            topAdet+" adet"+(kmod==="hediye"
+              ? (" · hediye"+(topMaliyet>0?(" · maliyet "+tl(topMaliyet)):""))
+              : (" · toplam "+tl(topDeger)+(topMarj>0?(" · marj "+tl(topMarj)):"")))):null)
         : (rafSecili.length?h("div",{style:{textAlign:"center",marginTop:10,fontSize:13,fontWeight:500,color:"var(--txt)"}},
-            rafAdet+" adet"+(kmod==="satis"?(" · toplam "+tl(rafDeger)):"")):null));
+            rafAdet+" adet"+(kmod==="satis"
+              ? (" · toplam "+tl(rafDeger)+(rafHak>0?(" · hakediş "+tl(rafHak)):""))
+              : "")):null));
   }
   /* 📋 SAYIM — mekandaki fiziki adedin gözlemi + aynı ekranda sipariş.
      Sahadaki gerçek akış: bak → say → tamamla → sat. Aynı ürün listesini iki kez

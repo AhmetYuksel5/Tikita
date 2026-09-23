@@ -48,3 +48,4 @@ Testler daha önce oturuma özel scratchpad'de tutuluyordu ve ortam yenilenince
 | `urunBirlesE2E.mjs` | 🔗 ürün birleştirme: arşivli ürün hiçbir listede çıkmaz (süzgeç map'ten ÖNCE), kapanan kart silinmez (birlesti + birlestiOnce okunur), sayaç toplamı ve hareket geçmişi korunur |
 | `defterSilE2E.mjs` | 🧾 komuta defterinden silme: değişim çifti birlikte gider, mahsup izi geri sarılır (satışın borcu yeniden açılır), izsiz kayıtta hiçbir satışa dokunulmaz |
 | `rafDonusE2E.mjs` | ↩️ konsinye satışı iptal edilince adet ÇIKTIĞI partiye döner (parti izi + izsiz eski kayıtta LIFO) |
+| `konsVerisE2E.mjs` | 🏭 konsinye ekranında veriliş (üreticiden alış) bedeli: bırakışta satır başına veriliş + marj ve alt toplamda toplam marj, fiyat değişince marj da değişir, anlaşmalı üründe anlaşmalı veriliş okunur; raftan satışta raf · veriliş · hakediş; hediyede maliyet; iadede para yok |
