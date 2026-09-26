@@ -9,8 +9,10 @@
        tahsilatı da görünür (ör. yalnız tahsilat yapılan Anadolu Market)
      7 Başka haftanın satışına gelen tahsilat hangi günün satışı olduğunu yazar
      8 Satış satırına dokununca ürün ürün döküm açılır
-     9 Nakit kutusu: "Teslim edilecek nakit" · "Gerilla satışları" · "Kale satışları"
-    10 "Geçmiş dönemler" bölümü yok */
+     9 İki grup: Satışlar (açıklama·ciro·hakediş, toplam) · Tahsilatlar (açıklama·tutar)
+    10 Tahsilatların altında: Toplam tahsilat − Tikita'ya verilecek = Benim alacağım
+       (hakediş nakitten mahsup edilir — 38. haftadan itibaren); en son satır o
+    11 "Geçmiş dönemler" bölümü yok · Rapor nakit kartı da mahsuplu */
 import {chromium} from "playwright";
 import fs from "fs";
 import path from "path";
@@ -78,7 +80,7 @@ const basBtn=re=>p.evaluate(s=>{ const d=x=>(x.innerText||"").replace(/\s+/g," "
 const metin=()=>p.evaluate(()=>(document.body.innerText||"").replace(/\s+/g," ").trim());
 /* açık sheet'in metni — arka plandaki Rapor ekranı karışmasın */
 const sheet=()=>p.evaluate(()=>{ const d=x=>(x.innerText||"").replace(/\s+/g," ").trim();
-  const L=Array.from(document.querySelectorAll("div")).filter(x=>/Teslim edilecek nakit/.test(d(x))&&/açıklama/.test(d(x)));
+  const L=Array.from(document.querySelectorAll("div")).filter(x=>/Benim alacağım/.test(d(x))&&/açıklama/.test(d(x))&&/\d+\. hafta/.test(d(x)));
   L.sort((a,b)=>d(a).length-d(b).length); return L[0]?d(L[0]):"SHEET YOK"; });
 
 await basBtn("Rapor$"); await p.waitForTimeout(900);
@@ -98,33 +100,46 @@ ok("💼 simgesi var",/💼/.test(S));
 ok("🫰 hiçbir yerde yok",!/🫰/.test(tum));
 
 console.log("═══ 3) özet ═══");
-ok("'Ciro' var, '(müşteriden)' yok",/Ciro/.test(S)&&!/müşteriden/.test(S));
+ok("'Ciro' satırı YOK",!/Ciro \d/.test(S)&&!/müşteriden/.test(S),S.slice(0,80));
 ok("'Tikita ödemesi' var",/Tikita ödemesi/.test(S));
 ok("'Veriliş bedeli' yok",!/Veriliş bedeli/.test(S));
-ok("'Satış N adet' satırı yok",!/^.{0,40}Satış \d+ adet/.test(S)&&!/Satış \d+ adet Ciro/.test(S),S.slice(0,90));
 
-console.log("═══ 4) sütun başlıkları ═══");
-ok("açıklama · ciro · hakediş",/açıklama ciro hakediş/.test(S));
+console.log("═══ 4) iki grup: Satışlar · Tahsilatlar ═══");
+const iS=S.indexOf("Satışlar"), iT=S.indexOf("Tahsilatlar");
+ok("'Satışlar' başlığı var",iS>=0);
+ok("'Tahsilatlar' başlığı var",iT>=0);
+ok("önce satışlar, sonra tahsilatlar",iS>=0&&iT>iS);
+const SAT=S.slice(iS,iT), TAH=S.slice(iT);
+ok("satış sütunları: açıklama ciro hakediş",/açıklama ciro hakediş/.test(SAT));
+ok("tahsilat sütunları: açıklama tutar",/açıklama tutar/.test(TAH));
 ok("'GÜN · KALE DÖKÜMÜ' yok",!/GÜN · KALE/i.test(S));
-ok("'N satır' yok",!/\d+ satır/.test(S));
 
-console.log("═══ 5) satış satırı tek satır ═══");
-/* 6×(50−30) + 3×(40−25) = 120 + 45 = 165 · ciro 300+120 = 420 */
-ok("Total Kirazlıtepe satış: 420 ₺ ciro · 165 ₺ hakediş",/Total Kirazlıtepe ⌄ 420 ₺ 165 ₺/.test(S),
-  (S.match(/Total Kirazlıtepe ⌄[^T]{0,30}/)||[""])[0]);
-ok("'N adet' alt satırı yok",!/· \d+ adet/.test(S.replace(/\d+ adet · satış/g,"")));
+console.log("═══ 5) Satışlar grubu ═══");
+/* 6×(50−30) + 3×(40−25) = 165 · ciro 420 */
+ok("Total Kirazlıtepe satış: 420 ₺ · 165 ₺",/Total Kirazlıtepe ⌄ 420 ₺ 165 ₺/.test(SAT),
+  (SAT.match(/Total Kirazlıtepe ⌄[^T]{0,24}/)||[""])[0]);
+ok("gerilla satış satırı (200 ₺ · 165 ₺)",/Seyyar[^⌄]*⌄ 200 ₺ 165 ₺/.test(SAT));
+ok("satışlarda tahsilat YOK",!/Anadolu Market/.test(SAT));
+ok("satış toplamı: 620 ₺ · 330 ₺",/Toplam 620 ₺ 330 ₺/.test(SAT),(SAT.match(/Toplam[^T]{0,24}/)||[""])[0]);
 
-console.log("═══ 6) tahsilat ayrı satır ═══");
-ok("Total 420 tahsilat satırı",/🧾 Total Kirazlıtepe tahsilat 420 ₺/.test(S),
-  (S.match(/🧾 Total Kirazlıtepe[^🧾]{0,40}/g)||[]).join(" | "));
-ok("Anadolu Market tahsilatı (satışsız)",/🧾 Anadolu Market tahsilat 500 ₺/.test(S));
-ok("Anadolu Market'in SATIŞ satırı yok",!/Anadolu Market ⌄/.test(S));
-
-console.log("═══ 7) başka haftanın satışına gelen tahsilat ═══");
+console.log("═══ 6) Tahsilatlar grubu ═══");
+ok("Anadolu Market 500 ₺ (satışsız kale)",/Anadolu Market 500 ₺/.test(TAH));
+ok("Total Kirazlıtepe 420 ₺",/Total Kirazlıtepe 420 ₺/.test(TAH));
 const eskiG=new Date(ESKI).toLocaleDateString("tr-TR",{day:"numeric",month:"short"});
-ok("200 ₺ tahsilat '"+eskiG+" satışının' yazıyor",
-  new RegExp("🧾 Total Kirazlıtepe tahsilat 200 ₺ "+eskiG+" satışının").test(S),
-  (S.match(/🧾 Total Kirazlıtepe tahsilat 200 ₺[^🧾]{0,20}/)||[""])[0]);
+ok("200 ₺ tahsilat '"+eskiG+" satışının'",new RegExp("Total Kirazlıtepe 200 ₺ "+eskiG+" satışının").test(TAH),
+  (TAH.match(/Total Kirazlıtepe 200 ₺[^T]{0,20}/)||[""])[0]);
+ok("gerilla nakdi tahsilatta 'peşin' (200 ₺)",/Seyyar[^·]*· peşin 200 ₺/.test(TAH),(TAH.match(/Seyyar[^₺]{0,40}₺/)||[""])[0]);
+ok("satışlar tahsilat grubuna KARIŞMADI",!/⌄/.test(TAH));
+
+console.log("═══ 7) netleşme — en altta benim alacağım ═══");
+/* tahsilat 500+420+200+200 = 1.320 · hakediş 330 · Tikita'ya 990 */
+ok("Toplam tahsilat 1.320 ₺",/Toplam tahsilat 1\.320 ₺/.test(TAH));
+ok("Tikita'ya verilecek −990 ₺",/Tikita'ya verilecek −990 ₺/.test(TAH),(TAH.match(/Tikita'ya verilecek [^B]{0,12}/)||[""])[0]);
+ok("Benim alacağım 330 ₺",/Benim alacağım 330 ₺/.test(TAH));
+/* sheet'in sonunda yalnız gönder düğmesi var — içerikteki son satır "Benim alacağım" */
+ok("'Benim alacağım' en son satır",/Benim alacağım 330 ₺ (Komutaya gönder|Kapat)$/.test(TAH.replace(/\s*$/,"")),TAH.slice(-40));
+ok("eski 'Teslim edilecek nakit' kutusu yok",!/Teslim edilecek nakit/.test(S));
+ok("'Gerilla satışları' / 'Kale satışları' kutusu yok",!/Kale satışları/.test(S));
 
 console.log("═══ 8) satış satırı açılıyor ═══");
 ok("satış satırına dokunuldu",(await basBtn("Total Kirazlıtepe ⌄"))!=="YOK");
@@ -133,15 +148,16 @@ const S2=await sheet();
 ok("ürün dökümü: 6 adet · satış 50 · veriliş 30",/6 adet · satış 50 · veriliş 30/.test(S2));
 ok("ürün dökümü: 3 adet · satış 40 · veriliş 25",/3 adet · satış 40 · veriliş 25/.test(S2));
 
-console.log("═══ 9) nakit kutusu ═══");
-ok("'Teslim edilecek nakit' başlığı",/Teslim edilecek nakit/.test(S));
-ok("'KOMUTAYA TESLİM EDİLECEK NAKİT' yok",!/KOMUTAYA TESLİM/.test(S));   // alttaki "Komutaya gönder" düğmesi ayrı
-ok("Gerilla satışları 200 ₺",/Gerilla satışları 200 ₺/.test(S));
-ok("Kale satışları 1.120 ₺ (200+420+500)",/Kale satışları 1\.120 ₺/.test(S));
-ok("Toplam 1.320 ₺",/Toplam 1\.320 ₺/.test(S));
-
-console.log("═══ 10) geçmiş dönemler yok ═══");
+console.log("═══ 9) geçmiş dönemler yok ═══");
 ok("'Geçmiş dönemler' yok",!/Geçmiş dönemler/.test(S));
+
+console.log("═══ 10) NAKİT KARTI — hakediş nakitten düşülmüş ═══");
+await basBtn("^✕$|^×$"); await p.waitForTimeout(500);
+const K=await p.evaluate(()=>{ const d=x=>(x.innerText||"").replace(/\s+/g," ").trim();
+  const L=Array.from(document.querySelectorAll("button")).filter(x=>/Teslim edilecek nakit|Tikita'dan alacağın/.test(d(x)));
+  L.sort((a,b)=>d(a).length-d(b).length); return L[0]?d(L[0]):"KART YOK"; });
+/* süren hafta: 1.320 tahsilat − 330 hakediş = 990 (eski satışın hakedişi o haftanın) */
+ok("kart 990 ₺ gösteriyor (1.320 − 330)",/990 ₺/.test(K),K);
 
 ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,200));
 console.log(hata?("\n✗ "+hata+" HATA"):"\n✓ HAFTALIK HAKEDİŞ EKRANI DOĞRULANDI");

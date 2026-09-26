@@ -16,7 +16,7 @@
    stok_hareket HİÇBİR adapterde mali satır üretmez.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const HM_SURUM = "5";   // 5: değişim iadesi = negatif tutarlı SATIŞ (ters kayıt) · 4: tahsilatta KDV (391) bacağı
+export const HM_SURUM = "6";   // 6: hakediş MAHSUBU (pazarlamacı hakedişini saha nakdinden keser → ÖDEME saha kasasından) · 5: 5: değişim iadesi = negatif tutarlı SATIŞ (ters kayıt) · 4: tahsilatta KDV (391) bacağı
 export const HM_TURLER = ["SATIS", "TAHSILAT", "MASRAF", "ODEME"];
 
 /* Hakediş düzeni kesim tarihi — TEK KAYNAK. admin/deneme/finans'taki üç kopya
@@ -273,6 +273,9 @@ export function satirAciklama(s) {
 export function kasaYeri(s) {
   if (s.tur === "TAHSILAT" || (s.tur === "SATIS" && s.pesin))
     return ms(s.tarih) >= HAKEDIS_BAS_MS ? "saha" : "merkez";
+  /* hakediş mahsubu: pazarlamacı hakedişini topladığı nakitten kesti — para
+     merkez kasadan değil SAHA kasasından çıkar (teslim edilen nakit o kadar az) */
+  if (s.tur === "ODEME" && s.mahsup) return "saha";
   return "merkez";
 }
 
@@ -423,7 +426,7 @@ export function olayUret(D, opts) {
     if (ot) {
       ekle(satir("gid:" + g.id, "ODEME", ot, g,
         { tarafTip: "kullanici", tarafId: g.kullaniciId || "", tarafAd: kisiAd(g, adMap),
-          tutar: t, kaynakKol: "gider", kaynakId: g.id }));
+          tutar: t, mahsup: !!g.mahsup, kaynakKol: "gider", kaynakId: g.id }));
       return;
     }
     const altTur = STOK_ALIM_TUR[g.tur] || g.stok ? "stokAlim" : (g.tur === "Vergi" ? "vergi" : "isletme");
