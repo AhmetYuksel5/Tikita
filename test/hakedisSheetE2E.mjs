@@ -150,8 +150,23 @@ console.log("═══ 8) satış satırı açılıyor ═══");
 ok("satış satırına dokunuldu",(await basBtn("Total Kirazlıtepe ⌄"))!=="YOK");
 await p.waitForTimeout(450);
 const S2=await sheet();
-ok("ürün dökümü: 6 adet · satış 50 · veriliş 30",/6 adet · satış 50 · veriliş 30/.test(S2));
-ok("ürün dökümü: 3 adet · satış 40 · veriliş 25",/3 adet · satış 40 · veriliş 25/.test(S2));
+ok("ürün dökümü: Alış 30 ₺ · Satış 50 ₺ × 6 adet",/Alış 30 ₺ · Satış 50 ₺ × 6 adet/.test(S2),(S2.match(/Alış [^T]{0,40}/g)||[]).join(" | "));
+ok("ürün dökümü: Alış 25 ₺ · Satış 40 ₺ × 3 adet",/Alış 25 ₺ · Satış 40 ₺ × 3 adet/.test(S2));
+/* Ahtapot: ciro 300 · hakediş 120 · altında adet başı 50 · 20 */
+ok("Ahtapot: 300 ₺ · 120 ₺ ve altında 50 ₺ · 20 ₺",/Ahtapot Alış 30 ₺ · Satış 50 ₺ × 6 adet 300 ₺ 50 ₺ 120 ₺ 20 ₺/.test(S2),
+  (S2.match(/Ahtapot Alış[^P]{0,70}/)||[""])[0]);
+/* yalnız Ahtapot satırının içinden oku — Penguen'in cirosu da 120 ₺ */
+const renk=await p.evaluate(()=>{ const d=x=>(x.innerText||"").replace(/\s+/g," ").trim();
+  const sat=Array.from(document.querySelectorAll("div")).filter(x=>/^🏬 Ahtapot Alış/.test(d(x))&&/ 300 ₺ /.test(d(x)))
+    .sort((a,b)=>d(a).length-d(b).length)[0];
+  const o={}; if(!sat) return o;
+  Array.from(sat.querySelectorAll("div")).filter(x=>/^[\d.]+ ₺$/.test(d(x))&&!x.querySelector("div"))
+    .forEach(x=>{ const cs=getComputedStyle(x); o[d(x)]={c:cs.color,f:cs.fontSize}; }); return o; });
+const TUR="rgb(217, 123, 18)", YES="rgb(22, 163, 74)";
+ok("ciro turuncu, hakediş yeşil",renk["300 ₺"]&&renk["300 ₺"].c===TUR&&renk["120 ₺"]&&renk["120 ₺"].c===YES,JSON.stringify(renk));
+ok("ciro ve hakediş aynı boy",renk["300 ₺"]&&renk["120 ₺"]&&renk["300 ₺"].f===renk["120 ₺"].f);
+ok("adet başı satır bir tık küçük",renk["50 ₺"]&&renk["20 ₺"]&&parseFloat(renk["50 ₺"].f)<parseFloat(renk["300 ₺"].f)
+  &&renk["50 ₺"].c===TUR&&renk["20 ₺"].c===YES,JSON.stringify(renk));
 
 console.log("═══ 9) geçmiş dönemler yok ═══");
 ok("'Geçmiş dönemler' yok",!/Geçmiş dönemler/.test(S));
