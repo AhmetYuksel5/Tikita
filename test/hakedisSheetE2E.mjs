@@ -101,14 +101,18 @@ ok("🫰 hiçbir yerde yok",!/🫰/.test(tum));
 
 console.log("═══ 3) özet ═══");
 ok("'Ciro' satırı YOK",!/Ciro \d/.test(S)&&!/müşteriden/.test(S),S.slice(0,80));
-ok("'Tikita ödemesi' var",/Tikita ödemesi/.test(S));
+ok("üstteki özet kutusu YOK (Tikita ödemesi / Hakedişin)",!/Tikita ödemesi/.test(S)&&!/Hakedişin/.test(S));
 ok("'Veriliş bedeli' yok",!/Veriliş bedeli/.test(S));
 
-console.log("═══ 4) iki grup: Satışlar · Tahsilatlar ═══");
-const iS=S.indexOf("Satışlar"), iT=S.indexOf("Tahsilatlar");
-ok("'Satışlar' başlığı var",iS>=0);
-ok("'Tahsilatlar' başlığı var",iT>=0);
-ok("önce satışlar, sonra tahsilatlar",iS>=0&&iT>iS);
+console.log("═══ 4) üç kutu: Satışlar · Tahsilatlar · Hakediş ═══");
+const iS=S.indexOf("Satışlar"), iT=S.indexOf("Tahsilatlar"), iH=S.indexOf("Hakediş Toplam tahsilat");
+ok("'Satışlar' kutusu",iS>=0);
+ok("'Tahsilatlar' kutusu",iT>=0);
+ok("'Hakediş' kutusu",iH>=0);
+ok("sıra: Satışlar → Tahsilatlar → Hakediş",iS>=0&&iT>iS&&iH>iT);
+const kutular=await p.evaluate(()=>{ const d=x=>(x.innerText||"").replace(/\s+/g," ").trim();
+  return Array.from(document.querySelectorAll("div.card")).map(d).filter(t=>/^(Satışlar|Tahsilatlar|Hakediş) /.test(t)).map(t=>t.split(" ")[0]); });
+ok("üçü de ayrı kutu (div.card)",kutular.join(",")==="Satışlar,Tahsilatlar,Hakediş",kutular.join(","));
 const SAT=S.slice(iS,iT), TAH=S.slice(iT);
 ok("satış sütunları: açıklama ciro hakediş",/açıklama ciro hakediş/.test(SAT));
 ok("tahsilat sütunları: açıklama tutar",/açıklama tutar/.test(TAH));
@@ -133,7 +137,8 @@ ok("satışlar tahsilat grubuna KARIŞMADI",!/⌄/.test(TAH));
 
 console.log("═══ 7) netleşme — en altta benim alacağım ═══");
 /* tahsilat 500+420+200+200 = 1.320 · hakediş 330 · Tikita'ya 990 */
-ok("Toplam tahsilat 1.320 ₺",/Toplam tahsilat 1\.320 ₺/.test(TAH));
+ok("Tahsilatlar kutusu toplamı 1.320 ₺",/Toplam 1\.320 ₺ Hakediş/.test(TAH),(TAH.match(/Toplam [\d.]+ ₺ Hakediş/)||[""])[0]);
+ok("Hakediş kutusu: Toplam tahsilat 1.320 ₺",/Hakediş Toplam tahsilat 1\.320 ₺/.test(TAH));
 ok("Tikita'ya verilecek −990 ₺",/Tikita'ya verilecek −990 ₺/.test(TAH),(TAH.match(/Tikita'ya verilecek [^B]{0,12}/)||[""])[0]);
 ok("Benim alacağım 330 ₺",/Benim alacağım 330 ₺/.test(TAH));
 /* sheet'in sonunda yalnız gönder düğmesi var — içerikteki son satır "Benim alacağım" */
