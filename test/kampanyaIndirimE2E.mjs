@@ -146,14 +146,34 @@ console.log("\n═══ 5) Pazarlamacı · Üs kartı, prim verilmeden ══�
 
 console.log("\n═══ 5-7) Pazarlamacı · prim verildikten sonra ═══");
 { V=temel();
-  V.pazarlama_hareket.push({id:"p1",tip:"prim",kaynak:"kampanya",kampanyaId:"k1",kampanyaAd:"Ekim atağı",
-    kullaniciId:"e1",kullaniciAd:"Emir",oran:10,verisBedel:4800,adet:160,tutar:480,tarih:BU_H});
+  /* prim az önce verildi: son işlemlerde ve bugünün komuta raporunda görünsün */
+  V.pazarlama_hareket.push({id:(NOW-60e3).toString(36)+"prim01",tip:"prim",kaynak:"kampanya",kampanyaId:"k1",kampanyaAd:"Ekim atağı",
+    kullaniciId:"e1",kullaniciAd:"Emir",oran:10,verisBedel:4800,adet:160,tutar:480,tarih:new Date(NOW-60e3).toISOString()});
   V.kampanya[0].verilen={e1:{tarih:BU_H,tutar:480}};
   const {c,p,log}=await ac("e1","deneme.html");
   await p.waitForTimeout(800);
   let t=await metin(p);
   ok("Üs kartı: '🎁 480 ₺ prim verildi'",/🎁 480 ₺ prim verildi/.test(t));
   /* süren haftanın hakedişi: 60×20 = 1.200 + 480 prim = 1.680 (sembolik 0) */
+  ok("Üs: toplam hakediş primi içerir (kalelerin 3.455 ₺ + 480 ₺ = 3.935 ₺)",/3\.935 ₺ toplam hakediş/.test(t),(t.match(/[\d.]+ ₺ toplam hakediş/)||[""])[0]);
+  await basBtn(p,"Rapor$"); await p.waitForTimeout(1000);
+  t=await metin(p);
+  ok("son işlemler: '🎁 Kampanya primi · Ekim atağı · 480 ₺'",/🎁 Kampanya primi · Ekim atağı · 480 ₺/.test(t));
+  const primGeri=await p.evaluate(()=>{ const d=x=>(x.innerText||"").replace(/\s+/g," ").trim();
+    const r=Array.from(document.querySelectorAll("div")).filter(x=>/^🎁 Kampanya primi · Ekim atağı/.test(d(x))).sort((a,b)=>d(a).length-d(b).length)[0];
+    return r?!!r.querySelector("button"):null; });
+  ok("son işlemler: primde geri alma düğmesi yok",primGeri===false,String(primGeri));
+  ok("Detaylı dönem raporu açıldı",(await basBtn(p,"Detaylı dönem raporu"))!=="YOK"); await p.waitForTimeout(600);
+  t=await metin(p);
+  ok("Detaylı dönem raporu: 'Kampanya primi 🎁 Ekim atağı · %10 480 ₺'",/Kampanya primi 🎁 Ekim atağı · %10 480 ₺/.test(t));
+  await basBtn(p,"^✕$"); await p.waitForTimeout(400);
+  ok("Komuta'ya rapor açıldı",(await basBtn(p,"Komuta'ya rapor ver"))!=="YOK"); await p.waitForTimeout(700);
+  ok("hakediş dökümü açıldı",(await p.evaluate(()=>{ const d=x=>(x.innerText||"").replace(/\s+/g," ").trim();
+    const L=Array.from(document.querySelectorAll("button,div")).filter(x=>/hakedişin \(satış − alış\)/.test(d(x))).sort((a,b)=>d(a).length-d(b).length);
+    if(L[0]){ L[0].click(); return true; } return false; })));
+  await p.waitForTimeout(600); t=await metin(p);
+  ok("Komuta'ya rapor: hakediş dökümünde '🎁 Ekim atağı · %10 … +480 ₺'",/🎁 Ekim atağı · %10 kampanya primi · [^+]{0,30}\+480 ₺/.test(t),(t.match(/🎁 Ekim atağı · %10[^₺]{0,60}₺/)||[""])[0]);
+  await p.goto(SUNUCU+"/deneme.html",{waitUntil:"domcontentloaded"}); await p.waitForTimeout(1500);
   await basBtn(p,"Rapor$"); await p.waitForTimeout(1000);
   t=await metin(p);
   ok("Rapor: 'Bu hafta hakediş' 1.680 ₺",/1\.680 ₺ Bu hafta hakediş/.test(t),(t.match(/[\d.]+ ₺ Bu hafta hakediş/)||[""])[0]);

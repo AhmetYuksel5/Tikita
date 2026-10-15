@@ -110,7 +110,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v156";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v157";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🔤 TASARIM BELİRTEÇLERİ — TASARIM.md (punto merdiveni R3, ağırlık R2).
    Beş punto, dört ağırlık; ara değer yoktur. Satır içi stiller bunları kullanır,
@@ -361,12 +361,14 @@ function raporHesap(hareketler,kod){ const [b0,ad]=donemAralik(kod);
   const ciro=satList.reduce((s,x)=>s+x.ciro,0), adet=satList.reduce((s,x)=>s+x.adet,0);
   const uret=satList.reduce((s,x)=>s+x.uret,0), marj=satList.reduce((s,x)=>s+x.marj,0);
   const tahsil=tahList.reduce((s,x)=>s+x.t,0);
+  const primL=(hareketler||[]).filter(x=>x.tip==="prim"&&inR(x));   // ％ kampanya primi
   const orn=ciro>0?Math.min(1,marj/ciro):0;   // canlı marj oranı — veriliş fiyatı değişince güncellenir
   const T={ciro,adet,uret,marj,tahsil,
     uPay:tahsil*(1-orn)+gerU,   // tahsilattan üreticiye giden (canlı oran)
     pPay:tahsil*orn+gerP,        // tahsilattan pazarlamacıya (hakedişine) giren (canlı oran)
-    gerCiro:ger.reduce((s,x)=>s+(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),0)};
-  return {ad,satList,tahList,T}; }
+    gerCiro:ger.reduce((s,x)=>s+(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),0),
+    prim:primL.reduce((s,x)=>s+num(x.tutar),0)};
+  return {ad,satList,tahList,primL,T}; }
 
 /* ————— YAZMA katmanı — CANLI · asıl deftere yazar (ana uygulama ile aynı) ————— */
 const OV="";  // canlı bağlandı — koleksiyonlar asıl adlarıyla
@@ -850,7 +852,8 @@ function hesap(hareketler,musteriler,kullanicilar,urunler,opt){
   const emirSira=lider.findIndex(x=>x.uid===emir.id);
   // dashboard genel toplamları + bugün
   const toplamCiro=kaleler.reduce((s,k)=>s+k.ciro,0);
-  const hakedisTop=kaleler.reduce((s,k)=>s+k.hakedis,0);
+  const hakedisTop=kaleler.reduce((s,k)=>s+k.hakedis,0)
+    +(emir.sirketPaz?0:(hareketler||[]).filter(x=>x.tip==="prim").reduce((s,x)=>s+num(x.tutar),0));   // ％ kampanya primi
   const vurkac=gerillaGanimet>0&&gerillaGanimet>toplamCiro*0.5;   // gelirin çoğu seyyar — kale kur uyarısı
   const bg=(()=>{const t=new Date();t.setHours(0,0,0,0);return t.getTime();})();
   const bgSat=(hareketler||[]).filter(x=>x.tip==="satis"&&!x.gerilla&&new Date(x.tarih).getTime()>=bg);
@@ -2801,6 +2804,7 @@ function Nav({aktif,go,rozet}){ const items=[["us","⛺","Üs"],["kaleler","🏰
 
 // bir deneme (overlay) kaydını insanca özetle
 function ovOzet(x){
+  if(x.tip==="prim") return {ik:"🎁",t:"Kampanya primi · "+(x.kampanyaAd||""),v:tl(x.tutar)};
   if(x.tip==="tahsilat") return {ik:"🧾",t:x.avans?"Tahsilat (sayımsız)":"Tahsilat",v:tl(x.tutar)};
   if(x.tip==="konsinye") return {ik:"🏬",t:"Konsinye bırakıldı",v:num(x.adet)+" × "+urunAdi(x.urunAd||"?")};
   if(x.tip==="hediye") return {ik:"🎁",t:"Hediye edildi",v:num(x.adet)+" × "+urunAdi(x.urunAd||"?")};
@@ -2842,7 +2846,7 @@ function OvSatir({x,geriAl}){ const o=ovOzet(x);
         o.t+(o.v?(" · "+o.v):"")),
       h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
         (x.yer||"—")+(gec?(gun?(" · 🕘 "+gun):""):(saat?(" · 🕘 "+saat):""))+(girisEt?(" · "+girisEt):""))),
-    h("button",{onClick:()=>geriAl(x),title:"Geri al",
+    x.tip==="prim"?null:h("button",{onClick:()=>geriAl(x),title:"Geri al",
       style:{flexShrink:0,width:30,height:30,borderRadius:8,fontSize:13,display:"flex",alignItems:"center",
         justifyContent:"center",background:"#fff",border:"1px solid var(--line)",color:"var(--red)"}},"↩️"));
 }
@@ -2860,7 +2864,7 @@ const sembolik=f=>num(f)<=BEDAVA_ESIK;
    haftalık dönemde ayrıca ödenir. İkisi birlikte sayılırsa pazarlamacının payı
    iki kez görünür ve müşteriden alınan para eksik gösterilir. */
 function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,ganimet=0,iade=0,hediyeAd=0;
-  let hakYeni=0,hakEski=0,tabla=0,nakitEski=0;
+  let hakYeni=0,hakEski=0,tabla=0,nakitEski=0,prim=0;
   (recs||[]).forEach(x=>{
     const yeni=(new Date(x.tarih).getTime()||0)>=HAKEDIS_BAS_MS;
     if(x.tip==="satis"){
@@ -2873,13 +2877,14 @@ function donemRapor(recs){ let satAd=0,ciro=0,tah=0,konsAd=0,ganimet=0,iade=0,he
     else if(x.tip==="tahsilat"){ tah+=num(x.tutar);
       if(!yeni){ hakEski+=(x.pazPay!=null?num(x.pazPay):0); nakitEski+=num(x.tutar); } }
     else if(x.tip==="tabla"){ tabla+=num(x.tutar); }   // tabla ücreti de kazançtır
+    else if(x.tip==="prim"){ prim+=num(x.tutar); }     // ％ kampanya primi
     else if(x.tip==="konsinye"){ konsAd+=num(x.adet); }
     else if(x.tip==="iade"){ iade+=num(x.adet); }
     else if(x.tip==="hediye"){ hediyeAd+=num(x.adet); } });
-  const hak=hakYeni+hakEski+tabla;
+  const hak=hakYeni+hakEski+tabla+prim;
   const nakit=tah+ganimet;                       // pazarlamacının elindeki toplam para
   const tikita=Math.max(0,nakit-hakEski);        // yeni dönemde nakdin tamamı Tikita'ya gider
-  return {satAd,ciro,tah,konsAd,hak,hakYeni,hakEski,tabla,ganimet,iade,hediyeAd,nakit,tikita,
+  return {satAd,ciro,tah,konsAd,hak,hakYeni,hakEski,tabla,prim,ganimet,iade,hediyeAd,nakit,tikita,
     bos:!(satAd||tah||konsAd||ganimet||iade||hak||hediyeAd)}; }
 // komuta raporunu WhatsApp metnine çevir — satış · konsinye · tahsilat sırasıyla, emojisiz
 function raporMetni(v,recs){ v=v||{};
@@ -2945,8 +2950,9 @@ function raporMetni(v,recs){ v=v||{};
   }
   if(hak>0){
     L.push("","HAKEDIS (satis - alis)");
-    L.push(sat("Bu donem","",tl(num(v.hakYeni)||Math.max(0,hak-tabla-hakEski))));
+    L.push(sat("Bu donem","",tl(num(v.hakYeni)||Math.max(0,hak-tabla-hakEski-num(v.prim)))));
     if(tabla>0) L.push(sat("  tabla ucreti","",tl(tabla)));
+    if(num(v.prim)>0) L.push(sat("  kampanya primi","",tl(v.prim)));
     L.push(sat("Toplam","",tl(hak)));
     L.push("Tahsilattan dusulmez; haftalik donemde ayrica odenir.");
   }
@@ -2991,7 +2997,8 @@ function SeferRaporSheet({mod,veri,recs,onClose,onOnay,bekle}){ const v=veri||{}
     ...RG.filter(x=>x.tip==="satis"&&x.gerilla&&!yeniMi(x)).map(x=>{ const th=num(x.tahsil)||num(x.adet)*num(x.satisFiyat); const K=num(x.adet)*num(x.alisFiyat); const m2=th-K;
       return {t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad. sattın",
         alt:tl(th)+" satış − "+tl(K)+" üretici (alış "+tl(x.alisFiyat)+") · "+fmtS(x.tarih),v:(m2<0?"":"+")+tl(m2),renk:m2<0?"var(--red)":"var(--cyan)"}; }),
-    ...RG.filter(x=>x.tip==="tabla").map(x=>({t:"🧹 Tabla ücreti",alt:(x.yer||"Atölye")+" · "+fmtS(x.tarih),v:"+"+tl(x.tutar),renk:"var(--txt)"}))];
+    ...RG.filter(x=>x.tip==="tabla").map(x=>({t:"🧹 Tabla ücreti",alt:(x.yer||"Atölye")+" · "+fmtS(x.tarih),v:"+"+tl(x.tutar),renk:"var(--txt)"})),
+    ...RG.filter(x=>x.tip==="prim").map(x=>({t:"🎁 "+(x.kampanyaAd||"Kampanya")+" · %"+num(x.oran),alt:"kampanya primi · "+fmtS(x.tarih),v:"+"+tl(x.tutar),renk:"var(--gold)"}))];
   const konsRows=RG.filter(x=>x.tip==="konsinye").map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:num(x.adet)+" ad.",renk:"var(--txt)"}));
   const gerRows=RG.filter(x=>x.tip==="satis"&&x.gerilla).map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?")+" — "+tl(x.satisFiyat)+"/ad."+(x.toptan?" · 📦 toptan":""),alt:(x.yer||"⚡ Seyyar")+" · "+fmtS(x.tarih),v:tl(num(x.tahsil)||num(x.adet)*num(x.satisFiyat)),renk:"var(--cyan)"}));
   const iadeRows=R.filter(x=>x.tip==="iade").map(x=>({t:num(x.adet)+" × "+(x.urunAd||"?"),alt:(x.yer||"—")+" · "+fmtS(x.tarih),v:num(x.adet)+" ad.",renk:"var(--mut)"}));
@@ -4400,7 +4407,8 @@ function RaporDetaySheet({hareketler,onClose}){
       +"<h3 style='font-size:16px'>Özet</h3><table style='border-collapse:collapse;font-size:13px;width:100%'>"
       +tr("Satış",v.T.adet+" adet")+tr("Ciro",tl(v.T.ciro))+tr("🏭 Üretici payı (önce)",tl(v.T.uret))+tr("💼 Marj / hakediş",tl(v.T.marj))
       +tr("🧾 Tahsil edilen",tl(v.T.tahsil))+tr("· üreticiye",tl(v.T.uPay))+tr("· pazarlamacıya",tl(v.T.pPay))
-      +(v.T.gerCiro>0?tr("⚡ Gerilla (peşin)",tl(v.T.gerCiro)):"")+"</table>"
+      +(v.T.gerCiro>0?tr("⚡ Gerilla (peşin)",tl(v.T.gerCiro)):"")
+      +v.primL.map(x=>tr("🎁 Kampanya primi · "+(x.kampanyaAd||"")+" %"+num(x.oran),tl(x.tutar))).join("")+"</table>"
       +"<h3 style='font-size:16px'>Kale bazında satış</h3><table style='border-collapse:collapse;font-size:13px;width:100%'>"
       +v.satList.map(r=>tr(r.yer+" ("+r.adet+" ad.)",tl(r.ciro)+" · marj "+tl(r.marj))).join("")+"</table>"
       +"<h3 style='font-size:16px'>Tahsilatlar</h3><table style='border-collapse:collapse;font-size:13px;width:100%'>"
@@ -4421,6 +4429,9 @@ function RaporDetaySheet({hareketler,onClose}){
       h(Stat,{v:tl(v.T.uPay),l:"üreticiye giden"}),
       h(Stat,{v:tl(v.T.pPay),l:"hakedişine giren",renk:"var(--gold)"})),
     v.T.gerCiro>0?h("div",{style:{fontSize:13,color:"var(--cyan)",fontWeight:500,marginBottom:12}},"⚡ Gerilla (peşin): "+tl(v.T.gerCiro)):null,
+    v.primL.length?h("div",{style:{marginBottom:12}},
+      h("div",{className:"lbl",style:{marginBottom:4}},"Kampanya primi"),
+      v.primL.map((x,i)=>satir("🎁 "+(x.kampanyaAd||"Kampanya")+" · %"+num(x.oran),tl(x.tutar),"var(--gold)"))):null,
     h("div",{className:"lbl",style:{marginBottom:4}},"Kale bazında satış"),
     v.satList.length?v.satList.map((r,i)=>satir(r.yer+" · "+r.adet+" ad.",tl(r.ciro),"var(--green)")):h("div",{style:{padding:"10px 0",color:"var(--mut)",fontSize:13}},"Bu dönemde satış yok."),
     h("div",{className:"lbl",style:{margin:"14px 0 4px"}},"Tahsilatlar"),
@@ -4987,6 +4998,7 @@ function App(){
   /* 🔒 tek seferde tek geri alma — hızlı çift dokunuş iki kez çalıştırıyordu */
   const geriAlMesgul=useRef(false);
   const geriAlKayit=async(x)=>{
+    if(x&&x.tip==="prim") return;   // ％ kampanya primini yalnız komuta verir/geri alır
     if(geriAlMesgul.current) return;
     geriAlMesgul.current=true;
     try{ return await AUD.op(()=>__geriAlKayit(x),"pazarlama_hareket:delete","↩ Kayıt geri alındı"); }
