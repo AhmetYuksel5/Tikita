@@ -134,6 +134,27 @@ console.log("\n═══ 2-4) Komuta · indirim tutarı ve onay ═══");
   ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,160));
   await c.close(); }
 
+console.log("\n═══ 4b) Süresiz kampanya · yeni haftanın satışı: kalan fark verilir ═══");
+{ V=temel();
+  V.pazarlama_hareket.push({id:"pEski",tip:"prim",kaynak:"kampanya",kampanyaId:"k1",kampanyaAd:"Ekim atağı",
+    kullaniciId:"e1",kullaniciAd:"Emir",oran:10,tutar:400,tarih:GECEN_H});
+  V.kampanya[0].verilen={e1:{tarih:GECEN_H,tutar:400}};
+  const {c,p,log}=await ac("a1","admin.html");
+  await basBtn(p,"Ekip$"); await p.waitForTimeout(700); await basBtn(p,"Kampanya$"); await p.waitForTimeout(700);
+  let t=await metin(p);
+  ok("Emir: daha önce 400 ₺ verildi → '％ İndirimi ver · 80 ₺'",/％ İndirimi ver · 80 ₺/.test(t));
+  await basBtn(p,"İndirimi ver"); await p.waitForTimeout(900);
+  const pr=(await p.evaluate(()=>window.__KAYITLAR("pazarlama_hareket"))).filter(x=>x.tip==="prim"&&x.id!=="pEski");
+  ok("yeni prim 80 ₺",pr.length===1&&Number(pr[0].tutar)===80,JSON.stringify(pr).slice(0,160));
+  t=await metin(p);
+  ok("sonra '✓ 480 ₺ prim verildi'",/✓ 480 ₺ prim verildi/.test(t));
+  ok("sayfa hatası yok",!log.length,log.join(" | ").slice(0,160));
+  await c.close();
+  const m=await ac("e1","deneme.html"); await m.p.waitForTimeout(800);
+  const t2=await metin(m.p);
+  ok("pazarlamacı kartı: '✅ 80 ₺ prim komutada' · 'verilen 400 ₺'",/✅ 80 ₺ prim komutada/.test(t2)&&/verilen 400 ₺/.test(t2));
+  await m.c.close(); }
+
 console.log("\n═══ 5) Pazarlamacı · Üs kartı, prim verilmeden ═══");
 { V=temel();
   const {c,p,log}=await ac("e1","deneme.html");

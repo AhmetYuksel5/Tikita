@@ -110,7 +110,7 @@ const BACK_STACK=[];   // açık kapatılabilir katmanlar (en üstteki en sonda)
 function useBackClose(closeFn){ const ref=useRef(closeFn); ref.current=closeFn;
   useEffect(()=>{ const e={c:()=>{try{ref.current&&ref.current();}catch(_){}}}; BACK_STACK.push(e);
     return ()=>{ const i=BACK_STACK.indexOf(e); if(i>=0) BACK_STACK.splice(i,1); }; },[]); }
-const SURUM="v157";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
+const SURUM="v158";   // görünür sürüm damgası — hangi sürümde olduğun alt yazıda yazar
 
 /* 🔤 TASARIM BELİRTEÇLERİ — TASARIM.md (punto merdiveni R3, ağırlık R2).
    Beş punto, dört ağırlık; ara değer yoktur. Satır içi stiller bunları kullanır,
@@ -460,6 +460,10 @@ function kampanyaIndirim(kmp,har,uid,esik){
   o.tutar=Math.round(o.veris*num(kmp.indirimOran))/100;
   return o;
 }
+/* ％ verilmiş primler — kampanya süresiz sürerken yeni haftaların satışı da
+   indirime girer; ödenecek = dönemin toplam indirimi − daha önce verilen primler */
+const kampanyaPrimVerilen=(kmp,har,uid)=>(har||[]).filter(x=>x&&x.tip==="prim"&&x.kampanyaId===(kmp&&kmp.id)&&(x.kullaniciId||"")===uid)
+  .reduce((s,x)=>s+num(x.tutar),0);
 const kampanyaKapsar=(kmp,uid)=>!!kmp&&kmp.aktif!==false&&(!((kmp.kime||[]).length)||(kmp.kime||[]).indexOf(uid)>=0);
 /* 🏬 Mekan kapsamlı kampanya: hedef her kale için ayrı sayılır ve TEKRARLANIR —
    200 alan kale 100'lük hedefi iki kez hak eder. Ödül kaleye verilir. */
@@ -1019,11 +1023,13 @@ function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tab
     const ilr=kampanyaIlerleme(k,tumHar,d.emir.id);
     const oran=Math.max(0,Math.min(100,Math.round(ilr/hedef*100)));
     const doldu=ilr>=num(k.hedefMiktar);
-    const verildi=kampanyaVerildi(k,d.emir.id);
+    const verildi0=kampanyaVerildi(k,d.emir.id);
     const ind=indMi?kampanyaIndirim(k,tumHar,d.emir.id,BEDAVA_ESIK):null;
-    const verT=num((((k.verilen||{})[d.emir.id])||{}).tutar);
+    const verT=indMi?kampanyaPrimVerilen(k,tumHar,d.emir.id):0;
+    const kalanT=indMi?Math.round((ind.tutar-verT)*100)/100:0;
+    const verildi=indMi?(verT>0&&kalanT<=0.5):verildi0;
     const durum=verildi?[indMi?("🎁 "+tl(verT)+" prim verildi"):"🎁 Ödül verildi","var(--green)"]
-      :(doldu?[indMi?("✅ "+tl(ind.tutar)+" prim komutada"):"✅ Tamamlandı — ödül komutadan","var(--gold)"]
+      :(doldu?[indMi?("✅ "+tl(kalanT)+" prim komutada"):"✅ Tamamlandı — ödül komutadan","var(--gold)"]
       :[(k.hedefTip==="ciro"?tl(ilr):num(ilr))+" / "+hedefEt,"var(--mut)"]);
     return h("div",{key:k.id,className:"card",style:{padding:"13px 15px",marginBottom:8,boxShadow:"none"}},
       ustSatir(durum[0],durum[1]),
@@ -1031,7 +1037,7 @@ function Home({d,say,openKale,openSheet,openBrif,goView,openBilgi,toplanacak,tab
         h("div",{style:{height:"100%",width:oran+"%",borderRadius:7,
           background:verildi?"var(--green)":(doldu?"var(--gold)":"var(--cyan)"),transition:"width .4s"}})),
       h("div",{style:{fontSize:11,color:"var(--mut)",marginTop:6,fontWeight:500}},"Ödül: "+odulEt
-        +(indMi&&!verildi&&ind.tutar>0?(" · şu an "+tl(ind.tutar)):""))); });
+        +(indMi&&!verildi&&kalanT>0.5?(" · şu an "+tl(kalanT)):"")+(indMi&&verT>0?(" · verilen "+tl(verT)):""))); });
   // 🎯 komutanın verdiği hedefler — atandıktan sonra 2 gün radarda kalır
   const yeniHedefler=(hedefler||[]).filter(g=>{ const t=new Date(g.tarih).getTime(); return t&&(Date.now()-t)<2*864e5; })
     .sort((a,b)=>new Date(b.tarih)-new Date(a.tarih));
